@@ -1,0 +1,87 @@
+---
+// ELWIS – ELW-Informationssystem
+// App-Logik in public/app.js, Styles in public/app.css (aus dem Prototyp portiert).
+// Relative Pfade, damit alles unter dem GitHub-Pages-Unterordner /elwis/ funktioniert.
+---
+
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>ELWIS – ELW-Informationssystem</title>
+    <meta name="description" content="ELWIS: Kräfteerfassung, Lagekarte, Funktagebuch und Einsatzmonitor für die Einsatzstelle – offline-fähig." />
+    <meta name="theme-color" content="#D93A32" />
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="icon" href="./icon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="./icon.svg" />
+    <link rel="stylesheet" href="./app.css" />
+  </head>
+  <body>
+    <div id="splash" role="button" aria-label="Überspringen">
+      <div class="strip" aria-hidden="true">
+        <span style="background:#D93A32"></span><span style="background:#BE8A18"></span>
+        <span style="background:#2E9560"></span><span style="background:#5D93E3"></span>
+      </div>
+      <div class="mark" aria-hidden="true">
+        <svg viewBox="0 0 64 64" style="width:56px;height:56px;stroke:#fff;fill:none;stroke-width:5;stroke-linecap:round">
+          <path d="M32 28v22M21 50h22"></path><path d="M20.5 12a16 16 0 0 0 0 20M43.5 12a16 16 0 0 1 0 20"></path>
+          <circle cx="32" cy="21" r="5.5" fill="#fff" stroke="none"></circle>
+        </svg>
+      </div>
+      <h1><span class="p-elw">ELW</span><span class="p-is">IS</span></h1>
+      <div class="tag">ELW-Informationssystem</div>
+      <div class="ug" id="splashUg">UG-Weiden</div>
+      <div class="load" aria-hidden="true"><i></i></div>
+      <div class="skip">Tippen zum Überspringen</div>
+    </div>
+
+    <div id="app">
+      <header class="topbar">
+        <div class="brand">
+          <div class="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 64 64" style="width:22px;height:22px;stroke:#fff;fill:none;stroke-width:5;stroke-linecap:round">
+              <path d="M32 28v22M21 50h22"></path><path d="M20.5 12a16 16 0 0 0 0 20M43.5 12a16 16 0 0 1 0 20"></path>
+              <circle cx="32" cy="21" r="5.5" fill="#fff" stroke="none"></circle>
+            </svg>
+          </div>
+          <div>
+            <h1><span class="n-elw">ELW</span><span class="n-is">IS</span></h1>
+            <div class="sub" id="appSub">UG-Weiden</div>
+          </div>
+        </div>
+        <div class="topbar-right">
+          <span id="syncPill" class="sync-pill"><span class="dot"></span><span id="syncText">Offline</span></span>
+          <button id="wlanSwitch" class="wlan-switch" role="switch" aria-checked="false" title="Simuliert: Erfasser kommt zurück zum ELW und hat WLAN">
+            <span>ELW-WLAN</span><span class="track"></span>
+          </button>
+          <button id="btnSettings" class="iconbtn" aria-label="Einstellungen">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+          </button>
+        </div>
+      </header>
+
+      <main id="view"></main>
+
+      <footer class="note" id="footNote">
+        Alle Daten liegen lokal auf diesem Gerät.
+        Der WLAN-Schalter oben simuliert die Synchronisierung am ELW (echter Sync folgt).
+      </footer>
+    </div>
+
+    <nav class="rail" aria-label="Ansichten">
+      <div class="rail-brand" aria-hidden="true">
+        <svg viewBox="0 0 64 64" style="width:26px;height:26px;stroke:#fff;fill:none;stroke-width:5;stroke-linecap:round">
+          <path d="M32 28v22M21 50h22"></path><path d="M20.5 12a16 16 0 0 0 0 20M43.5 12a16 16 0 0 1 0 20"></path>
+          <circle cx="32" cy="21" r="5.5" fill="#fff" stroke="none"></circle>
+        </svg>
+      </div>
+    </nav>
+    <nav class="tabs" aria-label="Ansichten"></nav>
+
+    <div id="sheetHost"></div>
+    <div id="printArea"></div>
+
+    <script is:inline src="./app.js"></script>
+  </body>
+</html>
