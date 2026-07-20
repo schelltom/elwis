@@ -35,6 +35,25 @@ const FZG_KATALOG = [
   { grp:"Sonstige",         typ:"MZF",           name:"Florian Neunkirchen",  kennung:"1/11/1", f:1,u:1,m:1, agt:0 },
   { grp:"Sonstige",         typ:"MTW",           name:"Florian Rothenstadt",  kennung:"14/1",   f:0,u:1,m:5, agt:0 },
 ];
+/* Fahrzeugkatalog: Anzeige-Label, nach Fahrzeugart gruppiert + innerhalb alphabetisch */
+function katalogLabel(k){
+  return [k.typ, [k.name, k.kennung].filter(Boolean).join(" ")].filter(Boolean).join(" – ");
+}
+function katalogGruppen(){
+  const kat = (state.config.katalog || []).map((k,i) => ({...k, _i:i}));
+  const grps = [...new Set(kat.map(k => k.grp || "Weitere Fahrzeuge"))].sort((a,b) => a.localeCompare(b, "de"));
+  return grps.map(g => ({ grp:g,
+    items: kat.filter(k => (k.grp||"Weitere Fahrzeuge") === g)
+      .sort((a,b) => katalogLabel(a).localeCompare(katalogLabel(b), "de")) }));
+}
+function katalogHinzufuegen(u){
+  const kat = state.config.katalog || (state.config.katalog = []);
+  const norm = s => (s||"").trim().toLowerCase();
+  const da = kat.some(k => (k.org||"FW") === u.org && norm(k.name) === norm(u.name) && norm(k.kennung) === norm(u.kennung));
+  if(da || (!u.name && !u.kennung)) return;
+  kat.push({ grp:"Weitere Fahrzeuge", typ:"", name:u.name, kennung:u.kennung,
+    f:u.f|0, u:u.u|0, m:u.m|0, agt:u.agt|0, csa:u.csa|0, org:u.org });
+}
 const FUNKTIONEN = ["Einsatzleiter","Örtlicher Einsatzleiter","Abschnittsleiter","Zugführer",
   "Gruppenführer","Organisatorischer Leiter","Einsatzleiter Rettungsdienst","Fachberater THW","Zugtruppführer","Polizeiführer"];
 const STORE_KEY = "kraefteerfassung-proto-v1";
@@ -54,10 +73,10 @@ const TABS = [
     icon:'<path d="M4 6.5 5.5 8 8 5M4 12.5 5.5 14 8 11M4 18.5 5.5 20 8 17"/><path d="M11 6.5h9M11 12.5h9M11 18.5h9"/>' },
   { id:"atemschutz",label:"Atemschutz",
     icon:'<path d="M12 3v8"/><path d="M9.5 11a4.5 4.5 0 0 0-4.5 4.5V18a2 2 0 0 0 4 0v-7"/><path d="M14.5 11a4.5 4.5 0 0 1 4.5 4.5V18a2 2 0 0 1-4 0v-7"/>' },
-  { id:"monitor",  label:"Monitor", nurGross:true,
-    icon:'<rect x="3" y="4.5" width="18" height="12.5" rx="1.5"/><path d="M9 21h6M12 17v4"/>' },
   { id:"lagekarte",label:"Lagekarte", nurGross:true,
     icon:'<path d="M9 4 3.5 6v14L9 18l6 2 5.5-2V4L15 6 9 4zM9 4v14M15 6v14"/>' },
+  { id:"monitor",  label:"Monitor", nurGross:true,
+    icon:'<rect x="3" y="4.5" width="18" height="12.5" rx="1.5"/><path d="M9 21h6M12 17v4"/>' },
 ];
 // Auf kleinen Geräten (Handy) geht es nur um die Kräfteerfassung – Monitor, Lagekarte
 // und Funkskizze brauchen mindestens ein 10-Zoll-Gerät.
@@ -98,6 +117,8 @@ const stored = load() || {};
 let state = Object.assign(defaultState(), stored);
 state.config = Object.assign(defaultConfig(), stored.config || {});
 state.config.prefixes = Object.assign(defaultConfig().prefixes, (stored.config||{}).prefixes || {});
+// Fahrzeugkatalog: beim ersten Start aus der Vorlage befüllen, danach frei pflegbar
+if(!Array.isArray(state.config.katalog)) state.config.katalog = FZG_KATALOG.map(k => ({...k, org:"FW"}));
 applyTheme();
 if(!state.lage || !Array.isArray(state.lage.items)) state.lage = { items: [], bg: "" };
 if(!Array.isArray(state.lage.snapshots)) state.lage.snapshots = [];
@@ -168,13 +189,26 @@ function modalConfirm(text, ok = "Ja", abbrechen = "Abbrechen"){
   return modal({ text, ok, abbrechen });
 }
 function modalInfo(text){ return modal({ text, ok: "OK" }); }
+
+/* QR-Code als Bild-Data-URL (Vendor-Lib qrcode) */
+function qrDataUrl(text){
+  try{ const qr = qrcode(0, "M"); qr.addData(text); qr.make(); return qr.createDataURL(5, 12); }
+  catch(e){ return ""; }
+}
 function gesamt(u){ return (u.f|0)+(u.u|0)+(u.m|0); }
 function staerkeStr(u){ return `${u.f}/${u.u}/${u.m}/${gesamt(u)}`; }
-function fullName(u){ return [u.name, u.kennung].filter(Boolean).join(" ").trim(); }
+function fullName(u){ return [u.name, u.kennung].map(s => (s||"").trim()).filter(Boolean).join(" "); }
 function abNameOf(id, list){
   if(id === "BR") return "Bereitstellungsraum";
   const a = (list || state.abschnitte).find(x => x.id === id);
   return a ? a.name : "";
+}
+/* Kurzkürzel für eine Abschnittsfläche: „EA <Nr>“ (Nr. aus dem Namen, sonst Reihenfolge) */
+function abKuerzel(id){
+  const idx = state.abschnitte.findIndex(a => a.id === id);
+  if(idx < 0) return "EA";
+  const m = (state.abschnitte[idx].name || "").match(/\d+/);
+  return "EA " + (m ? m[0] : (idx + 1));
 }
 function fmtZeit(iso){
   if(!iso) return "–";
@@ -206,7 +240,7 @@ function nowLocalInput(){
 }
 function aktive(){ return state.einheiten.filter(u => !u.abgerueckt); }
 function summen(units){
-  return units.reduce((a,u)=>({ f:a.f+(u.f|0), u:a.u+(u.u|0), m:a.m+(u.m|0), agt:a.agt+(u.agt|0) }),{f:0,u:0,m:0,agt:0});
+  return units.reduce((a,u)=>({ f:a.f+(u.f|0), u:a.u+(u.u|0), m:a.m+(u.m|0), agt:a.agt+(u.agt|0), csa:a.csa+(u.csa|0) }),{f:0,u:0,m:0,agt:0,csa:0});
 }
 /* Bilder clientseitig verkleinern, damit der lokale Speicher reicht */
 function resizeImage(file, maxDim, cb){
@@ -349,6 +383,19 @@ function renderSettingsSheet(){
       <button class="sheet-close" data-close="1" aria-label="Schließen">×</button>
     </div>
     <div class="sheet-body">
+      ${SYNC.aktiv && SYNC.urls.length ? `
+      <div class="field"><label style="margin-bottom:10px">Tablet verbinden</label>
+        <div class="cfg-qr">
+          <img src="${qrDataUrl(SYNC.urls[0])}" alt="QR-Code zum Verbinden" width="176" height="176">
+          <div>
+            <p class="hint" style="margin:0 0 8px">Mit der Tablet-Kamera scannen – ELWIS öffnet sich im ELW-WLAN und verbindet sich automatisch mit dem Einsatz.</p>
+            ${SYNC.urls.map(u => `<div class="mono" style="font-size:.82rem">${esc(u)}</div>`).join("")}
+          </div>
+        </div>
+      </div>` : `
+      <div class="field"><label style="margin-bottom:6px">Tablet verbinden</label>
+        <p class="hint" style="margin:0">Der QR-Code zum Verbinden erscheint hier, sobald ELWIS über den ELW-Server läuft (<span class="mono">npm run server</span>) – die Tablets landen dann im gleichen WLAN und synchronisieren automatisch.</p>
+      </div>`}
       <div class="field"><label style="margin-bottom:10px">Darstellung</label>
         <div class="seg" style="max-width:none">
           <button type="button" data-theme-opt="auto" class="${(c.theme||'auto')==='auto'?'active':''}">Automatisch</button>
@@ -374,24 +421,44 @@ function renderSettingsSheet(){
         <div class="form-grid">${prefFields}</div>
         <p class="hint">Wird bei der Erfassung vorbelegt und kann dort jederzeit überschrieben werden.</p>
       </div>
+      <div class="field"><label style="margin-bottom:10px">Fahrzeugkatalog (${(c.katalog||[]).length})</label>
+        <div class="kat-list">
+          ${katalogGruppen().map(g => `
+            <div class="kat-grp">${esc(g.grp)}</div>
+            ${g.items.map(k => `
+              <div class="kat-row">
+                <span>${esc(katalogLabel(k))}</span>
+                <button class="kat-x" data-katdel="${k._i}" aria-label="Aus Katalog entfernen">✕</button>
+              </div>`).join("")}`).join("")}
+        </div>
+        <p class="hint">Neue Fahrzeuge werden bei der Erfassung automatisch aufgenommen. Mit ✕ entfernen.</p>
+      </div>
     </div>
     <div class="sheet-foot">
       <button class="btn btn-primary btn-block" id="cfg-save" style="flex:1">Speichern</button>
     </div>
   </div>`;
-  document.querySelectorAll("[data-close]").forEach(el => el.addEventListener("click", closeEditor));
-  document.querySelectorAll("[data-theme-opt]").forEach(b => b.addEventListener("click", () => {
-    state.config.theme = b.dataset.themeOpt;
-    document.querySelectorAll("[data-theme-opt]").forEach(x => x.classList.toggle("active", x.dataset.themeOpt===state.config.theme));
-    applyTheme(); save();   // sofort sichtbar und gespeichert
-  }));
-  $("#cfg-save").addEventListener("click", () => {
+  const leseSettings = () => {
     state.config.ugName = $("#cfg-ug").value.trim();
     state.config.ilsName = $("#cfg-ils").value.trim();
     state.config.ilsGruppe = $("#cfg-ilsgrp").value.trim();
     document.querySelectorAll("[data-pfx]").forEach(inp => {
       state.config.prefixes[inp.dataset.pfx] = inp.value.trim();
     });
+  };
+  document.querySelectorAll("[data-close]").forEach(el => el.addEventListener("click", closeEditor));
+  document.querySelectorAll("[data-theme-opt]").forEach(b => b.addEventListener("click", () => {
+    state.config.theme = b.dataset.themeOpt;
+    document.querySelectorAll("[data-theme-opt]").forEach(x => x.classList.toggle("active", x.dataset.themeOpt===state.config.theme));
+    applyTheme(); save();   // sofort sichtbar und gespeichert
+  }));
+  document.querySelectorAll("[data-katdel]").forEach(b => b.addEventListener("click", () => {
+    leseSettings();   // laufende Eingaben nicht verlieren
+    state.config.katalog.splice(Number(b.dataset.katdel), 1);
+    save(); renderSettingsSheet();
+  }));
+  $("#cfg-save").addEventListener("click", () => {
+    leseSettings();
     markChange(); closeEditor(); render();
   });
 }
@@ -801,15 +868,16 @@ function renderKraefte(){
       ${items}`;
   }
   if(state.ksub === "fuehrung"){
-    const list = state.fuehrung.length
-      ? `<div class="unit-list">${state.fuehrung.map(fkCard).join("")}</div>`
+    const fkSort = [...state.fuehrung].sort((a,b) => (a.name||"").localeCompare(b.name||"", "de"));
+    const list = fkSort.length
+      ? `<div class="unit-list">${fkSort.map(fkCard).join("")}</div>`
       : `<div class="empty"><p>Noch keine Führungskräfte erfasst.<br>Einsatzleiter, Abschnittsleiter, Zugführer … aller Organisationen.</p></div>`;
     return `${seg}
       <button class="btn btn-primary btn-block" id="btnAddFk" style="margin-bottom:16px">＋&nbsp; Führungskraft erfassen</button>
       ${list}`;
   }
   const sorted = [...state.einheiten].sort((a,b) =>
-    (a.abgerueckt?1:0)-(b.abgerueckt?1:0) || (b.ankunft||"").localeCompare(a.ankunft||""));
+    (a.abgerueckt?1:0)-(b.abgerueckt?1:0) || fullName(a).localeCompare(fullName(b), "de"));
   let list;
   if(!sorted.length){
     list = `<div class="empty">
@@ -831,7 +899,7 @@ function renderKraefte(){
   return `
   <div class="statstrip" role="status" aria-label="Summen">
     <div class="stat"><div class="k">Gesamtstärke</div><div class="v mono">${s.f+s.u+s.m}</div><div class="s mono">${s.f}/${s.u}/${s.m}</div></div>
-    <div class="stat"><div class="k">AGT</div><div class="v mono">${s.agt}</div><div class="s">Atemschutz</div></div>
+    <div class="stat"><div class="k">AGT / CSA</div><div class="v mono">${s.agt} / ${s.csa}</div><div class="s">Atemschutz</div></div>
     <div class="stat"><div class="k">Einheiten</div><div class="v mono">${act.length}</div><div class="s">an E-Stelle</div></div>
   </div>
   ${seg}
@@ -847,6 +915,7 @@ function unitCard(u){
       <div class="u-meta">
         <span class="chip chip-${esc(u.org)}">${esc(org.short)}</span>
         ${u.agt>0 ? `<span class="badge-agt">AGT ${u.agt}</span>` : ""}
+        ${u.csa>0 ? `<span class="badge-agt">CSA ${u.csa}</span>` : ""}
         <span class="mono">${fmtZeit(u.ankunft)}</span>
         ${u.abgerueckt ? "<span>abgerückt</span>" : ""}
       </div>
@@ -863,6 +932,7 @@ function fkCard(f){
       <div class="u-meta">
         <span class="chip chip-${esc(f.org)}">${esc(org.short)}</span>
         <span>${esc(f.funktion)}</span>
+        ${f.funkrufname ? `<span class="mono">· ${esc(f.funkrufname)}</span>` : ""}
         ${f.einheit ? `<span>· ${esc(f.einheit)}</span>` : ""}
       </div>
     </div>
@@ -889,8 +959,9 @@ function openEditor(id){
     const u = state.einheiten.find(x => x.id === id);
     if(!u) return;
     editing = { unit: {...u}, isNew:false };
+    if(editing.unit.csa == null) editing.unit.csa = 0;
   }else{
-    editing = { unit: { id:uid(), org:"FW", name:pfx("FW"), kennung:"", f:0, u:1, m:8, agt:0,
+    editing = { unit: { id:uid(), org:"FW", name:pfx("FW"), kennung:"", f:0, u:1, m:8, agt:0, csa:0,
       ankunft:new Date().toISOString(), abgerueckt:false, abschnitt:"" }, isNew:true };
   }
   renderSheet();
@@ -933,12 +1004,12 @@ function renderSheet(){
       <div class="field"><label for="e-katalog">Fahrzeugkatalog (Fuhrpark)</label>
         <select id="e-katalog">
           <option value="">– Fahrzeug wählen, füllt alles vor –</option>
-          ${[...new Set(FZG_KATALOG.map(k => k.grp))].map(grp => `
-            <optgroup label="${esc(grp)}">
-              ${FZG_KATALOG.map((k,idx) => k.grp===grp
-                ? `<option value="${idx}">${esc(k.typ)} – ${esc(k.name)} ${esc(k.kennung)}</option>` : "").join("")}
+          ${katalogGruppen().map(g => `
+            <optgroup label="${esc(g.grp)}">
+              ${g.items.map(k => `<option value="${k._i}">${esc(katalogLabel(k))}</option>`).join("")}
             </optgroup>`).join("")}
         </select>
+        <p class="hint">Neue Fahrzeuge landen automatisch im Katalog; verwalten (löschen) in den Einstellungen.</p>
       </div>
       <div class="field"><label>Organisation</label><div class="orgpick">${orgPickHtml(u.org)}</div></div>
       <div class="field">
@@ -965,8 +1036,11 @@ function renderSheet(){
         <div class="gesamt-row"><span class="g-lbl">Stärke</span>
           <span class="g-not mono" id="e-gesamt">${staerkeStr(u)}</span></div>
       </div>
-      <div class="field"><label>Atemschutzgeräteträger (AGT)</label>
-        <div class="steppers">${stepper("agt","AGT","einsatzbereit an Bord")}</div></div>
+      <div class="field"><label>Atemschutz &amp; CSA</label>
+        <div class="steppers">
+          ${stepper("agt","AGT","Atemschutzgeräteträger")}
+          ${stepper("csa","CSA","Chemikalienschutzanzug-Träger")}
+        </div></div>
       <div class="field"><label for="e-zeit">Ankunft an Einsatzstelle</label>
         <input id="e-zeit" type="time" class="mono" value="${fmtZeit(u.ankunft)==="–"?"":fmtZeit(u.ankunft)}"></div>
       ${editing.isNew ? "" : `
@@ -994,10 +1068,10 @@ function wireSheet(){
   updatePreview();
   document.querySelectorAll("[data-close]").forEach(el => el.addEventListener("click", closeEditor));
   $("#e-katalog").addEventListener("change", e => {
-    const k = FZG_KATALOG[Number(e.target.value)];
+    const k = state.config.katalog[Number(e.target.value)];
     if(!k) return;
-    u.org = "FW"; u.name = k.name; u.kennung = k.kennung;
-    u.f = k.f; u.u = k.u; u.m = k.m; u.agt = k.agt;
+    u.org = k.org || "FW"; u.name = k.name; u.kennung = k.kennung;
+    u.f = k.f|0; u.u = k.u|0; u.m = k.m|0; u.agt = k.agt|0; u.csa = k.csa|0;
     renderSheet(); // alle Felder mit den Katalogwerten neu aufbauen
   });
   document.querySelectorAll("[data-org]").forEach(b => b.addEventListener("click", () => {
@@ -1005,8 +1079,12 @@ function wireSheet(){
     u.org = b.dataset.org;
     // Präfix nur ersetzen, wenn der Nutzer noch nichts Eigenes geschrieben hat
     if(!u.name.trim() || u.name.trim() === prevDefault){
-      u.name = pfx(u.org);
-      $("#e-name").value = u.name;
+      const p = pfx(u.org);
+      u.name = p ? p + " " : "";     // Leerzeichen ans Präfix, damit direkt der Ort getippt werden kann
+      const inp = $("#e-name");
+      inp.value = u.name;
+      inp.focus();
+      inp.setSelectionRange(u.name.length, u.name.length);   // Cursor ans Ende
     }
     document.querySelectorAll("[data-org]").forEach(x => x.setAttribute("aria-pressed", x.dataset.org===u.org));
     updatePreview();
@@ -1051,7 +1129,9 @@ function wireSheet(){
     });
   });
   $("#e-save").addEventListener("click", () => {
+    u.name = (u.name||"").trim();
     u.kennung = (u.kennung||"").replace(/\/+$/,"");
+    katalogHinzufuegen(u);   // noch unbekanntes Fahrzeug in den Katalog übernehmen
     const idx = state.einheiten.findIndex(x => x.id === u.id);
     if(idx >= 0) state.einheiten[idx] = u; else state.einheiten.push(u);
     markChange(); closeEditor(); render();
@@ -1197,7 +1277,7 @@ function openFkEditor(id){
     if(!f) return;
     editingFk = { fk: {...f}, isNew:false };
   }else{
-    editingFk = { fk: { id:uid(), org:"FW", name:"", funktion:"", einheit:"" }, isNew:true };
+    editingFk = { fk: { id:uid(), org:"FW", name:"", funktion:"", funkrufname:"", einheit:"" }, isNew:true };
   }
   renderFkSheet();
 }
@@ -1214,10 +1294,12 @@ function renderFkSheet(){
     <div class="sheet-body">
       <div class="field"><label>Organisation</label><div class="orgpick">${orgPickHtml(f.org)}</div></div>
       <div class="field"><label for="fk-name">Name</label>
-        <input id="fk-name" value="${esc(f.name)}" placeholder="Name, Dienstgrad" autocomplete="off"></div>
+        <input id="fk-name" value="${esc(f.name)}" placeholder="Name" autocomplete="off"></div>
       <div class="field"><label for="fk-funktion">Funktion</label>
         <input id="fk-funktion" value="${esc(f.funktion)}" list="fk-funktionen" placeholder="z. B. Abschnittsleiter" autocomplete="off">
         <datalist id="fk-funktionen">${FUNKTIONEN.map(x=>`<option value="${esc(x)}">`).join("")}</datalist></div>
+      <div class="field"><label for="fk-funkruf">Funkrufname</label>
+        <input id="fk-funkruf" class="mono" value="${esc(f.funkrufname||"")}" placeholder="z. B. Florian Weiden 1" autocomplete="off"></div>
       <div class="field"><label for="fk-einheit">Einheit / Abschnitt <span style="text-transform:none;font-weight:500">(optional)</span></label>
         <input id="fk-einheit" value="${esc(f.einheit||"")}" placeholder="z. B. Abschnitt 1, ${esc(pfx("FW"))} Weiden 40/1" autocomplete="off"></div>
     </div>
@@ -1233,6 +1315,7 @@ function renderFkSheet(){
   }));
   $("#fk-name").addEventListener("input", e => { f.name = e.target.value; });
   $("#fk-funktion").addEventListener("input", e => { f.funktion = e.target.value; });
+  $("#fk-funkruf").addEventListener("input", e => { f.funkrufname = e.target.value; });
   $("#fk-einheit").addEventListener("input", e => { f.einheit = e.target.value; });
   const del = $("#fk-del");
   if(del) del.addEventListener("click", () => {
@@ -1251,11 +1334,14 @@ function renderFkSheet(){
 /* ---------------- Ansicht: Funk (Einsatztagebuch) ---------------- */
 let editingFs = null; // { fs, isNew }
 function fsSuggestions(){
-  const s = new Set(["Leitstelle", "ELW", state.config.ugName]);
-  state.abschnitte.forEach(a => { if(a.name) s.add(a.name); if(a.ansprechpartner) s.add(a.ansprechpartner); });
-  state.einheiten.forEach(u => { const n = fullName(u); if(n) s.add(n); });
-  state.fuehrung.forEach(f => { if(f.name) s.add(f.name); });
-  return [...s].filter(Boolean);
+  // Fahrzeuge zuerst, dann Führungskräfte (mit Funkrufname), dann Abschnitte/Leitstelle
+  const s = [];
+  const add = v => { v = (v||"").trim(); if(v && !s.includes(v)) s.push(v); };
+  aktive().forEach(u => add(fullName(u)));
+  state.fuehrung.forEach(f => { add(f.funkrufname); add(f.name); });
+  state.abschnitte.forEach(a => { add(a.ansprechpartner); add(a.name); });
+  ["Leitstelle", "ELW", state.config.ugName].forEach(add);
+  return s;
 }
 function renderFunk(){
   const list = [...state.funk].sort((a,b) => (b.zeit||"").localeCompare(a.zeit||""));
@@ -1987,10 +2073,10 @@ function renderMonitor(){
     </div>`;
   }).join("") || `<p class="hint">Noch keine Kräfte an der Einsatzstelle.</p>`;
 
-  const fkRows = state.fuehrung.map(f => `
+  const fkRows = [...state.fuehrung].sort((a,b) => (a.name||"").localeCompare(b.name||"", "de")).map(f => `
     <div class="fkrow">
       <span class="chip chip-${esc(f.org)}">${esc((ORGS[f.org]||ORGS.SON).short)}</span>
-      <span class="fk-n">${esc(f.name)}</span>
+      <span class="fk-n">${esc(f.name)}${f.funkrufname?` <span class="mono" style="font-weight:600;color:var(--ink2)">${esc(f.funkrufname)}</span>`:""}</span>
       <span class="fk-f">${esc(f.funktion)}${f.einheit?` · ${esc(f.einheit)}`:""}</span>
     </div>`).join("");
 
@@ -2103,6 +2189,7 @@ function renderMonitor(){
       <div class="kpis-compact">
         <div class="kpic accent"><span class="k">Gesamtstärke</span><span class="v mono">${s.f+s.u+s.m}</span><span class="s mono">${s.f}/${s.u}/${s.m}</span></div>
         <div class="kpic"><span class="k">AGT</span><span class="v mono">${s.agt}</span></div>
+        ${s.csa ? `<div class="kpic"><span class="k">CSA</span><span class="v mono">${s.csa}</span></div>` : ""}
         <div class="kpic"><span class="k">Einheiten</span><span class="v mono">${act.length}</span><span class="s">${state.einheiten.length - act.length} abgerückt</span></div>
         <div class="kpic"><span class="k">Führungskräfte</span><span class="v mono">${state.fuehrung.length}</span></div>
         ${brUnits.length ? `<div class="kpic"><span class="k">Bereitstellung</span><span class="v mono">${brUnits.length}</span><span class="s">Einheiten</span></div>` : ""}
@@ -2397,9 +2484,10 @@ function lgShapesSvg(items, draw){
   const labels = items.filter(i => i.type === "area" && i.abschnittId && Array.isArray(i.points)).map(i => {
     const a = state.abschnitte.find(x => x.id === i.abschnittId);
     if(!a) return "";
-    const cx = i.points.reduce((s,p) => s + p.x, 0) / i.points.length;
-    const cy = i.points.reduce((s,p) => s + p.y, 0) / i.points.length;
-    return `<span class="lg-arealbl" style="left:${cx}%;top:${cy}%">${esc(a.name)}</span>`;
+    const cx = i.labelPos ? i.labelPos.x : i.points.reduce((s,p) => s + p.x, 0) / i.points.length;
+    const cy = i.labelPos ? i.labelPos.y : i.points.reduce((s,p) => s + p.y, 0) / i.points.length;
+    const col = LG_SHAPE_COLORS.includes(i.color) ? i.color : "fw";
+    return `<span class="lg-ealbl" data-ealbl="${esc(i.id)}" style="left:${cx}%;top:${cy}%;color:var(--${col})">${esc(abKuerzel(i.abschnittId))}<small>${esc(a.name)}</small></span>`;
   }).join("");
   return svg + labels;
 }
@@ -2487,21 +2575,25 @@ function renderLagekarte(){
       <select data-lgcar="${esc(i.id)}" aria-label="Fahrzeug ${esc(i.num||"")} zuordnen">${lgCarOptions(i.unitId)}</select>
     </div>`;
   }).join("");
+  const zweispaltig = (nums.length + cars.length) > 10;   // bei langer Liste zweispaltig
   const legend = `
     <div class="lg-legend">
-      <h3>Legende</h3>
-      <div class="lg-leg-cols">
-      ${nums.length ? nums.map(i => `
-        <button class="lg-leg-item" data-lgedit="${esc(i.id)}">
-          <span class="lg-leg-num">${esc(i.num)}</span>
-          <span class="lg-leg-text">${i.text ? esc(i.text) : `<span class="ph">Beschreibung antippen …</span>`}</span>
-        </button>`).join("")
-      : `<p class="hint" style="margin:0">Noch keine Marker gesetzt.<br>Werkzeug „Marker 1·2·3“ wählen und auf die Karte tippen – die Beschreibung (z. B. „Faltbehälter 10.000 Liter“) steht dann hier, damit die Karte selbst übersichtlich bleibt.</p>`}
+      <div class="lg-leg-body ${zweispaltig ? "zweispaltig" : ""}">
+        <div class="lg-leg-sec">
+          <h3>Marker</h3>
+          ${nums.length ? nums.map(i => `
+            <button class="lg-leg-item" data-lgedit="${esc(i.id)}">
+              <span class="lg-leg-num">${esc(i.num)}</span>
+              <span class="lg-leg-text">${i.text ? esc(i.text) : `<span class="ph">Beschreibung antippen …</span>`}</span>
+            </button>`).join("")
+          : `<p class="hint" style="margin:0">Noch keine Marker. Werkzeug „Marker 1·2·3“ wählen und auf die Karte tippen – die Beschreibung steht dann hier.</p>`}
+        </div>
+        ${cars.length ? `
+        <div class="lg-leg-sec">
+          <h3>Fahrzeuge</h3>
+          ${carRows}
+        </div>` : ""}
       </div>
-      ${cars.length ? `
-      <h3 style="margin-top:16px">Fahrzeuge</h3>
-      ${carRows}
-      <p class="hint">Auto auf der Karte platzieren, hier das Fahrzeug aus den erfassten Einheiten zuordnen – Symbol färbt sich nach Organisation.</p>` : ""}
     </div>`;
   return `
   <div class="card">
@@ -2712,8 +2804,14 @@ function lgMapRenderLayers(){
       shp.addTo(lgMapLayer);
       if(i.type === "area" && i.abschnittId){
         const a = state.abschnitte.find(x => x.id === i.abschnittId);
-        if(a) L.marker(shp.getBounds().getCenter(),
-          { interactive:false, icon: lgDivIcon(`<span class="lg-arealbl" style="position:static;transform:none">${esc(a.name)}</span>`) }).addTo(lgMapLayer);
+        if(a){
+          const pos = i.labelLL ? [i.labelLL.lat, i.labelLL.lng] : shp.getBounds().getCenter();
+          const lcol = LG_SHAPE_COLORS.includes(i.color) ? i.color : "fw";
+          const lm = L.marker(pos, { draggable:true,
+            icon: lgDivIcon(`<span class="lg-ealbl" style="position:static;transform:none;color:var(--${lcol})">${esc(abKuerzel(i.abschnittId))}<small>${esc(a.name)}</small></span>`) });
+          lm.on("dragend", () => { const p = lm.getLatLng(); i.labelLL = { lat:p.lat, lng:p.lng }; markChange(); });
+          lm.addTo(lgMapLayer);
+        }
       }
     }
   }
@@ -2900,8 +2998,9 @@ function wireLagekarte(){
     };
   };
   wrap.addEventListener("pointerdown", e => {
-    const el = e.target.closest(".lg-item");
-    drag = { el, id: el ? el.dataset.id : null, sx:e.clientX, sy:e.clientY, moved:false };
+    const el = e.target.closest(".lg-item, [data-ealbl]");
+    drag = { el, id: el ? (el.dataset.id || el.dataset.ealbl) : null,
+      ealbl: el ? el.hasAttribute("data-ealbl") : false, sx:e.clientX, sy:e.clientY, moved:false };
     if(el){ wrap.setPointerCapture(e.pointerId); e.preventDefault(); }
   });
   wrap.addEventListener("pointermove", e => {
@@ -2919,7 +3018,9 @@ function wireLagekarte(){
     if(d.el){
       const it = state.lage.items.find(i => i.id === d.id);
       if(!it) return;
-      if(d.moved){ it.x = d.x; it.y = d.y; markChange(); }
+      if(d.ealbl){
+        if(d.moved){ it.labelPos = { x:d.x, y:d.y }; markChange(); }
+      }else if(d.moved){ it.x = d.x; it.y = d.y; markChange(); }
       else openLgEdit(it.id);
       return;
     }
@@ -3078,14 +3179,12 @@ function openLgShapeEdit(id){
     it.color = b.dataset.shcolor;
     document.querySelectorAll("[data-shcolor]").forEach(x =>
       x.setAttribute("aria-pressed", x.dataset.shcolor === it.color));
-    markChange();
+    markChange(); render();   // Fläche und EA-Label sofort in der neuen Farbe zeichnen
   }));
   const abSel = $("#sh-abschnitt");
   if(abSel) abSel.addEventListener("change", () => {
     it.abschnittId = abSel.value || "";
-    // Fläche in der Abschnittsfarbe (rot=Accent) einfärben, wenn verknüpft
-    if(it.abschnittId){ it.color = "fw"; }
-    markChange();
+    markChange(); render();   // Label sofort ein-/ausblenden (Farbe bleibt frei wählbar)
   });
   $("#sh-del").addEventListener("click", () => {
     state.lage.items = state.lage.items.filter(i => i.id !== it.id);
@@ -3185,12 +3284,14 @@ function doPrint(data){
       ${showAb ? `<td>${esc(abNameOf(u.abschnitt, abs)) || "–"}</td>` : ""}
       <td class="p-mono" style="text-align:right">${staerkeStr(u)}</td>
       <td class="p-mono" style="text-align:right">${u.agt||"–"}</td>
+      <td class="p-mono" style="text-align:right">${u.csa||"–"}</td>
       <td>${u.abgerueckt?"abgerückt":"vor Ort"}</td>
     </tr>`).join("");
-  const fkRows = data.fuehrung.map(f => `
+  const fkRows = [...data.fuehrung].sort((a,b) => (a.name||"").localeCompare(b.name||"", "de")).map(f => `
     <tr>
       <td>${esc(f.name)}</td>
       <td>${esc(f.funktion)}</td>
+      <td class="p-mono">${esc(f.funkrufname||"")}</td>
       <td>${esc((ORGS[f.org]||ORGS.SON).label)}</td>
       <td>${esc(f.einheit||"–")}</td>
     </tr>`).join("");
@@ -3217,9 +3318,9 @@ function doPrint(data){
       ${e.bemerkung ? `<tr><td>Bemerkungen</td><td>${esc(e.bemerkung)}</td></tr>` : ""}
     </table>
     <h2>Führungskräfte (${data.fuehrung.length})</h2>
-    ${fkRows ? `<table><thead><tr><th>Name</th><th>Funktion</th><th>Organisation</th><th>Einheit / Abschnitt</th></tr></thead><tbody>${fkRows}</tbody></table>` : "<p>Keine erfasst.</p>"}
+    ${fkRows ? `<table><thead><tr><th>Name</th><th>Funktion</th><th>Funkrufname</th><th>Organisation</th><th>Einheit / Abschnitt</th></tr></thead><tbody>${fkRows}</tbody></table>` : "<p>Keine erfasst.</p>"}
     <h2>Einheiten (${data.einheiten.length})</h2>
-    ${unitRows ? `<table><thead><tr><th>Ankunft</th><th>Organisation</th><th>Funkrufname</th>${showAb?"<th>Abschnitt</th>":""}<th>Stärke</th><th>AGT</th><th>Status</th></tr></thead><tbody>${unitRows}</tbody></table>` : "<p>Keine erfasst.</p>"}
+    ${unitRows ? `<table><thead><tr><th>Ankunft</th><th>Organisation</th><th>Funkrufname</th>${showAb?"<th>Abschnitt</th>":""}<th>Stärke</th><th>AGT</th><th>CSA</th><th>Status</th></tr></thead><tbody>${unitRows}</tbody></table>` : "<p>Keine erfasst.</p>"}
     ${(data.asTrupps||[]).length ? `
     <h2>Atemschutz – Trupps (${data.asTrupps.length})</h2>
     <table><thead><tr><th>Nr.</th><th>Träger</th><th>Feuerwehr</th><th>Gerät</th><th>Maske</th><th>Typ</th><th>Start</th><th>Ende</th><th>Abschnitt / Funk</th><th>ab</th><th>zurück</th></tr></thead><tbody>
@@ -3305,7 +3406,7 @@ function doPrint(data){
       </figure>`).join("")}
     </div>` : ""}
     <p class="p-sum">
-      Gesamtstärke über den Einsatz: <span class="p-mono">${sAll.f}/${sAll.u}/${sAll.m}/${sAll.f+sAll.u+sAll.m}</span> · AGT: ${sAll.agt}
+      Gesamtstärke über den Einsatz: <span class="p-mono">${sAll.f}/${sAll.u}/${sAll.m}/${sAll.f+sAll.u+sAll.m}</span> · AGT: ${sAll.agt} · CSA: ${sAll.csa}
       ${data.ende ? "" : ` &nbsp;|&nbsp; aktuell vor Ort: <span class="p-mono">${s.f}/${s.u}/${s.m}/${s.f+s.u+s.m}</span>`}
     </p>
     <div class="p-foot">

@@ -3,7 +3,7 @@
     --ink:#211E1B; --ink2:#544E47; --ink3:#7E776D;
     --line:#BFB8AB; --shadow:0 1px 2px rgba(38,34,31,.12),0 4px 14px rgba(38,34,31,.10);
     --accent:#C4232B; --accent-ink:#FFFFFF; --accent-press:#A31B22;
-    --fw:#C4232B; --brk:#B8720F; --pol:#256B3D; --thw:#23539E; --son:#6E6862;
+    --fw:#C4232B; --brk:#B8720F; --pol:#1E7E3C; --thw:#23539E; --son:#6E6862;
     --good:#1E7A3C; --good-bg:#E1F0E4;
     --warn:#8A5F00; --warn-bg:#F7ECD0;
     --rail:0px;
@@ -15,7 +15,7 @@
       --ink:#F3F0EB; --ink2:#B9B3A9; --ink3:#8C857B;
       --line:#493F38; --shadow:0 1px 3px rgba(0,0,0,.5),0 6px 18px rgba(0,0,0,.42);
       --accent:#D93A32; --accent-ink:#FFFFFF; --accent-press:#B72C26;
-      --fw:#D93A32; --brk:#BE8A18; --pol:#2E9560; --thw:#5D93E3; --son:#8A857E;
+      --fw:#D93A32; --brk:#BE8A18; --pol:#33A866; --thw:#5D93E3; --son:#8A857E;
       --good:#4CAF6E; --good-bg:#22352A;
       --warn:#D9A83C; --warn-bg:#3A3120;
       color-scheme:dark;
@@ -26,7 +26,7 @@
     --ink:#F3F0EB; --ink2:#B9B3A9; --ink3:#8C857B;
     --line:#493F38; --shadow:0 1px 3px rgba(0,0,0,.5),0 6px 18px rgba(0,0,0,.42);
     --accent:#D93A32; --accent-ink:#FFFFFF; --accent-press:#B72C26;
-    --fw:#D93A32; --brk:#BE8A18; --pol:#2E9560; --thw:#5D93E3; --son:#8A857E;
+    --fw:#D93A32; --brk:#BE8A18; --pol:#33A866; --thw:#5D93E3; --son:#8A857E;
     --good:#4CAF6E; --good-bg:#22352A;
     --warn:#D9A83C; --warn-bg:#3A3120;
     color-scheme:dark;
@@ -36,7 +36,7 @@
     --ink:#211E1B; --ink2:#544E47; --ink3:#7E776D;
     --line:#BFB8AB; --shadow:0 1px 2px rgba(38,34,31,.12),0 4px 14px rgba(38,34,31,.10);
     --accent:#C4232B; --accent-ink:#FFFFFF; --accent-press:#A31B22;
-    --fw:#C4232B; --brk:#B8720F; --pol:#256B3D; --thw:#23539E; --son:#6E6862;
+    --fw:#C4232B; --brk:#B8720F; --pol:#1E7E3C; --thw:#23539E; --son:#6E6862;
     --good:#1E7A3C; --good-bg:#E1F0E4;
     --warn:#8A5F00; --warn-bg:#F7ECD0;
     color-scheme:light;
@@ -47,7 +47,7 @@
     --ink:#F3F0EB; --ink2:#B9B3A9; --ink3:#8C857B;
     --line:#493F38; --shadow:0 1px 3px rgba(0,0,0,.5),0 6px 18px rgba(0,0,0,.42);
     --accent:#D93A32; --accent-ink:#FFFFFF; --accent-press:#B72C26;
-    --fw:#D93A32; --brk:#BE8A18; --pol:#2E9560; --thw:#5D93E3; --son:#8A857E;
+    --fw:#D93A32; --brk:#BE8A18; --pol:#33A866; --thw:#5D93E3; --son:#8A857E;
     --good:#4CAF6E; --good-bg:#22352A;
     --warn:#D9A83C; --warn-bg:#3A3120;
   }
@@ -759,6 +759,16 @@
   font-size:.8rem;font-weight:800;color:var(--fw);text-align:center;white-space:nowrap;
   background:color-mix(in oklab,var(--surface) 82%,transparent);padding:2px 8px;border-radius:6px}
 @media (min-width:1500px){.lg-arealbl{font-size:1rem}}
+/* Großes, verschiebbares Abschnitts-Label „EA n – Bezeichnung“ */
+.lg-ealbl{position:absolute;transform:translate(-50%,-50%);z-index:3;cursor:grab;touch-action:none;
+  display:flex;flex-direction:column;align-items:center;line-height:1.1;text-align:center;
+  font-size:1.6rem;font-weight:800;color:var(--fw);white-space:nowrap;
+  background:color-mix(in oklab,var(--surface) 84%,transparent);
+  border:2px solid currentColor;border-radius:10px;padding:4px 12px;box-shadow:var(--shadow)}
+.lg-ealbl small{font-size:.72rem;font-weight:650;color:var(--ink);max-width:220px;overflow:hidden;
+  text-overflow:ellipsis;white-space:nowrap}
+.lg-ealbl:active{cursor:grabbing}
+@media (min-width:1500px){.lg-ealbl{font-size:2rem}.lg-ealbl small{font-size:.85rem}}
 
 /* ---------- Lagekarte: Online-Karte (Leaflet) ---------- */
 #lgMap{width:100%;height:100%;background:var(--surface2)}
@@ -844,3 +854,30 @@
   font-weight:700;font-size:.8rem;color:var(--thw);
   background:color-mix(in oklab,var(--thw) 12%,var(--surface));border-radius:5px;padding:1px 6px}
 .as-mit{line-height:1.5}
+
+/* Einstellungen: QR-Code zum Tablet-Verbinden */
+.cfg-qr{display:flex;gap:16px;align-items:center;flex-wrap:wrap}
+.cfg-qr img{width:176px;height:176px;border-radius:10px;background:#fff;padding:8px;border:1px solid var(--line);image-rendering:pixelated}
+.cfg-qr>div{flex:1;min-width:200px}
+
+/* Fahrzeugkatalog-Verwaltung in den Einstellungen */
+.kat-list{border:1px solid var(--line);border-radius:10px;max-height:280px;overflow-y:auto;padding:4px 10px}
+.kat-grp{font-size:.72rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;
+  color:var(--ink3);margin:10px 0 2px}
+.kat-row{display:flex;align-items:center;gap:10px;padding:5px 0;border-bottom:1px solid var(--line)}
+.kat-row:last-child{border-bottom:none}
+.kat-row span{flex:1;min-width:0;font-size:.9rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.kat-x{width:34px;height:34px;flex:none;border-radius:8px;border:1.5px solid var(--line);
+  color:var(--accent);font-weight:700;background:var(--surface)}
+.kat-x:active{background:var(--surface2)}
+
+/* Lagekarten-Legende: bei Bedarf zweispaltig, getrennt Marker / Fahrzeuge */
+.lg-leg-body.zweispaltig{display:grid;grid-template-columns:1fr 1fr;gap:0 18px;align-items:start}
+.lg-leg-sec h3{font-size:.72rem;font-weight:700;letter-spacing:.09em;text-transform:uppercase;color:var(--ink3);margin:0 0 8px}
+.lg-leg-sec + .lg-leg-sec{margin-top:0}
+
+/* Handy: Datums-/Zeitfelder nicht über den Rand hinaus */
+@media (max-width:899px){
+  input[type="datetime-local"],input[type="time"],input[type="date"]{width:100%;min-width:0;max-width:100%}
+  .field{min-width:0}
+}
