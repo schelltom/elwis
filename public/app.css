@@ -886,3 +886,8 @@
   input[type="datetime-local"],input[type="time"],input[type="date"]{width:100%;min-width:0;max-width:100%}
   .field{min-width:0}
 }
+
+/* Monitor: Untertitel in der Abschnitts-/BR-Kachel (z. B. Bereitstellungsraum-Ort) */
+.ab-cardsub{font-size:.82rem;color:var(--ink2);font-weight:600;margin-top:1px;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+@media (min-width:1500px){.ab-cardsub{font-size:.95rem}}

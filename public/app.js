@@ -103,7 +103,7 @@ function defaultState(){
   return {
     einsatzId: uid(),                      // Identität für den Sync (welcher Einsatz?)
     einsatzStart: new Date().toISOString(),
-    einsatz: { stichwort:"", ort:"", objekt:"", beginn:"", ende:"", leiter:"", bemerkung:"", ilsGruppe:"TMO 2772" },
+    einsatz: { stichwort:"", ort:"", objekt:"", beginn:"", ende:"", leiter:"", bereitstellungsraum:"", bemerkung:"", ilsGruppe:"TMO 2772" },
     einheiten: [], fuehrung: [], abschnitte: [], archiv: [],
     lage: { items: [], bg: "", snapshots: [], mode: "raster", mapView: null, mapLayer: "luftbild" },
     funk: [], besprechungen: [], anforderungen: [], checks: [], fotos: [],
@@ -516,6 +516,8 @@ function renderEinsatz(){
         <input id="f-ende" data-ez="ende" type="datetime-local" value="${esc(e.ende||"")}"></div>
       <div class="field span2"><label for="f-el">Einsatzleiter</label>
         <input id="f-el" data-ez="leiter" value="${esc(e.leiter)}" placeholder="Name / Funktion"></div>
+      <div class="field span2"><label for="f-br">Bereitstellungsraum</label>
+        <input id="f-br" data-ez="bereitstellungsraum" value="${esc(e.bereitstellungsraum||"")}" placeholder="z. B. Parkplatz Süd, Volksfestplatz"></div>
       <div class="field span2" style="margin-bottom:0"><label for="f-bem">Bemerkungen</label>
         <textarea id="f-bem" data-ez="bemerkung" placeholder="Lage, Abschnitte, Besonderheiten …">${esc(e.bemerkung)}</textarea></div>
     </div>
@@ -763,7 +765,7 @@ async function endeEinsatz(){
   const entry = baueArchivEintrag();
   state.archiv.push(entry);
   state.einsatzId = uid(); state.einsatzStart = new Date().toISOString();
-  state.einsatz = { stichwort:"", ort:"", objekt:"", beginn:nowLocalInput(), ende:"", leiter:"", bemerkung:"", ilsGruppe:"TMO 2772" };
+  state.einsatz = { stichwort:"", ort:"", objekt:"", beginn:nowLocalInput(), ende:"", leiter:"", bereitstellungsraum:"", bemerkung:"", ilsGruppe:"TMO 2772" };
   state.einheiten = []; state.fuehrung = []; state.abschnitte = [];
   state.lage = { items: [], bg: "", snapshots: [], mode: "raster", mapView: null, mapLayer: "luftbild" };
   state.funk = []; state.besprechungen = [];
@@ -2136,7 +2138,10 @@ function renderMonitor(){
     return `
     <div class="ab-card ${opts.none ? "none" : ""} ${opts.br ? "br" : ""}">
       <div class="ab-head">
-        <h4>${esc(title)}</h4>
+        <div style="flex:1;min-width:0">
+          <h4>${esc(title)}</h4>
+          ${opts.sub ? `<div class="ab-cardsub">${esc(opts.sub)}</div>` : ""}
+        </div>
         <div class="ab-staerke mono">${su.f}/${su.u}/${su.m}/${g}</div>
       </div>
       <div class="ab-sub">
@@ -2304,7 +2309,7 @@ function monCardsData(){
     cards.push({ key:"all", title:"Alle Einheiten an der Einsatzstelle",
       units:act.filter(u => u.abschnitt !== "BR"), opts:{ none:true } });
   }
-  if(brUnits.length && !hid.BR) cards.push({ key:"BR", title:"Bereitstellungsraum", units:brUnits, opts:{ br:true } });
+  if(brUnits.length && !hid.BR) cards.push({ key:"BR", title:"Bereitstellungsraum", units:brUnits, opts:{ br:true, sub: state.einsatz.bereitstellungsraum } });
   return cards;
 }
 /* Sonderseiten des Monitors (Lagekarte, Funkskizze) – über den Kacheln-Dialog abschaltbar */
