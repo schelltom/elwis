@@ -76,7 +76,7 @@ function defaultState(){
     einsatzStart: new Date().toISOString(),
     einsatz: { stichwort:"", ort:"", beginn:"", leiter:"", bemerkung:"" },
     einheiten: [], fuehrung: [], abschnitte: [], archiv: [],
-    lage: { items: [], bg: "", snapshots: [], mode: "raster", mapView: null },
+    lage: { items: [], bg: "", snapshots: [], mode: "raster", mapView: null, mapLayer: "luftbild" },
     funk: [], besprechungen: [], anforderungen: [], checks: [], fotos: [],
     monHide: { panels: {}, ab: {} },
     config: defaultConfig(),
@@ -90,6 +90,7 @@ state.config.prefixes = Object.assign(defaultConfig().prefixes, (stored.config||
 if(!state.lage || !Array.isArray(state.lage.items)) state.lage = { items: [], bg: "" };
 if(!Array.isArray(state.lage.snapshots)) state.lage.snapshots = [];
 if(!state.lage.mode) state.lage.mode = state.lage.bg ? "bild" : "raster";
+if(!state.lage.mapLayer) state.lage.mapLayer = "luftbild";
 if(!Array.isArray(state.funk)) state.funk = [];
 if(!Array.isArray(state.besprechungen)) state.besprechungen = [];
 if(!Array.isArray(state.anforderungen)) state.anforderungen = [];
@@ -601,7 +602,7 @@ function baueArchivEintrag(){
     besprechungen: state.besprechungen.map(b => ({...b})),
     anforderungen: state.anforderungen.map(a => ({...a})),
     checks: state.checks.map(c => ({...c, punkte:c.punkte.map(p => ({...p}))})),
-    lage: { bg: state.lage.bg, mode: state.lage.mode, mapView: state.lage.mapView,
+    lage: { bg: state.lage.bg, mode: state.lage.mode, mapView: state.lage.mapView, mapLayer: state.lage.mapLayer,
       items: state.lage.items.map(i => ({...i})),
       snapshots: state.lage.snapshots.map(s => ({...s, items: s.items.map(i => ({...i}))})) },
     fotos: state.fotos.map(f => ({...f})),
@@ -646,7 +647,7 @@ async function endeEinsatz(){
   state.einsatzId = uid(); state.einsatzStart = new Date().toISOString();
   state.einsatz = { stichwort:"", ort:"", beginn:nowLocalInput(), leiter:"", bemerkung:"" };
   state.einheiten = []; state.fuehrung = []; state.abschnitte = [];
-  state.lage = { items: [], bg: "", snapshots: [], mode: "raster", mapView: null };
+  state.lage = { items: [], bg: "", snapshots: [], mode: "raster", mapView: null, mapLayer: "luftbild" };
   state.funk = []; state.besprechungen = [];
   state.anforderungen = []; state.checks = []; state.fotos = [];
   try{ markChange(); }catch(err){
@@ -2272,8 +2273,28 @@ function lgMapSetup(){
   lgMapTeardown();
   const v = state.lage.mapView || { center:[49.6767, 12.1625], zoom:14 };
   lgMapObj = L.map(el, { zoomControl:true }).setView(v.center, v.zoom);
-  L.tileLayer("https://sgx.geodatenzentrum.de/wmts_topplus_open/tile/1.0.0/web/default/WEBMERCATOR/{z}/{y}/{x}.png",
-    { maxZoom:18, attribution:"© Bundesamt für Kartographie und Geodäsie (TopPlusOpen)" }).addTo(lgMapObj);
+
+  // Wählbare Kartengrundlagen (alle OpenData)
+  const bayVV = "Bayerische Vermessungsverwaltung – geodaten.bayern.de";
+  const bases = {
+    luftbild: { name:"Luftbild (Bayern)", layer: L.tileLayer.wms(
+      "https://geoservices.bayern.de/od/wms/dop/v1/dop40",
+      { layers:"by_dop40c", format:"image/png", version:"1.3.0", maxZoom:20, attribution:"Luftbild: " + bayVV }) },
+    basis: { name:"Bayern-Karte", layer: L.tileLayer(
+      "https://wmtsod{s}.bayernwolke.de/wmts/by_webkarte/smerc/{z}/{x}/{y}",
+      { subdomains:["1","2","3","4","5","6","7"], maxZoom:20, attribution:bayVV }) },
+    strasse: { name:"Straßenkarte", layer: L.tileLayer(
+      "https://sgx.geodatenzentrum.de/wmts_topplus_open/tile/1.0.0/web/default/WEBMERCATOR/{z}/{y}/{x}.png",
+      { maxZoom:18, attribution:"© Bundesamt für Kartographie und Geodäsie (TopPlusOpen)" }) },
+  };
+  const cur = bases[state.lage.mapLayer] ? state.lage.mapLayer : "luftbild";
+  bases[cur].layer.addTo(lgMapObj);
+  const nach = {}; Object.entries(bases).forEach(([k,b]) => nach[b.name] = k);
+  L.control.layers(
+    Object.fromEntries(Object.values(bases).map(b => [b.name, b.layer])),
+    {}, { collapsed:false }).addTo(lgMapObj);
+  lgMapObj.on("baselayerchange", e => { state.lage.mapLayer = nach[e.name] || "luftbild"; save(); });
+
   lgMapLayer = L.layerGroup().addTo(lgMapObj);
   lgMapObj.on("moveend zoomend", () => {
     if(!lgMapObj) return;
