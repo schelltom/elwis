@@ -118,6 +118,35 @@ function pfx(org){ return state.config.prefixes[org] ?? ""; }
 /* ---------------- Hilfsfunktionen ---------------- */
 const $ = sel => document.querySelector(sel);
 function esc(s){ return String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+
+/* ---------------- Dialoge (statt Browser-alert/confirm) ---------------- */
+function modal(opts){
+  return new Promise(resolve => {
+    const host = $("#modalHost");
+    host.innerHTML = `
+    <div class="modal-backdrop"></div>
+    <div class="modal" role="alertdialog" aria-modal="true">
+      ${opts.titel ? `<h2>${esc(opts.titel)}</h2>` : ""}
+      <p>${esc(opts.text)}</p>
+      <div class="modal-btns">
+        ${opts.abbrechen ? `<button class="btn btn-ghost" data-md="0">${esc(opts.abbrechen)}</button>` : ""}
+        <button class="btn btn-primary" data-md="1">${esc(opts.ok || "OK")}</button>
+      </div>
+    </div>`;
+    const fertig = v => { host.innerHTML = ""; resolve(v); };
+    host.querySelectorAll("[data-md]").forEach(b =>
+      b.addEventListener("click", () => fertig(b.dataset.md === "1")));
+    host.querySelector(".modal-backdrop").addEventListener("click", () => {
+      if(opts.abbrechen) fertig(false);
+    });
+    const okBtn = host.querySelector('[data-md="1"]');
+    if(okBtn) okBtn.focus();
+  });
+}
+function modalConfirm(text, ok = "Ja", abbrechen = "Abbrechen"){
+  return modal({ text, ok, abbrechen });
+}
+function modalInfo(text){ return modal({ text, ok: "OK" }); }
 function gesamt(u){ return (u.f|0)+(u.u|0)+(u.m|0); }
 function staerkeStr(u){ return `${u.f}/${u.u}/${u.m}/${gesamt(u)}`; }
 function fullName(u){ return [u.name, u.kennung].filter(Boolean).join(" ").trim(); }
@@ -192,7 +221,7 @@ function attachDictation(btn, target){
     rec.onerror = e => {
       rec = null; btn.classList.remove("rec");
       if(e.error === "not-allowed" || e.error === "service-not-allowed")
-        alert("Spracheingabe nicht verfügbar – Mikrofonberechtigung fehlt oder wird in dieser Umgebung blockiert.");
+        modalInfo("Spracheingabe nicht verfügbar – Mikrofonberechtigung fehlt oder wird in dieser Umgebung blockiert.");
     };
     btn.classList.add("rec");
     try{ rec.start(); }catch(err){ rec = null; btn.classList.remove("rec"); }
@@ -330,6 +359,7 @@ function renderEinsatz(){
         <div class="a-t">${esc(a.einsatz.stichwort) || "Ohne Stichwort"}</div>
         <div class="a-s">${fmtDatum(a.ende)} · ${a.einheiten.length} Einheiten · ${a.fuehrung.length} Führungskräfte</div>
       </div>
+      <button class="btn btn-ghost" data-aakt="${esc(a.id)}">Aktivieren</button>
       <button class="btn btn-ghost" data-aprint="${esc(a.id)}">Drucken</button>
       <button class="btn btn-danger-ghost" data-adel="${esc(a.id)}" aria-label="Archiveintrag löschen">✕</button>
     </div>`).join("") : `<p class="hint" style="margin:0">Noch keine abgeschlossenen Einsätze.</p>`;
@@ -413,7 +443,7 @@ function wireEinsatz(){
     if(!file) return;
     resizeImage(file, 1280, data => {
       state.fotos.push({ id:uid(), zeit:new Date().toISOString(), data, notiz:"" });
-      try{ markChange(); }catch(err){ alert("Speicher voll – bitte alte Fotos löschen."); state.fotos.pop(); }
+      try{ markChange(); }catch(err){ modalInfo("Speicher voll – bitte alte Fotos löschen."); state.fotos.pop(); }
       render();
     });
   });
@@ -421,12 +451,12 @@ function wireEinsatz(){
     img.addEventListener("click", () => openFotoSheet(img.dataset.foto)));
   $("#btnDemo").addEventListener("click", loadDemo);
   $("#btnReset").addEventListener("click", () => {
-    if(confirm("Aktuellen Einsatz wirklich verwerfen? Alle erfassten Kräfte gehen verloren (Archiv bleibt).")){
+    modalConfirm("Aktuellen Einsatz wirklich verwerfen? Alle erfassten Kräfte gehen verloren (Archiv bleibt).").then(ok => { if(!ok) return;
       const keepArchiv = state.archiv, keepCfg = state.config;
       state = defaultState(); state.archiv = keepArchiv; state.config = keepCfg;
       state.einsatz.beginn = nowLocalInput();
       save(); render();
-    }
+    });
   });
   $("#btnPrintNow").addEventListener("click", () =>
     doPrint({ einsatz:state.einsatz, einheiten:state.einheiten, fuehrung:state.fuehrung,
@@ -434,15 +464,17 @@ function wireEinsatz(){
       anforderungen:state.anforderungen, checks:state.checks,
       lage:state.lage, fotos:state.fotos, ende:null }));
   $("#btnEnde").addEventListener("click", endeEinsatz);
+  document.querySelectorAll("[data-aakt]").forEach(b =>
+    b.addEventListener("click", () => aktiviereArchiv(b.dataset.aakt)));
   document.querySelectorAll("[data-aprint]").forEach(b => b.addEventListener("click", () => {
     const a = state.archiv.find(x => x.id === b.dataset.aprint);
     if(a) doPrint(a);
   }));
   document.querySelectorAll("[data-adel]").forEach(b => b.addEventListener("click", () => {
-    if(confirm("Diesen Archiveintrag wirklich löschen?")){
+    modalConfirm("Diesen Archiveintrag wirklich löschen?").then(ok => { if(!ok) return;
       state.archiv = state.archiv.filter(x => x.id !== b.dataset.adel);
       markChange(); render();
-    }
+    });
   }));
 }
 /* Einsatz als Datei sichern / einlesen – Backup, Gerätewechsel, „Sync per USB-Stick“ */
@@ -464,13 +496,13 @@ function exportEinsatz(){
 }
 function importEinsatz(file){
   const rd = new FileReader();
-  rd.onload = () => {
+  rd.onload = async () => {
     try{
       const d = JSON.parse(rd.result);
       if(!d || d.elwis !== 1 || !d.einsatz) throw new Error("kein ELWIS-Export");
       const wer = [d.einsatz.stichwort || "ohne Stichwort", d.ugName ? `(${d.ugName})` : "",
         d.exportiert ? `– exportiert ${fmtDatum(d.exportiert)} ${fmtZeit(d.exportiert)} Uhr` : ""].join(" ");
-      if(!confirm(`Einsatz „${wer}“ importieren?\nDer aktuell erfasste Einsatz wird ersetzt (Archiv und Einstellungen bleiben).`)) return;
+      if(!(await modalConfirm(`Einsatz „${wer}“ importieren?\nDer aktuell erfasste Einsatz wird ersetzt (Archiv und Einstellungen bleiben).`))) return;
       state.einsatz = d.einsatz;
       state.einheiten = d.einheiten || [];
       state.fuehrung = d.fuehrung || [];
@@ -486,11 +518,11 @@ function importEinsatz(file){
       try{ markChange(); }catch(err){
         state.fotos = []; state.lage.bg = "";
         markChange();
-        alert("Import gelungen, aber Fotos/Kartenhintergrund passten nicht in den lokalen Speicher und wurden weggelassen.");
+        modalInfo("Import gelungen, aber Fotos/Kartenhintergrund passten nicht in den lokalen Speicher und wurden weggelassen.");
       }
       render();
     }catch(err){
-      alert("Datei konnte nicht gelesen werden – ist das ein ELWIS-Export (.json)?");
+      modalInfo("Datei konnte nicht gelesen werden – ist das ein ELWIS-Export (.json)?");
     }
   };
   rd.readAsText(file);
@@ -517,22 +549,18 @@ function openFotoSheet(id){
   </div>`;
   document.querySelectorAll("[data-close]").forEach(el => el.addEventListener("click", closeEditor));
   $("#foto-del").addEventListener("click", () => {
-    if(confirm("Dieses Foto wirklich löschen?")){
+    modalConfirm("Dieses Foto wirklich löschen?").then(ok => { if(!ok) return;
       state.fotos = state.fotos.filter(x => x.id !== f.id);
       markChange(); closeEditor(); render();
-    }
+    });
   });
   $("#foto-save").addEventListener("click", () => {
     f.notiz = $("#foto-notiz").value.trim();
     markChange(); closeEditor(); render();
   });
 }
-function endeEinsatz(){
-  if(!state.einheiten.length && !state.einsatz.stichwort){
-    alert("Es ist kein Einsatz mit Daten vorhanden."); return;
-  }
-  if(!confirm("Einsatz jetzt beenden? Er wird archiviert und die Erfassung geleert.")) return;
-  const entry = {
+function baueArchivEintrag(){
+  return {
     id: uid(), ende: new Date().toISOString(),
     einsatz: {...state.einsatz},
     einheiten: state.einheiten.map(u => ({...u})),
@@ -546,6 +574,42 @@ function endeEinsatz(){
       snapshots: state.lage.snapshots.map(s => ({...s, items: s.items.map(i => ({...i}))})) },
     fotos: state.fotos.map(f => ({...f})),
   };
+}
+/* Archivierten Einsatz wieder aktiv machen (aktueller Einsatz wird vorher archiviert) */
+async function aktiviereArchiv(id){
+  const a = state.archiv.find(x => x.id === id);
+  if(!a) return;
+  const hatInhalt = state.einheiten.length || state.funk.length || state.besprechungen.length ||
+    state.lage.items.length || state.einsatz.stichwort;
+  const frage = `Einsatz „${a.einsatz.stichwort || "ohne Stichwort"}“ wieder aktivieren?` +
+    (hatInhalt ? "\nDer aktuell erfasste Einsatz wird dabei automatisch archiviert." : "");
+  if(!(await modalConfirm(frage, "Aktivieren"))) return;
+  if(hatInhalt) state.archiv.push(baueArchivEintrag());
+  state.archiv = state.archiv.filter(x => x.id !== id);
+  state.einsatz = {...a.einsatz};
+  state.einheiten = (a.einheiten || []).map(x => ({...x}));
+  state.fuehrung = (a.fuehrung || []).map(x => ({...x}));
+  state.abschnitte = (a.abschnitte || []).map(x => ({...x}));
+  state.funk = (a.funk || []).map(x => ({...x}));
+  state.besprechungen = (a.besprechungen || []).map(x => ({...x}));
+  state.anforderungen = (a.anforderungen || []).map(x => ({...x}));
+  state.checks = (a.checks || []).map(c => ({...c, punkte:(c.punkte || []).map(p => ({...p}))}));
+  state.lage = a.lage
+    ? { bg: a.lage.bg || "", items: (a.lage.items || []).map(x => ({...x})),
+        snapshots: (a.lage.snapshots || []).map(s => ({...s, items:(s.items || []).map(x => ({...x}))})) }
+    : { items: [], bg: "", snapshots: [] };
+  state.fotos = (a.fotos || []).map(x => ({...x}));
+  // Neue Sync-Identität: der reaktivierte Einsatz wird zum aktuellen (auch am Server)
+  state.einsatzId = uid();
+  state.einsatzStart = new Date().toISOString();
+  markChange(); render();
+}
+async function endeEinsatz(){
+  if(!state.einheiten.length && !state.einsatz.stichwort){
+    modalInfo("Es ist kein Einsatz mit Daten vorhanden."); return;
+  }
+  if(!(await modalConfirm("Einsatz jetzt beenden? Er wird archiviert und die Erfassung geleert."))) return;
+  const entry = baueArchivEintrag();
   state.archiv.push(entry);
   state.einsatzId = uid(); state.einsatzStart = new Date().toISOString();
   state.einsatz = { stichwort:"", ort:"", beginn:nowLocalInput(), leiter:"", bemerkung:"" };
@@ -556,11 +620,11 @@ function endeEinsatz(){
   try{ markChange(); }catch(err){
     // Speicher voll: Bilder aus dem Archiveintrag entfernen und erneut versuchen
     entry.fotos = []; entry.lage.bg = ""; entry.lage.snapshots = [];
-    try{ markChange(); alert("Archiviert – Fotos/Kartenbilder passten nicht in den lokalen Speicher und wurden im Archiv weggelassen (vorher exportieren sichert alles)."); }
-    catch(e2){ state.archiv.pop(); markChange(); alert("Lokaler Speicher voll – Einsatz konnte nicht archiviert werden. Bitte erst exportieren oder alte Archiveinträge löschen."); return; }
+    try{ markChange(); modalInfo("Archiviert – Fotos/Kartenbilder passten nicht in den lokalen Speicher und wurden im Archiv weggelassen (vorher exportieren sichert alles)."); }
+    catch(e2){ state.archiv.pop(); markChange(); modalInfo("Lokaler Speicher voll – Einsatz konnte nicht archiviert werden. Bitte erst exportieren oder alte Archiveinträge löschen."); return; }
   }
   render();
-  if(confirm("Einsatz archiviert. Bericht jetzt drucken?")) doPrint(entry);
+  if(await modalConfirm("Einsatz archiviert. Bericht jetzt drucken?", "Drucken", "Später")) doPrint(entry);
 }
 function loadDemo(){
   const t = (minAgo) => new Date(Date.now() - minAgo*60000).toISOString();
@@ -911,10 +975,10 @@ function wireSheet(){
   });
   const del = $("#e-del");
   if(del) del.addEventListener("click", () => {
-    if(confirm("Diese Kraft wirklich löschen?")){
+    modalConfirm("Diese Kraft wirklich löschen?").then(ok => { if(!ok) return;
       state.einheiten = state.einheiten.filter(x => x.id !== u.id);
       markChange(); closeEditor(); render();
-    }
+    });
   });
   $("#e-save").addEventListener("click", () => {
     u.kennung = (u.kennung||"").replace(/\/+$/,"");
@@ -978,10 +1042,10 @@ function openAfEditor(id){
   });
   const del = $("#af-del");
   if(del) del.addEventListener("click", () => {
-    if(confirm("Diese Anforderung wirklich löschen?")){
+    modalConfirm("Diese Anforderung wirklich löschen?").then(ok => { if(!ok) return;
       state.anforderungen = state.anforderungen.filter(x => x.id !== a.id);
       markChange(); closeEditor(); render();
-    }
+    });
   });
   $("#af-save").addEventListener("click", () => {
     a.was = $("#af-was").value.trim();
@@ -1038,11 +1102,11 @@ function renderAbSheet(){
   document.querySelectorAll("[data-close]").forEach(el => el.addEventListener("click", closeEditor));
   const del = $("#ab-del");
   if(del) del.addEventListener("click", () => {
-    if(confirm(`Abschnitt „${a.name}“ löschen? Zugeordnete Einheiten bleiben erhalten (ohne Abschnitt).`)){
+    modalConfirm(`Abschnitt „${a.name}“ löschen? Zugeordnete Einheiten bleiben erhalten (ohne Abschnitt).`).then(ok => { if(!ok) return;
       state.abschnitte = state.abschnitte.filter(x => x.id !== a.id);
       state.einheiten.forEach(u => { if(u.abschnitt === a.id) u.abschnitt = ""; });
       markChange(); closeEditor(); render();
-    }
+    });
   });
   $("#ab-save").addEventListener("click", () => {
     a.name = $("#ab-name").value.trim();
@@ -1102,10 +1166,10 @@ function renderFkSheet(){
   $("#fk-einheit").addEventListener("input", e => { f.einheit = e.target.value; });
   const del = $("#fk-del");
   if(del) del.addEventListener("click", () => {
-    if(confirm("Diese Führungskraft wirklich löschen?")){
+    modalConfirm("Diese Führungskraft wirklich löschen?").then(ok => { if(!ok) return;
       state.fuehrung = state.fuehrung.filter(x => x.id !== f.id);
       markChange(); closeEditor(); render();
-    }
+    });
   });
   $("#fk-save").addEventListener("click", () => {
     const idx = state.fuehrung.findIndex(x => x.id === f.id);
@@ -1256,10 +1320,10 @@ function renderFsSheet(){
   });
   const del = $("#fs-del");
   if(del) del.addEventListener("click", () => {
-    if(confirm("Diesen Funkspruch wirklich löschen?")){
+    modalConfirm("Diesen Funkspruch wirklich löschen?").then(ok => { if(!ok) return;
       state.funk = state.funk.filter(x => x.id !== f.id);
       markChange(); closeEditor(); render();
-    }
+    });
   });
   $("#fs-save").addEventListener("click", () => {
     const dv = $("#fs-datum").value, tv = $("#fs-zeit").value;
@@ -1344,10 +1408,10 @@ function wireListen(){
     markChange(); render();
   }));
   document.querySelectorAll("[data-checkdel]").forEach(b => b.addEventListener("click", () => {
-    if(confirm("Diese Checkliste wirklich entfernen?")){
+    modalConfirm("Diese Checkliste wirklich entfernen?").then(ok => { if(!ok) return;
       state.checks = state.checks.filter(x => x.id !== b.dataset.checkdel);
       markChange(); render();
-    }
+    });
   }));
 }
 
@@ -1448,10 +1512,10 @@ function openBesprEditor(id){
   });
   const del = $("#b-del");
   if(del) del.addEventListener("click", () => {
-    if(confirm("Dieses Protokoll wirklich löschen?")){
+    modalConfirm("Dieses Protokoll wirklich löschen?").then(ok => { if(!ok) return;
       state.besprechungen = state.besprechungen.filter(x => x.id !== b.id);
       markChange(); closeEditor(); render();
-    }
+    });
   });
   $("#b-save").addEventListener("click", () => {
     const dv = $("#b-datum").value, tv = $("#b-zeit").value;
@@ -2052,7 +2116,7 @@ function renderLagekarte(){
 }
 function setLgBg(data){
   state.lage.bg = data;
-  try{ markChange(); }catch(err){ alert("Bild zu groß für den lokalen Speicher."); state.lage.bg = ""; }
+  try{ markChange(); }catch(err){ modalInfo("Bild zu groß für den lokalen Speicher."); state.lage.bg = ""; }
   render();
 }
 /* Strg+V / Cmd+V auf der Lagekarte: Bild aus der Zwischenablage als Hintergrund */
@@ -2133,10 +2197,10 @@ function wireLagekarte(){
     b.addEventListener("click", () => openLgSnapshot(b.dataset.lgsnap)));
   document.querySelectorAll("[data-lgsnapdel]").forEach(b =>
     b.addEventListener("click", () => {
-      if(confirm("Dieses Lagebild wirklich löschen?")){
+      modalConfirm("Dieses Lagebild wirklich löschen?").then(ok => { if(!ok) return;
         state.lage.snapshots = state.lage.snapshots.filter(s => s.id !== b.dataset.lgsnapdel);
         markChange(); render();
-      }
+      });
     }));
   $("#lgBigBtn").addEventListener("click", () => {
     lgBig = !lgBig;
@@ -2179,7 +2243,7 @@ function wireLagekarte(){
     if(!file) return;
     resizeImage(file, 1920, data => {
       state.lage.bg = data;
-      try{ markChange(); }catch(err){ alert("Bild zu groß für den lokalen Speicher – bitte kleineres Foto wählen."); state.lage.bg = ""; }
+      try{ markChange(); }catch(err){ modalInfo("Bild zu groß für den lokalen Speicher – bitte kleineres Foto wählen."); state.lage.bg = ""; }
       render();
     });
   });
@@ -2196,16 +2260,16 @@ function wireLagekarte(){
           return;
         }
       }
-      alert("Kein Bild in der Zwischenablage gefunden – erst einen Screenshot kopieren (z. B. aus dem BayernAtlas).");
+      modalInfo("Kein Bild in der Zwischenablage gefunden – erst einen Screenshot kopieren (z. B. aus dem BayernAtlas).");
     }catch(err){
-      alert("Zugriff auf die Zwischenablage nicht möglich. Alternativ: Strg+V direkt auf der Lagekarte, oder den Foto-Knopf nutzen.");
+      modalInfo("Zugriff auf die Zwischenablage nicht möglich. Alternativ: Strg+V direkt auf der Lagekarte, oder den Foto-Knopf nutzen.");
     }
   });
   const clear = $("#lgClear");
   if(clear) clear.addEventListener("click", () => {
-    if(confirm("Alle Symbole von der Lagekarte entfernen?")){
+    modalConfirm("Alle Symbole von der Lagekarte entfernen?").then(ok => { if(!ok) return;
       state.lage.items = []; markChange(); render();
-    }
+    });
   });
 
   // Zoom: Canvas wächst, Verschieben über natives Scrollen/Wischen im Wrap

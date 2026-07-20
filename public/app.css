@@ -713,3 +713,14 @@
     #printArea .p-fotos img{width:100%;border:1px solid #999;border-radius:3px}
     #printArea .p-fotos figcaption{font-size:8pt;color:#333;margin-top:2px}
   }
+
+/* ---------- Dialoge (ersetzen Browser-alert/confirm) ---------- */
+.modal-backdrop{position:fixed;inset:0;z-index:60;background:rgba(20,16,14,.5)}
+.modal{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:61;
+  background:var(--surface);border:1px solid var(--line);border-radius:16px;
+  box-shadow:0 12px 48px rgba(0,0,0,.35);
+  width:min(460px,calc(100vw - 32px));padding:20px 22px}
+.modal h2{font-size:1.05rem;font-weight:750;margin:0 0 8px}
+.modal p{margin:0 0 18px;color:var(--ink2);line-height:1.5;white-space:pre-line}
+.modal-btns{display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap}
+.modal-btns .btn{min-height:48px}
