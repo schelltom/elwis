@@ -541,14 +541,18 @@
   /* Lagekarte: Zeichenfläche (zoombar: Canvas wächst, Wrap scrollt/pannt) */
   .lg-wrap{position:relative;border:1.5px solid var(--line);border-radius:14px;
     aspect-ratio:16/10;overflow:auto;touch-action:pan-x pan-y;
-    background-color:var(--surface);overscroll-behavior:contain}
+    background-color:var(--surface2);overscroll-behavior:contain;
+    isolation:isolate}   /* eigener Stacking-Kontext: Leaflet-Ebenen dürfen Splash/Dialoge nicht überlagern */
+  /* Raster: dunkleres, neutrales Grau als Hintergrund → weiße Symbolkacheln heben sich klar ab */
   .lg-canvas{position:relative;width:100%;height:100%;
+    background-color:color-mix(in oklab,var(--ink) 26%,var(--surface));
     background-size:cover;background-position:center}
-  .lg-canvas::after{content:"";position:absolute;inset:0;pointer-events:none;opacity:.55;
-    background:linear-gradient(var(--line) 1px,transparent 1px),
-      linear-gradient(90deg,var(--line) 1px,transparent 1px);
+  .lg-canvas::after{content:"";position:absolute;inset:0;pointer-events:none;opacity:1;
+    background:linear-gradient(color-mix(in oklab,var(--ink) 32%,transparent) 1px,transparent 1px),
+      linear-gradient(90deg,color-mix(in oklab,var(--ink) 32%,transparent) 1px,transparent 1px);
     background-size:44px 44px}
-  .lg-canvas.hasbg::after{opacity:.14}
+  .lg-canvas.hasbg{background-color:var(--surface2)}
+  .lg-canvas.hasbg::after{opacity:.12}
   .lg-zoom{display:flex;align-items:center;gap:2px;margin-right:auto;
     border:1.5px solid var(--line);border-radius:12px;background:var(--surface);padding:2px}
   .lg-zoom button{width:46px;height:40px;border-radius:9px;font-size:1.25rem;font-weight:700;color:var(--ink)}
@@ -768,3 +772,13 @@
 .lg-drawbar button{min-height:40px;padding:6px 14px;border-radius:8px;font-weight:700;
   border:1.5px solid var(--line);background:var(--surface);color:var(--ink)}
 .lg-drawbar button[data-dr="ok"]{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+
+/* Lagekarte: Modus-Zeile + kompakte Kartengrundlagen-Auswahl */
+.lg-modes{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:16px}
+.lg-modes .seg{margin-bottom:0}
+.lg-layerpick{display:inline-flex;gap:2px;background:var(--surface2);border:1px solid var(--line);
+  border-radius:9px;padding:3px}
+.lg-layerpick button{min-height:36px;padding:5px 12px;border-radius:7px;font-size:.8rem;
+  font-weight:650;color:var(--ink2)}
+.lg-layerpick button.active{background:var(--surface);color:var(--ink);box-shadow:var(--shadow)}
+@media (max-width:899px){.lg-layerpick button{min-height:42px}}

@@ -2126,10 +2126,18 @@ function renderLagekarte(){
       <button class="btn btn-ghost" id="lgBigBtn" style="margin-right:8px">${lgBig ? "Großansicht beenden" : "Großansicht / Vollbild"}</button>
       <button class="btn btn-primary" id="lgToMonitor">Zum Monitor</button>
     </div>
-    <div class="seg" role="tablist" style="max-width:420px">
-      <button role="tab" data-lgmode="raster" class="${state.lage.mode==="raster"?"active":""}">Raster</button>
-      <button role="tab" data-lgmode="bild" class="${state.lage.mode==="bild"?"active":""}">Bild</button>
-      <button role="tab" data-lgmode="karte" class="${state.lage.mode==="karte"?"active":""}">Karte (online)</button>
+    <div class="lg-modes">
+      <div class="seg" role="tablist" style="max-width:420px;margin:0">
+        <button role="tab" data-lgmode="raster" class="${state.lage.mode==="raster"?"active":""}">Raster</button>
+        <button role="tab" data-lgmode="bild" class="${state.lage.mode==="bild"?"active":""}">Bild</button>
+        <button role="tab" data-lgmode="karte" class="${state.lage.mode==="karte"?"active":""}">Karte (online)</button>
+      </div>
+      ${state.lage.mode === "karte" ? `
+      <div class="lg-layerpick" role="group" aria-label="Kartengrundlage">
+        <button data-lglayer="luftbild" class="${state.lage.mapLayer==="luftbild"?"active":""}">Luftbild</button>
+        <button data-lglayer="basis" class="${state.lage.mapLayer==="basis"?"active":""}">Bayern-Karte</button>
+        <button data-lglayer="strasse" class="${state.lage.mapLayer==="strasse"?"active":""}">Straße</button>
+      </div>` : ""}
     </div>
     <div class="lg-toolbar">${tools}</div>
     ${statusText ? `<div class="lg-status">${esc(statusText)}<span style="margin-left:auto">${drawButtons}</span><button id="lgCancel">Abbrechen</button></div>` : ""}
@@ -2288,12 +2296,7 @@ function lgMapSetup(){
       { maxZoom:18, attribution:"© Bundesamt für Kartographie und Geodäsie (TopPlusOpen)" }) },
   };
   const cur = bases[state.lage.mapLayer] ? state.lage.mapLayer : "luftbild";
-  bases[cur].layer.addTo(lgMapObj);
-  const nach = {}; Object.entries(bases).forEach(([k,b]) => nach[b.name] = k);
-  L.control.layers(
-    Object.fromEntries(Object.values(bases).map(b => [b.name, b.layer])),
-    {}, { collapsed:false }).addTo(lgMapObj);
-  lgMapObj.on("baselayerchange", e => { state.lage.mapLayer = nach[e.name] || "luftbild"; save(); });
+  bases[cur].layer.addTo(lgMapObj);   // Umschaltung über die kleine App-Auswahl oben (nicht über eine Karten-Steuerung)
 
   lgMapLayer = L.layerGroup().addTo(lgMapObj);
   lgMapObj.on("moveend zoomend", () => {
@@ -2396,6 +2399,10 @@ function wireLagekarte(){
   document.querySelectorAll("[data-lgmode]").forEach(b => b.addEventListener("click", () => {
     state.lage.mode = b.dataset.lgmode;
     lgTool = null; lgDraw = null;
+    markChange(); render();
+  }));
+  document.querySelectorAll("[data-lglayer]").forEach(b => b.addEventListener("click", () => {
+    state.lage.mapLayer = b.dataset.lglayer;
     markChange(); render();
   }));
   $("#lgSnapBtn").addEventListener("click", () => { lgFreeze(); render(); });
