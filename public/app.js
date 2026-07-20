@@ -103,7 +103,7 @@ function defaultState(){
   return {
     einsatzId: uid(),                      // Identität für den Sync (welcher Einsatz?)
     einsatzStart: new Date().toISOString(),
-    einsatz: { stichwort:"", ort:"", beginn:"", leiter:"", bemerkung:"" },
+    einsatz: { stichwort:"", ort:"", objekt:"", beginn:"", ende:"", leiter:"", bemerkung:"" },
     einheiten: [], fuehrung: [], abschnitte: [], archiv: [],
     lage: { items: [], bg: "", snapshots: [], mode: "raster", mapView: null, mapLayer: "luftbild" },
     funk: [], besprechungen: [], anforderungen: [], checks: [], fotos: [],
@@ -498,10 +498,14 @@ function renderEinsatz(){
         <input id="f-stw" data-ez="stichwort" value="${esc(e.stichwort)}" placeholder="z. B. B4 – Brand Gewerbeanlage"></div>
       <div class="field"><label for="f-ort">Einsatzort</label>
         <input id="f-ort" data-ez="ort" value="${esc(e.ort)}" placeholder="Straße, Ort"></div>
+      <div class="field"><label for="f-obj">Objekt</label>
+        <input id="f-obj" data-ez="objekt" value="${esc(e.objekt||"")}" placeholder="z. B. Klinikum Weiden"></div>
       <div class="field"><label for="f-beg">Alarmzeit</label>
         <input id="f-beg" data-ez="beginn" type="datetime-local" value="${esc(e.beginn)}"></div>
       <div class="field"><label for="f-lb">Nächste Lagebesprechung</label>
         <input id="f-lb" data-ez="lagebespr" type="time" class="mono" value="${esc(e.lagebespr||"")}"></div>
+      <div class="field span2"><label for="f-ende">Einsatzende <span style="text-transform:none;font-weight:500">(wird beim Beenden gesetzt)</span></label>
+        <input id="f-ende" data-ez="ende" type="datetime-local" value="${esc(e.ende||"")}"></div>
       <div class="field span2"><label for="f-el">Einsatzleiter</label>
         <input id="f-el" data-ez="leiter" value="${esc(e.leiter)}" placeholder="Name / Funktion"></div>
       <div class="field span2" style="margin-bottom:0"><label for="f-bem">Bemerkungen</label>
@@ -745,10 +749,11 @@ async function endeEinsatz(){
     modalInfo("Es ist kein Einsatz mit Daten vorhanden."); return;
   }
   if(!(await modalConfirm("Einsatz jetzt beenden? Er wird archiviert und die Erfassung geleert."))) return;
+  state.einsatz.ende = nowLocalInput();   // Einsatzende auf jetzt setzen (wird mit archiviert/gedruckt)
   const entry = baueArchivEintrag();
   state.archiv.push(entry);
   state.einsatzId = uid(); state.einsatzStart = new Date().toISOString();
-  state.einsatz = { stichwort:"", ort:"", beginn:nowLocalInput(), leiter:"", bemerkung:"" };
+  state.einsatz = { stichwort:"", ort:"", objekt:"", beginn:nowLocalInput(), ende:"", leiter:"", bemerkung:"" };
   state.einheiten = []; state.fuehrung = []; state.abschnitte = [];
   state.lage = { items: [], bg: "", snapshots: [], mode: "raster", mapView: null, mapLayer: "luftbild" };
   state.funk = []; state.besprechungen = [];
@@ -768,7 +773,7 @@ function loadDemo(){
   const a1 = uid(), a2 = uid();
   const lbT = new Date(Date.now() + 30*60000);
   state.einsatz = {
-    stichwort:"B4 – Brand Lagerhalle", ort:"Industriestraße 12, Weiden",
+    stichwort:"B4 – Brand Lagerhalle", ort:"Industriestraße 12, Weiden", objekt:"Lagerhalle Nord", ende:"",
     beginn: nowLocalInput(), leiter:"KBI Mustermann", bemerkung:"Zwei Abschnitte gebildet",
     lagebespr: `${String(lbT.getHours()).padStart(2,"0")}:${String(lbT.getMinutes()).padStart(2,"0")}`,
   };
@@ -2117,6 +2122,7 @@ function renderMonitor(){
       <div class="ab-sub">
         <span><strong class="mono">${units.length}</strong> Einheiten</span>
         <span>AGT <strong class="mono">${su.agt}</strong></span>
+        <span>CSA <strong class="mono">${su.csa}</strong></span>
         ${opts.ansprechpartner ? `<span>Ansprechpartner <strong class="mono">${esc(opts.ansprechpartner)}</strong></span>` : ""}
       </div>
       ${funk ? `<div class="funkrow">${funk}</div>` : ""}
@@ -2189,7 +2195,7 @@ function renderMonitor(){
       <div class="kpis-compact">
         <div class="kpic accent"><span class="k">Gesamtstärke</span><span class="v mono">${s.f+s.u+s.m}</span><span class="s mono">${s.f}/${s.u}/${s.m}</span></div>
         <div class="kpic"><span class="k">AGT</span><span class="v mono">${s.agt}</span></div>
-        ${s.csa ? `<div class="kpic"><span class="k">CSA</span><span class="v mono">${s.csa}</span></div>` : ""}
+        <div class="kpic"><span class="k">CSA</span><span class="v mono">${s.csa}</span></div>
         <div class="kpic"><span class="k">Einheiten</span><span class="v mono">${act.length}</span><span class="s">${state.einheiten.length - act.length} abgerückt</span></div>
         <div class="kpic"><span class="k">Führungskräfte</span><span class="v mono">${state.fuehrung.length}</span></div>
         ${brUnits.length ? `<div class="kpic"><span class="k">Bereitstellung</span><span class="v mono">${brUnits.length}</span><span class="s">Einheiten</span></div>` : ""}
@@ -3281,6 +3287,7 @@ function printLegendHtml(items, units){
 }
 function doPrint(data){
   const e = data.einsatz;
+  const pEnde = e.ende || data.ende;   // Einsatzende: Stammdatenfeld, sonst Archiv-Zeitstempel
   const abs = data.abschnitte || [];
   const showAb = abs.length > 0;
   const s = summen(data.einheiten.filter(u => !u.abgerueckt));
@@ -3308,18 +3315,19 @@ function doPrint(data){
   $("#printArea").innerHTML = `
     <div class="p-head">
       <div>
-        <div class="p-sub">${esc(state.config.ugName)} · Einsatzbericht · Kräfteübersicht${data.ende ? "" : " · Zwischenstand"}</div>
+        <div class="p-sub">${esc(state.config.ugName)} · Einsatzbericht · Kräfteübersicht${pEnde ? "" : " · Zwischenstand"}</div>
         <h1>${esc(e.stichwort) || "Ohne Stichwort"}</h1>
-        <div>${esc(e.ort)}</div>
+        <div>${esc(e.ort)}${e.objekt ? " · " + esc(e.objekt) : ""}</div>
       </div>
       <div class="p-mark">ELWIS</div>
     </div>
     <table class="meta">
+      ${e.objekt ? `<tr><td>Objekt</td><td>${esc(e.objekt)}</td></tr>` : ""}
       <tr><td>Alarmzeit</td><td>${e.beginn ? fmtDatum(e.beginn)+" "+fmtZeit(e.beginn)+" Uhr" : "–"}</td></tr>
-      <tr><td>Einsatzende</td><td>${data.ende ? fmtDatum(data.ende)+" "+fmtZeit(data.ende)+" Uhr" : "– (Einsatz läuft)"}</td></tr>
-      <tr><td>Einsatzdauer</td><td>${dauerStr(e.beginn, data.ende) || "–"}</td></tr>
+      <tr><td>Einsatzende</td><td>${pEnde ? fmtDatum(pEnde)+" "+fmtZeit(pEnde)+" Uhr" : "– (Einsatz läuft)"}</td></tr>
+      <tr><td>Einsatzdauer</td><td>${dauerStr(e.beginn, pEnde) || "–"}</td></tr>
       <tr><td>Einsatzleiter</td><td>${esc(e.leiter) || "–"}</td></tr>
-      ${(!data.ende && e.lagebespr) ? `<tr><td>Nächste Lagebesprechung</td><td>${esc(e.lagebespr)} Uhr</td></tr>` : ""}
+      ${(!pEnde && e.lagebespr) ? `<tr><td>Nächste Lagebesprechung</td><td>${esc(e.lagebespr)} Uhr</td></tr>` : ""}
       ${showAb ? `<tr><td>Abschnitte</td><td>${abs.map(a=>{
         const funk=[a.ansprechpartner?`AP ${a.ansprechpartner}`:"",
           a.tmo?`TMO ${a.tmo}`:"",a.dmo?`DMO ${a.dmo}`:""].filter(Boolean).join(", ");

@@ -453,8 +453,8 @@
   .ab-play:active{background:var(--surface2)}
   .ab-play svg{width:18px;height:18px;fill:currentColor}
   .ab-cd{min-width:36px;text-align:right;font-weight:750;color:var(--ink2);font-size:.8rem}
-  .panel-head{display:flex;align-items:center;gap:10px}
-  .panel-head h3{margin:0 0 8px}
+  .panel-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px}
+  .panel-head h3{margin:0}
   .ab-table th{padding:3px 6px}
   .ab-table td{padding:3px 6px;font-size:.82rem}
   .ab-table .chip{font-size:.64rem;padding:1px 6px}
