@@ -105,6 +105,12 @@ unterwegs, Rückkehr ins gleiche WLAN“.
 - **Später optional: Supabase als zweites Sync-Ziel** (gehostete DB mit Realtime,
   Free-Tier, EU-Region) – gleiche Sync-Logik, andere URL → hybrid: Sync auch über LTE
   unterwegs, Monitor extern; Abwägung: Internetpflicht + Cloud-Datenschutz (Behörden).
+- **Echtzeit-Sync vom Feld (Tablet am iPhone-Hotspot, ELW mit LTE) – Optionen (offen,
+  Stand 20.07.2026):** Ohne Treffpunkt im Internet nicht möglich (getrennte Netze, LTE-NAT).
+  1. **Tailscale-VPN (Favorit):** beide Geräte im Overlay-Netz, vorhandener Server
+     funktioniert unverändert über die Tailscale-Adresse; ~1 h Aufwand, kostenlos, E2E.
+  2. **ELWIS-Server auf Mini-VPS** (https + Zugangs-Token nötig, ~½ Tag Entwicklung).
+  3. **Supabase-Adapter** (~1–2 Tage) – der richtige Weg fürs Verkaufsprodukt.
 - PouchDB/CouchDB bleibt als Alternative notiert, ist für 2 Geräte aber überdimensioniert.
 
 ### Konfliktfreiheit bei mehreren Erfassern
