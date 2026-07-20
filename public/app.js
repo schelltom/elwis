@@ -68,6 +68,8 @@ function defaultConfig(){
 }
 function defaultState(){
   return {
+    einsatzId: uid(),                      // Identität für den Sync (welcher Einsatz?)
+    einsatzStart: new Date().toISOString(),
     einsatz: { stichwort:"", ort:"", beginn:"", leiter:"", bemerkung:"" },
     einheiten: [], fuehrung: [], abschnitte: [], archiv: [],
     lage: { items: [], bg: "", snapshots: [] },
@@ -91,6 +93,11 @@ if(!Array.isArray(state.fotos)) state.fotos = [];
 if(!state.monHide || typeof state.monHide !== "object") state.monHide = { panels: {}, ab: {} };
 state.monHide.panels = state.monHide.panels || {};
 state.monHide.ab = state.monHide.ab || {};
+if(!state.einsatzId){
+  state.einsatzId = uid();
+  const b = state.einsatz && state.einsatz.beginn ? new Date(state.einsatz.beginn) : null;
+  state.einsatzStart = (b && !isNaN(b)) ? b.toISOString() : new Date().toISOString();
+}
 // Bestehende Fahrzeug-Symbole ohne Nummer nachnummerieren
 {
   let maxCar = state.lage.items.reduce((m,i) => i.type==="car" ? Math.max(m, i.num||0) : m, 0);
@@ -475,6 +482,7 @@ function importEinsatz(file){
       state.anforderungen = d.anforderungen || [];
       state.checks = d.checks || [];
       state.fotos = d.fotos || [];
+      state.einsatzId = uid(); state.einsatzStart = new Date().toISOString();
       try{ markChange(); }catch(err){
         state.fotos = []; state.lage.bg = "";
         markChange();
@@ -539,6 +547,7 @@ function endeEinsatz(){
     fotos: state.fotos.map(f => ({...f})),
   };
   state.archiv.push(entry);
+  state.einsatzId = uid(); state.einsatzStart = new Date().toISOString();
   state.einsatz = { stichwort:"", ort:"", beginn:nowLocalInput(), leiter:"", bemerkung:"" };
   state.einheiten = []; state.fuehrung = []; state.abschnitte = [];
   state.lage = { items: [], bg: "", snapshots: [] };
@@ -2632,3 +2641,168 @@ if("serviceWorker" in navigator && (location.protocol === "https:" || location.h
     navigator.serviceWorker.register("./sw.js").catch(() => {});
   });
 }
+
+/* ================================================================
+   Echter Sync mit dem ELW-Server (server/elwis-server.mjs)
+   ----------------------------------------------------------------
+   Läuft die App vom ELW-Server (gleiche Adresse), wird der Sync
+   automatisch aktiv: alle 3 s werden lokale Änderungen gepusht und
+   der zusammengeführte Serverstand übernommen (last-write-wins je
+   Datensatz, Löschungen über Tombstones). Gesynct wird ALLES zum
+   Einsatz; gerätelokal bleiben: Einstellungen, Monitor-Kacheln, Archiv.
+   ================================================================ */
+const SYNC = { aktiv:false, verbunden:false, seq:0, urls:[], clients:1, pending:0, busy:false };
+const SYNC_COLS = ["einheiten","fuehrung","abschnitte","funk","besprechungen",
+  "anforderungen","checks","fotos","lageItems","lageSnapshots"];
+
+function syncClientId(){
+  let id = localStorage.getItem("elwis-client-id");
+  if(!id){ id = uid(); localStorage.setItem("elwis-client-id", id); }
+  return id;
+}
+function syncColOf(name){
+  if(name === "lageItems") return state.lage.items;
+  if(name === "lageSnapshots") return state.lage.snapshots;
+  return state[name];
+}
+function syncSnapLoad(){
+  try{ return JSON.parse(localStorage.getItem("elwis-sync-snap")) || null; }catch(e){ return null; }
+}
+function syncSnapSave(s){
+  try{ localStorage.setItem("elwis-sync-snap", JSON.stringify(s)); }catch(e){}
+}
+function syncSnapshotVomZustand(){
+  const snap = { einsatzId: state.einsatzId,
+    singletons: { einsatz: JSON.stringify(state.einsatz), lageBg: JSON.stringify(state.lage.bg) },
+    collections: {} };
+  for(const name of SYNC_COLS){
+    const col = {};
+    for(const rec of (syncColOf(name) || [])) col[rec.id] = JSON.stringify(rec);
+    snap.collections[name] = col;
+  }
+  return snap;
+}
+/* Änderungen seit dem letzten Abgleich ermitteln (Diff gegen Snapshot) */
+function syncDiff(){
+  const snap = syncSnapLoad();
+  const passt = snap && snap.einsatzId === state.einsatzId;
+  const now = Date.now();
+  const out = { clientId: syncClientId(), einsatzId: state.einsatzId, einsatzStart: state.einsatzStart,
+    seq: SYNC.seq, singletons: {}, collections: {}, tombstones: {} };
+  let pending = 0;
+  const singles = { einsatz: state.einsatz, lageBg: state.lage.bg };
+  for(const k of Object.keys(singles)){
+    const j = JSON.stringify(singles[k]);
+    if(!passt || !snap.singletons || snap.singletons[k] !== j){
+      out.singletons[k] = { v: singles[k], _m: now };
+      pending++;
+    }
+  }
+  for(const name of SYNC_COLS){
+    const arr = syncColOf(name) || [];
+    const snapCol = (passt && snap.collections && snap.collections[name]) || {};
+    const changed = [];
+    const ids = new Set();
+    for(const rec of arr){
+      ids.add(String(rec.id));
+      if(snapCol[rec.id] !== JSON.stringify(rec)){
+        rec._m = now;
+        changed.push(rec);
+      }
+    }
+    const tomb = {};
+    for(const id of Object.keys(snapCol)){
+      if(!ids.has(id)){ tomb[id] = now; pending++; }
+    }
+    if(changed.length) out.collections[name] = changed;
+    if(Object.keys(tomb).length) out.tombstones[name] = tomb;
+    pending += changed.length;
+  }
+  return { out, pending };
+}
+/* Zusammengeführten Serverstand übernehmen (eigene Änderungen waren im Push enthalten) */
+function syncApply(server){
+  state.einsatzId = server.einsatzId;
+  state.einsatzStart = server.einsatzStart;
+  if(server.singletons && server.singletons.einsatz) state.einsatz = server.singletons.einsatz.v;
+  if(server.singletons && server.singletons.lageBg) state.lage.bg = server.singletons.lageBg.v || "";
+  for(const name of SYNC_COLS){
+    const arr = (server.collections && server.collections[name]) || [];
+    if(name === "lageItems") state.lage.items = arr;
+    else if(name === "lageSnapshots") state.lage.snapshots = arr;
+    else state[name] = arr;
+  }
+  syncSnapSave(syncSnapshotVomZustand());
+  save();
+}
+function syncTipptGerade(){
+  const a = document.activeElement;
+  return a && (a.tagName === "INPUT" || a.tagName === "TEXTAREA" || a.tagName === "SELECT");
+}
+async function syncTick(){
+  if(SYNC.busy) return;
+  SYNC.busy = true;
+  try{
+    const { out, pending } = syncDiff();
+    SYNC.pending = pending;
+    const vorher = JSON.stringify(syncSnapshotVomZustand());
+    const res = await fetch("./api/sync", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(out),
+    });
+    if(!res.ok) throw new Error("HTTP " + res.status);
+    const d = await res.json();
+    SYNC.verbunden = true;
+    SYNC.clients = d.clients || 1;
+    SYNC.seq = d.seq;
+    if(!d.unchanged){
+      syncApply(d);
+      SYNC.pending = 0;
+      // Nur neu zeichnen, wenn sich wirklich etwas geändert hat und niemand gerade tippt
+      if(JSON.stringify(syncSnapshotVomZustand()) !== vorher && !syncTipptGerade()) render();
+      else renderHeader();
+    }else{
+      if(pending === 0) SYNC.pending = 0;
+      renderHeader();
+    }
+  }catch(err){
+    SYNC.verbunden = false;
+    renderHeader();
+  }finally{
+    SYNC.busy = false;
+  }
+}
+function syncPill(){
+  if(!SYNC.aktiv) return;
+  const pill = $("#syncPill"), txt = $("#syncText"), sw = $("#wlanSwitch");
+  if(sw) sw.style.display = "none"; // Simulations-Schalter weg, der Sync ist echt
+  if(!pill || !txt) return;
+  pill.classList.remove("busy");
+  if(SYNC.verbunden){
+    pill.classList.add("good");
+    txt.textContent = `Synchron · ${SYNC.clients} Gerät${SYNC.clients === 1 ? "" : "e"}`;
+  }else{
+    pill.classList.remove("good");
+    txt.textContent = `Offline · ${SYNC.pending} lokal`;
+  }
+  const fn = $("#footNote");
+  if(fn && SYNC.urls.length){
+    fn.textContent = "ELWIS-Sync aktiv · Tablets im gleichen WLAN verbinden über: " + SYNC.urls.join("  ·  ");
+  }
+}
+const _origRenderHeader = renderHeader;
+renderHeader = function(){ _origRenderHeader(); syncPill(); };
+
+(async function syncInit(){
+  try{
+    const res = await fetch("./api/info", { cache: "no-store" });
+    if(!res.ok) return;
+    const d = await res.json();
+    if(!d || !d.elwis) return;
+    SYNC.aktiv = true;
+    SYNC.urls = d.urls || [];
+    syncTick();
+    setInterval(syncTick, 3000);
+    render();
+  }catch(e){ /* kein ELW-Server erreichbar → App läuft eigenständig weiter */ }
+})();

@@ -82,7 +82,14 @@ aktuellen Stand.
 
 ### Sync (der einzige Punkt, den GitHub Pages nicht kann)
 
-**Entschiedenes Konzept (Stand Juli 2026):** Szenario ist meist „ELW-Rechner + 1 Tablet
+**Umgesetzt (v1, 20.07.2026):** `server/elwis-server.mjs` (null Abhängigkeiten, `npm run server`,
+Port 8474) liefert die App im WLAN aus und führt Änderungen aller Geräte zusammen
+(LWW je Datensatz per `_m`-Zeitstempel, Tombstones für Löschungen, Diff-basierte Erkennung
+in der App gegen einen Sync-Snapshot in localStorage, Poll alle 3 s, kompakte Antwort bei
+unverändertem Stand). Kopplung v1 = Tablets öffnen die angezeigte Server-URL (QR folgt).
+Neuer Einsatz (`einsatzId` + `einsatzStart`) ersetzt serverseitig den alten.
+
+**Ursprüngliches Konzept:** Szenario ist meist „ELW-Rechner + 1 Tablet
 unterwegs, Rückkehr ins gleiche WLAN“.
 
 - **Kern: lokaler Serverteil im ELW** – kleines Node-Programm (~100–200 Zeilen:
