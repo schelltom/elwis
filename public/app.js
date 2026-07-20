@@ -72,7 +72,7 @@ function defaultState(){
     einsatzStart: new Date().toISOString(),
     einsatz: { stichwort:"", ort:"", beginn:"", leiter:"", bemerkung:"" },
     einheiten: [], fuehrung: [], abschnitte: [], archiv: [],
-    lage: { items: [], bg: "", snapshots: [], mode: "raster" },
+    lage: { items: [], bg: "", snapshots: [], mode: "raster", mapView: null },
     funk: [], besprechungen: [], anforderungen: [], checks: [], fotos: [],
     monHide: { panels: {}, ab: {} },
     config: defaultConfig(),
@@ -571,7 +571,8 @@ function baueArchivEintrag(){
     besprechungen: state.besprechungen.map(b => ({...b})),
     anforderungen: state.anforderungen.map(a => ({...a})),
     checks: state.checks.map(c => ({...c, punkte:c.punkte.map(p => ({...p}))})),
-    lage: { bg: state.lage.bg, items: state.lage.items.map(i => ({...i})),
+    lage: { bg: state.lage.bg, mode: state.lage.mode, mapView: state.lage.mapView,
+      items: state.lage.items.map(i => ({...i})),
       snapshots: state.lage.snapshots.map(s => ({...s, items: s.items.map(i => ({...i}))})) },
     fotos: state.fotos.map(f => ({...f})),
   };
@@ -615,7 +616,7 @@ async function endeEinsatz(){
   state.einsatzId = uid(); state.einsatzStart = new Date().toISOString();
   state.einsatz = { stichwort:"", ort:"", beginn:nowLocalInput(), leiter:"", bemerkung:"" };
   state.einheiten = []; state.fuehrung = []; state.abschnitte = [];
-  state.lage = { items: [], bg: "", snapshots: [], mode: "raster" };
+  state.lage = { items: [], bg: "", snapshots: [], mode: "raster", mapView: null };
   state.funk = []; state.besprechungen = [];
   state.anforderungen = []; state.checks = []; state.fotos = [];
   try{ markChange(); }catch(err){
@@ -1705,12 +1706,16 @@ function renderMonitor(){
             <div class="panel-head"><h3>Lagekarte</h3>
               <button class="ab-jump" id="monLgEdit" style="margin-left:10px">Karte bearbeiten</button>
               ${abPager}</div>
+            ${state.lage.mode === "karte" ? `
+            <div class="lg-wrap" style="display:grid;place-items:center;text-align:center;padding:30px;pointer-events:none">
+              <p class="hint" style="margin:0">Online-Kartenmodus aktiv – Live-Karte über „Karte bearbeiten“.</p>
+            </div>` : `
             <div class="lg-wrap" style="pointer-events:none;overflow:hidden">
               <div class="lg-canvas ${state.lage.bg ? "hasbg" : ""}" ${state.lage.bg ? `style="background-image:url('${state.lage.bg}')"` : ""}>
                 ${lgShapesSvg(state.lage.items, null)}
-                ${state.lage.items.map(lgMarkerHtml).join("")}
+                ${state.lage.items.filter(i => i.x != null).map(lgMarkerHtml).join("")}
               </div>
-            </div>
+            </div>`}
           </div>
           <div><h3 style="font-size:.72rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--ink3);margin:0 0 10px">Legende</h3>
             ${legRows || `<p class="hint">Noch keine Symbole auf der Karte.</p>`}
@@ -1949,7 +1954,9 @@ function symTile(s, small){
   return `<span class="lg-sym ${s.circle ? "circle" : ""}" style="--sc:${s.color};${small ? "transform:scale(.85)" : ""}">${inner}</span>`;
 }
 function lgShapesSvg(items, draw){
+  items = items.filter(i => i.type === "line" || i.type === "area");
   const shape = i => {
+    if(!Array.isArray(i.points)) return "";   // Geo-Flächen (Kartenmodus) hier überspringen
     const pts = i.points.map(p => `${p.x},${p.y}`).join(" ");
     const col = `var(--${LG_SHAPE_COLORS.includes(i.color) ? i.color : "fw"})`;
     return i.type === "area"
@@ -1966,7 +1973,7 @@ function lgShapesSvg(items, draw){
     ${items.filter(i => i.type === "line" || i.type === "area").map(shape).join("")}${tmp}
   </svg>`;
   // Beschriftung verknüpfter Abschnittsflächen (HTML-Overlay, damit Text nicht verzerrt)
-  const labels = items.filter(i => i.type === "area" && i.abschnittId).map(i => {
+  const labels = items.filter(i => i.type === "area" && i.abschnittId && Array.isArray(i.points)).map(i => {
     const a = state.abschnitte.find(x => x.id === i.abschnittId);
     if(!a) return "";
     const cx = i.points.reduce((s,p) => s + p.x, 0) / i.points.length;
@@ -1985,14 +1992,16 @@ function lgDefaultLabel(t){
   return { el:"Einsatzleitung", brand:"Brand", gefahr:"Gefahr", wasser:"Wasser",
     patient:"V-Ablage", text:"Text", fw:"", thw:"", brk:"", pol:"" }[t] ?? "";
 }
-function lgMarkerHtml(i){
-  let sym;
+/* Symbol + Beschriftung eines Markers (ohne Positionierung) – für Prozent-Canvas UND Leaflet-DivIcon */
+function lgMarkerInner(i){
+  let sym, lbl = "";
   if(i.type === "car"){
     const u = state.einheiten.find(x => x.id === i.unitId);
     const color = u ? `var(${(ORGS[u.org]||ORGS.SON).cssVar})` : "var(--ink3)";
     const kurz = u ? (u.kennung || u.name) : "";
     sym = `<span class="lg-car" style="color:${color}">${LG_CAR_SVG}<b class="car-num">${esc(i.num||"?")}</b></span>`;
-    return `<div class="lg-item" data-id="${esc(i.id)}" style="left:${i.x}%;top:${i.y}%">${sym}${kurz ? `<span class="lg-lbl">${esc(kurz)}</span>` : ""}</div>`;
+    if(kurz) lbl = `<span class="lg-lbl">${esc(kurz)}</span>`;
+    return sym + lbl;
   }
   if(i.type === "unit"){
     sym = `<span class="lg-rect" style="--oc:var(${(ORGS[i.org]||ORGS.SON).cssVar})">${esc(i.kurz || "?")}</span>`;
@@ -2011,8 +2020,11 @@ function lgMarkerHtml(i){
   }
   else { sym = `<span class="lg-text">${esc(i.label || "Text")}</span>`; }
   // Nummern-Marker bewusst ohne Beschriftung auf der Karte – Text steht in der Legende
-  const lbl = (i.type !== "text" && i.type !== "num" && i.label) ? `<span class="lg-lbl">${esc(i.label)}</span>` : "";
-  return `<div class="lg-item" data-id="${esc(i.id)}" style="left:${i.x}%;top:${i.y}%">${sym}${lbl}</div>`;
+  if(i.type !== "text" && i.type !== "num" && i.label) lbl = `<span class="lg-lbl">${esc(i.label)}</span>`;
+  return sym + lbl;
+}
+function lgMarkerHtml(i){
+  return `<div class="lg-item" data-id="${esc(i.id)}" style="left:${i.x}%;top:${i.y}%">${lgMarkerInner(i)}</div>`;
 }
 function lgCarOptions(currentUnitId){
   const usedIds = new Set(state.lage.items
@@ -2092,13 +2104,8 @@ function renderLagekarte(){
     ${statusText ? `<div class="lg-status">${esc(statusText)}<span style="margin-left:auto">${drawButtons}</span><button id="lgCancel">Abbrechen</button></div>` : ""}
     ${state.lage.mode === "karte" ? `
     <div class="lg-layout ${lgBig ? "big" : ""}">
-      <div class="lg-wrap" style="display:grid;place-items:center;text-align:center;padding:30px">
-        <div style="max-width:440px">
-          <h3 style="margin:0 0 8px;font-size:1.15rem;font-weight:750">Online-Karte folgt</h3>
-          <p class="hint" style="margin:0">Der Kartenmodus (Leaflet mit TopPlusOpen/BayernAtlas) ist als nächster
-          Ausbauschritt vorgesehen. Bis dahin: <strong>Raster</strong> oder ein <strong>Bild</strong>
-          (Screenshot aus dem BayernAtlas – Knopf unten oder Strg+V) als Hintergrund nutzen.</p>
-        </div>
+      <div class="lg-wrap" id="lgWrap" style="overflow:hidden">
+        <div id="lgMap"></div>
       </div>
       ${legend}
     </div>` : `
@@ -2107,7 +2114,7 @@ function renderLagekarte(){
         <div class="lg-canvas ${(state.lage.mode==="bild" && state.lage.bg) ? "hasbg" : ""}" id="lgCanvas"
           style="width:${lgZoom*100}%;height:${lgZoom*100}%;${(state.lage.mode==="bild" && state.lage.bg) ? `background-image:url('${state.lage.bg}')` : ""}">
           ${lgShapesSvg(state.lage.items, lgDraw)}
-          ${state.lage.items.map(lgMarkerHtml).join("")}
+          ${state.lage.items.filter(i => i.x != null).map(lgMarkerHtml).join("")}
         </div>
       </div>
       ${legend}
@@ -2219,8 +2226,122 @@ function renderFunkskizze(){
     <div class="fk-hwrap">${branches}</div>
   </div>`;
 }
+/* ==================== Lagekarte: Online-Karten-Modus (Leaflet) ==================== */
+let lgMapObj = null, lgMapLayer = null;
+function lgMapTeardown(){
+  if(lgMapObj){ try{ lgMapObj.remove(); }catch(e){} }
+  lgMapObj = null; lgMapLayer = null;
+}
+function lgAccentHex(name){
+  const v = getComputedStyle(document.documentElement).getPropertyValue("--" + (LG_SHAPE_COLORS.includes(name)?name:"fw")).trim();
+  return v || "#C4232B";
+}
+function lgMapSetup(){
+  const el = document.getElementById("lgMap");
+  if(!el || typeof L === "undefined") return;
+  lgMapTeardown();
+  const v = state.lage.mapView || { center:[49.6767, 12.1625], zoom:14 };
+  lgMapObj = L.map(el, { zoomControl:true }).setView(v.center, v.zoom);
+  L.tileLayer("https://sgx.geodatenzentrum.de/wmts_topplus_open/tile/1.0.0/web/default/WEBMERCATOR/{z}/{y}/{x}.png",
+    { maxZoom:18, attribution:"© Bundesamt für Kartographie und Geodäsie (TopPlusOpen)" }).addTo(lgMapObj);
+  lgMapLayer = L.layerGroup().addTo(lgMapObj);
+  lgMapObj.on("moveend zoomend", () => {
+    if(!lgMapObj) return;
+    const c = lgMapObj.getCenter();
+    state.lage.mapView = { center:[c.lat, c.lng], zoom: lgMapObj.getZoom() };
+    save();
+  });
+  lgMapObj.on("click", e => lgMapClick(e.latlng));
+  setTimeout(() => { if(lgMapObj) lgMapObj.invalidateSize(); }, 60);
+  lgMapRenderLayers();
+}
+function lgDivIcon(inner){
+  return L.divIcon({ html:`<div class="lg-mk">${inner}</div>`, className:"lg-divicon", iconSize:[0,0] });
+}
+function lgMapRenderLayers(){
+  if(!lgMapLayer) return;
+  lgMapLayer.clearLayers();
+  // Linien & Flächen (Geo)
+  for(const i of state.lage.items){
+    if((i.type === "line" || i.type === "area") && Array.isArray(i.llpoints)){
+      const col = lgAccentHex(i.color);
+      const ll = i.llpoints.map(p => [p.lat, p.lng]);
+      const shp = i.type === "area"
+        ? L.polygon(ll, { color:col, weight:3.5, fillOpacity:0.22 })
+        : L.polyline(ll, { color:col, weight:3.5 });
+      shp.on("click", ev => { L.DomEvent.stop(ev); openLgShapeEdit(i.id); });
+      shp.addTo(lgMapLayer);
+      if(i.type === "area" && i.abschnittId){
+        const a = state.abschnitte.find(x => x.id === i.abschnittId);
+        if(a) L.marker(shp.getBounds().getCenter(),
+          { interactive:false, icon: lgDivIcon(`<span class="lg-arealbl" style="position:static;transform:none">${esc(a.name)}</span>`) }).addTo(lgMapLayer);
+      }
+    }
+  }
+  // Marker (Geo)
+  for(const i of state.lage.items){
+    if(!i.ll) continue;
+    const m = L.marker(i.ll, { draggable:true, icon: lgDivIcon(lgMarkerInner(i)) });
+    m.on("click", () => openLgEdit(i.id));
+    m.on("dragend", () => { const p = m.getLatLng(); i.ll = [p.lat, p.lng]; markChange(); });
+    m.addTo(lgMapLayer);
+  }
+  // Zeichnung in Arbeit
+  if(lgDraw && lgDraw.geo && lgDraw.points.length){
+    const pts = lgDraw.points.map(p => [p.lat, p.lng]);
+    L.polyline(pts, { color:"#C4232B", dashArray:"6 6", weight:3 }).addTo(lgMapLayer);
+    for(const p of pts) L.circleMarker(p, { radius:4, color:"#C4232B", fillColor:"#C4232B", fillOpacity:1 }).addTo(lgMapLayer);
+  }
+  lgDrawbar();
+}
+function lgDrawbar(){
+  const el = document.getElementById("lgMap");
+  if(!el) return;
+  let bar = el.querySelector(".lg-drawbar");
+  if(!(lgDraw && lgDraw.geo)){ if(bar) bar.remove(); return; }
+  const need = lgDraw.type === "area" ? 3 : 2;
+  if(!bar){ bar = document.createElement("div"); bar.className = "lg-drawbar"; el.appendChild(bar); }
+  bar.innerHTML = `<span>${lgDraw.type === "area" ? "Fläche" : "Linie"}: ${lgDraw.points.length} Punkt${lgDraw.points.length===1?"":"e"}${lgDraw.points.length<need?` (mind. ${need})`:""}</span>
+    ${lgDraw.points.length>=need?`<button data-dr="ok">Fertig</button>`:""}
+    <button data-dr="x">Abbrechen</button>`;
+  bar.querySelectorAll("[data-dr]").forEach(b => b.addEventListener("click", ev => {
+    ev.stopPropagation();
+    if(b.dataset.dr === "x"){ lgDraw = null; lgTool = null; render(); return; }
+    const it = { id:uid(), type:lgDraw.type, llpoints:lgDraw.points.slice(), color:"fw" };
+    state.lage.items.push(it); const nid = it.id;
+    lgDraw = null; lgTool = null; markChange(); render(); openLgShapeEdit(nid);
+  }));
+}
+function lgMapClick(latlng){
+  const ll = [latlng.lat, latlng.lng];
+  if(lgTool === "line" || lgTool === "area"){
+    if(!lgDraw || !lgDraw.geo) lgDraw = { type:lgTool, geo:true, points:[] };
+    lgDraw.points.push({ lat:latlng.lat, lng:latlng.lng });
+    lgMapRenderLayers();
+    return;
+  }
+  if(!lgTool) return;
+  if(lgTool === "car"){
+    const num = state.lage.items.filter(i => i.type==="car").reduce((m,i)=>Math.max(m,i.num||0),0)+1;
+    const it = { id:uid(), type:"car", num, unitId:"", ll };
+    state.lage.items.push(it); lgTool = null; markChange(); render(); openLgEdit(it.id); return;
+  }
+  if(lgTool === "num"){
+    const num = state.lage.items.filter(i => i.type==="num").reduce((m,i)=>Math.max(m,i.num||0),0)+1;
+    const it = { id:uid(), type:"num", num, text:"", ll };
+    state.lage.items.push(it); lgTool = null; markChange(); render(); openLgEdit(it.id); return;
+  }
+  if(lgTool.startsWith("sym:")){
+    state.lage.items.push({ id:uid(), type:"sym", sym:lgTool.slice(4), label:"", ll });
+    lgTool = null; markChange(); render(); return;
+  }
+  state.lage.items.push({ id:uid(), type:lgTool, label:lgDefaultLabel(lgTool), ll });
+  lgTool = null; markChange(); render();
+}
+
 function wireLagekarte(){
   $("#lgToMonitor").addEventListener("click", () => { state.view = "monitor"; save(); render(); });
+  if(state.lage.mode === "karte") lgMapSetup();
   document.querySelectorAll("[data-lgmode]").forEach(b => b.addEventListener("click", () => {
     state.lage.mode = b.dataset.lgmode;
     lgTool = null; lgDraw = null;
@@ -2419,7 +2540,7 @@ function openLgSnapshot(id){
       <div class="lg-wrap" style="pointer-events:none;overflow:hidden">
         <div class="lg-canvas ${s.bg ? "hasbg" : ""}" ${s.bg ? `style="background-image:url('${s.bg}')"` : ""}>
           ${lgShapesSvg(s.items, null)}
-          ${s.items.map(lgMarkerHtml).join("")}
+          ${s.items.filter(i => i.x != null).map(lgMarkerHtml).join("")}
         </div>
       </div>
       ${nums.length ? `
@@ -2583,10 +2704,14 @@ function openLgEdit(id){
 
 /* ---------------- Druck: Einsatzbericht ---------------- */
 function printMapHtml(lage){
+  if(lage.mode === "karte"){
+    return `<p style="font-size:10pt">Lagekarte im Online-Kartenmodus – für den Ausdruck bitte am Gerät
+      einen Screenshot der Karte erstellen und als Bild-Hintergrund einfügen. Die Legende steht unten.</p>`;
+  }
   return `<div class="p-map">
     <div class="lg-canvas ${lage.bg ? "hasbg" : ""}" ${lage.bg ? `style="background-image:url('${lage.bg}')"` : ""}>
       ${lgShapesSvg(lage.items, null)}
-      ${lage.items.map(lgMarkerHtml).join("")}
+      ${lage.items.filter(i => i.x != null).map(lgMarkerHtml).join("")}
     </div>
   </div>`;
 }
@@ -2729,6 +2854,7 @@ function doPrint(data){
 
 /* ---------------- Render-Hauptschleife ---------------- */
 function render(){
+  lgMapTeardown();  // Leaflet-Karte vor dem Neuaufbau des DOM sauber entfernen
   renderHeader();
   document.querySelectorAll("nav [data-tab]").forEach(b =>
     b.classList.toggle("active", b.dataset.tab === state.view));

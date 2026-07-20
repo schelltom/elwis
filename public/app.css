@@ -733,3 +733,16 @@
   font-size:.8rem;font-weight:800;color:var(--fw);text-align:center;white-space:nowrap;
   background:color-mix(in oklab,var(--surface) 82%,transparent);padding:2px 8px;border-radius:6px}
 @media (min-width:1500px){.lg-arealbl{font-size:1rem}}
+
+/* ---------- Lagekarte: Online-Karte (Leaflet) ---------- */
+#lgMap{width:100%;height:100%;background:var(--surface2)}
+.leaflet-container{font:inherit}
+.lg-divicon{background:none;border:none}
+.lg-mk{position:absolute;transform:translate(-50%,-50%);display:flex;flex-direction:column;align-items:center;gap:2px}
+.lg-drawbar{position:absolute;top:10px;left:50%;transform:translateX(-50%);z-index:1000;
+  display:flex;align-items:center;gap:10px;background:var(--surface);color:var(--ink);
+  border:1px solid var(--line);border-radius:10px;box-shadow:var(--shadow);
+  padding:8px 12px;font-size:.85rem;font-weight:650}
+.lg-drawbar button{min-height:40px;padding:6px 14px;border-radius:8px;font-weight:700;
+  border:1.5px solid var(--line);background:var(--surface);color:var(--ink)}
+.lg-drawbar button[data-dr="ok"]{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
