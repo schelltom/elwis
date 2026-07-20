@@ -72,7 +72,7 @@ function defaultState(){
     einsatzStart: new Date().toISOString(),
     einsatz: { stichwort:"", ort:"", beginn:"", leiter:"", bemerkung:"" },
     einheiten: [], fuehrung: [], abschnitte: [], archiv: [],
-    lage: { items: [], bg: "", snapshots: [] },
+    lage: { items: [], bg: "", snapshots: [], mode: "raster" },
     funk: [], besprechungen: [], anforderungen: [], checks: [], fotos: [],
     monHide: { panels: {}, ab: {} },
     config: defaultConfig(),
@@ -85,6 +85,7 @@ state.config = Object.assign(defaultConfig(), stored.config || {});
 state.config.prefixes = Object.assign(defaultConfig().prefixes, (stored.config||{}).prefixes || {});
 if(!state.lage || !Array.isArray(state.lage.items)) state.lage = { items: [], bg: "" };
 if(!Array.isArray(state.lage.snapshots)) state.lage.snapshots = [];
+if(!state.lage.mode) state.lage.mode = state.lage.bg ? "bild" : "raster";
 if(!Array.isArray(state.funk)) state.funk = [];
 if(!Array.isArray(state.besprechungen)) state.besprechungen = [];
 if(!Array.isArray(state.anforderungen)) state.anforderungen = [];
@@ -614,7 +615,7 @@ async function endeEinsatz(){
   state.einsatzId = uid(); state.einsatzStart = new Date().toISOString();
   state.einsatz = { stichwort:"", ort:"", beginn:nowLocalInput(), leiter:"", bemerkung:"" };
   state.einheiten = []; state.fuehrung = []; state.abschnitte = [];
-  state.lage = { items: [], bg: "", snapshots: [] };
+  state.lage = { items: [], bg: "", snapshots: [], mode: "raster" };
   state.funk = []; state.besprechungen = [];
   state.anforderungen = []; state.checks = []; state.fotos = [];
   try{ markChange(); }catch(err){
@@ -2082,18 +2083,35 @@ function renderLagekarte(){
       <button class="btn btn-ghost" id="lgBigBtn" style="margin-right:8px">${lgBig ? "Großansicht beenden" : "Großansicht / Vollbild"}</button>
       <button class="btn btn-primary" id="lgToMonitor">Zum Monitor</button>
     </div>
+    <div class="seg" role="tablist" style="max-width:420px">
+      <button role="tab" data-lgmode="raster" class="${state.lage.mode==="raster"?"active":""}">Raster</button>
+      <button role="tab" data-lgmode="bild" class="${state.lage.mode==="bild"?"active":""}">Bild</button>
+      <button role="tab" data-lgmode="karte" class="${state.lage.mode==="karte"?"active":""}">Karte (online)</button>
+    </div>
     <div class="lg-toolbar">${tools}</div>
     ${statusText ? `<div class="lg-status">${esc(statusText)}<span style="margin-left:auto">${drawButtons}</span><button id="lgCancel">Abbrechen</button></div>` : ""}
+    ${state.lage.mode === "karte" ? `
+    <div class="lg-layout ${lgBig ? "big" : ""}">
+      <div class="lg-wrap" style="display:grid;place-items:center;text-align:center;padding:30px">
+        <div style="max-width:440px">
+          <h3 style="margin:0 0 8px;font-size:1.15rem;font-weight:750">Online-Karte folgt</h3>
+          <p class="hint" style="margin:0">Der Kartenmodus (Leaflet mit TopPlusOpen/BayernAtlas) ist als nächster
+          Ausbauschritt vorgesehen. Bis dahin: <strong>Raster</strong> oder ein <strong>Bild</strong>
+          (Screenshot aus dem BayernAtlas – Knopf unten oder Strg+V) als Hintergrund nutzen.</p>
+        </div>
+      </div>
+      ${legend}
+    </div>` : `
     <div class="lg-layout ${lgBig ? "big" : ""}">
       <div class="lg-wrap" id="lgWrap">
-        <div class="lg-canvas ${state.lage.bg ? "hasbg" : ""}" id="lgCanvas"
-          style="width:${lgZoom*100}%;height:${lgZoom*100}%;${state.lage.bg ? `background-image:url('${state.lage.bg}')` : ""}">
+        <div class="lg-canvas ${(state.lage.mode==="bild" && state.lage.bg) ? "hasbg" : ""}" id="lgCanvas"
+          style="width:${lgZoom*100}%;height:${lgZoom*100}%;${(state.lage.mode==="bild" && state.lage.bg) ? `background-image:url('${state.lage.bg}')` : ""}">
           ${lgShapesSvg(state.lage.items, lgDraw)}
           ${state.lage.items.map(lgMarkerHtml).join("")}
         </div>
       </div>
       ${legend}
-    </div>
+    </div>`}
     <p class="hint">Symbol wählen und auf die Karte tippen · Symbole mit dem Finger verschieben · Antippen zum Beschriften oder Löschen · Nummern-Marker halten die Karte frei, der Text steht in der Legende.</p>
     <div class="lg-bgrow">
       <button class="btn btn-ghost" id="lgBgBtn">Foto / Lageplan als Hintergrund</button>
@@ -2119,12 +2137,14 @@ function renderLagekarte(){
   </div>` : ""}
   <div class="card">
     <h2>Ausbaustufe</h2>
-    <p class="hint" style="margin:0">Im Endausbau: Offline-Straßenkarte (Leaflet mit vorab geladenen Kacheln),
-    Einsatzabschnitte als Flächen, Sync auf alle Geräte und den Einsatzmonitor.</p>
+    <p class="hint" style="margin:0">Hintergrund umschaltbar: <strong>Raster</strong> · <strong>Bild</strong>
+    (Screenshot/Foto, auch aus der Zwischenablage) · <strong>Karte (online)</strong>. Der Online-Kartenmodus
+    (Leaflet mit TopPlusOpen/BayernAtlas) folgt als nächster Ausbauschritt; danach optional Offline-Kacheln.</p>
   </div>`;
 }
 function setLgBg(data){
   state.lage.bg = data;
+  state.lage.mode = "bild";
   try{ markChange(); }catch(err){ modalInfo("Bild zu groß für den lokalen Speicher."); state.lage.bg = ""; }
   render();
 }
@@ -2201,6 +2221,11 @@ function renderFunkskizze(){
 }
 function wireLagekarte(){
   $("#lgToMonitor").addEventListener("click", () => { state.view = "monitor"; save(); render(); });
+  document.querySelectorAll("[data-lgmode]").forEach(b => b.addEventListener("click", () => {
+    state.lage.mode = b.dataset.lgmode;
+    lgTool = null; lgDraw = null;
+    markChange(); render();
+  }));
   $("#lgSnapBtn").addEventListener("click", () => { lgFreeze(); render(); });
   document.querySelectorAll("[data-lgsnap]").forEach(b =>
     b.addEventListener("click", () => openLgSnapshot(b.dataset.lgsnap)));
@@ -2252,12 +2277,13 @@ function wireLagekarte(){
     if(!file) return;
     resizeImage(file, 1920, data => {
       state.lage.bg = data;
+      state.lage.mode = "bild";
       try{ markChange(); }catch(err){ modalInfo("Bild zu groß für den lokalen Speicher – bitte kleineres Foto wählen."); state.lage.bg = ""; }
       render();
     });
   });
   const bgDel = $("#lgBgDel");
-  if(bgDel) bgDel.addEventListener("click", () => { state.lage.bg = ""; markChange(); render(); });
+  if(bgDel) bgDel.addEventListener("click", () => { state.lage.bg = ""; state.lage.mode = "raster"; markChange(); render(); });
   $("#lgBgPaste").addEventListener("click", async () => {
     try{
       const items = await navigator.clipboard.read();
@@ -2281,9 +2307,10 @@ function wireLagekarte(){
     });
   });
 
-  // Zoom: Canvas wächst, Verschieben über natives Scrollen/Wischen im Wrap
+  // Zoom + Zeichnen nur im Raster-/Bild-Modus (im Karten-Modus gibt es keine Canvas)
   const wrap = $("#lgWrap");
   const canvas = $("#lgCanvas");
+  if(!wrap || !canvas) return;
   const setZoom = z => {
     const old = lgZoom;
     lgZoom = Math.min(4, Math.max(1, z));
