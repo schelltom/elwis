@@ -186,42 +186,64 @@
   .wlan-switch[aria-checked="true"] .track{background:var(--good)}
   .wlan-switch[aria-checked="true"] .track::after{transform:translateX(20px)}
 
-  main{flex:1;width:100%;max-width:720px;margin:0 auto;padding:18px 14px 96px}
+  main{flex:1;width:100%;max-width:720px;margin:0 auto;padding:18px 14px 40px}
   main.w-tablet{max-width:980px}   /* Kräfteerfassung: 10-Zoll-Tablet */
   main.w-desk{max-width:1100px}    /* Einsatz & Funk: 22-Zoll-Monitor am ELW */
   main.wide{max-width:1720px}      /* Einsatzmonitor & Lagekarte: volle Breite */
   /* Funkliste auf dem großen Monitor zweispaltig */
   @media (min-width:1100px){.fs-list{display:grid;grid-template-columns:1fr 1fr;align-items:start}}
 
-  /* ---------- Navigation: unten (Telefon) / Seitenleiste (Tablet) ---------- */
-  nav.tabs{
-    position:fixed;left:0;right:0;bottom:0;z-index:20;
-    background:var(--surface);border-top:1px solid var(--line);
-    display:flex;justify-content:space-around;
-    padding:6px 8px calc(6px + env(safe-area-inset-bottom))}
-  nav.tabs button, nav.rail button{
-    min-height:56px;border-radius:12px;
-    display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;
-    font-size:.7rem;font-weight:650;letter-spacing:.03em;color:var(--ink3)}
-  nav.tabs button{flex:1;max-width:150px}
+  /* ---------- Navigation: Burger-Menü (Handy) / Seitenleiste (ab 10 Zoll) ---------- */
+  nav.tabs{display:none}   /* alte Fußleiste entfernt – ersetzt durch Burger-Drawer */
   nav svg{width:24px;height:24px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;flex:none}
-  nav.tabs button.active, nav.rail button.active{color:var(--accent);background:color-mix(in oklab,var(--accent) 9%,transparent)}
+
+  .menu-burger{display:grid}                 /* auf dem Handy sichtbar */
+  @media (min-width:900px){.menu-burger{display:none}}
+
+  /* Off-canvas-Drawer */
+  .drawer-backdrop{position:fixed;inset:0;z-index:50;background:rgba(20,16,14,.5)}
+  .drawer{position:fixed;left:0;top:0;bottom:0;z-index:51;width:min(300px,82vw);
+    background:var(--surface);border-right:1px solid var(--line);box-shadow:6px 0 40px rgba(0,0,0,.3);
+    display:flex;flex-direction:column;padding:14px 12px calc(14px + env(safe-area-inset-bottom));
+    overflow-y:auto}
+  .drawer-head{display:flex;align-items:center;gap:10px;padding:6px 6px 14px;margin-bottom:6px;
+    border-bottom:1px solid var(--line)}
+  .drawer-head .brand-mark{width:38px;height:38px}
+  .drawer-head h2{margin:0;font-size:1.05rem;font-weight:800}
+  .drawer button[data-tab]{display:flex;align-items:center;gap:14px;width:100%;text-align:left;
+    min-height:60px;padding:12px 14px;border-radius:12px;font-size:1.05rem;font-weight:650;color:var(--ink)}
+  .drawer button[data-tab] svg{width:26px;height:26px}
+  .drawer button[data-tab].active{color:var(--accent);background:color-mix(in oklab,var(--accent) 10%,transparent)}
+  .drawer button[data-tab]:active{background:var(--surface2)}
 
   nav.rail{
     display:none;position:fixed;left:0;top:0;bottom:0;width:96px;z-index:30;
     background:var(--surface);border-right:1px solid var(--line);
     flex-direction:column;gap:6px;padding:14px 8px;overflow-y:auto}
+  nav.rail button{
+    width:100%;min-height:64px;border-radius:12px;
+    display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;
+    font-size:.7rem;font-weight:650;letter-spacing:.03em;color:var(--ink3)}
   nav.rail .rail-brand{
     width:44px;height:44px;border-radius:11px;margin:2px auto 16px;
     background:var(--accent);color:var(--accent-ink);
-    display:grid;place-items:center;font-weight:800;font-size:.85rem;
-    font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace}
-  nav.rail button{width:100%;min-height:64px}
+    display:grid;place-items:center;font-weight:800;font-size:.85rem}
+  nav.rail button.active{color:var(--accent);background:color-mix(in oklab,var(--accent) 9%,transparent)}
   @media (min-width:900px){
     :root{--rail:96px}
-    nav.tabs{display:none}
     nav.rail{display:flex}
     main{padding-bottom:32px}
+  }
+
+  /* Auf dem Handy größere, fingerfreundliche Bedienelemente */
+  @media (max-width:899px){
+    .seg button{min-height:52px;font-size:1rem}
+    .btn{min-height:54px}
+    .arch .btn{min-height:48px;padding:10px 16px}
+    .chip{font-size:.8rem;padding:3px 10px}
+    input,select,textarea{min-height:52px;font-size:1.02rem}
+    .iconbtn{width:48px;height:48px}
+    .stepper button{width:56px;height:56px}
   }
 
   /* ---------- Karten & Bausteine ---------- */

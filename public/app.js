@@ -46,17 +46,21 @@ const TABS = [
     icon:'<path d="M2.5 15V9.5A1.5 1.5 0 0 1 4 8h9.5v7"/><path d="M13.5 9.5H18l3.5 3.5v2h-8"/><circle cx="6.5" cy="17" r="2"/><circle cx="17" cy="17" r="2"/><path d="M8.5 17h6.5M2.5 15v2h2"/>' },
   { id:"funk",     label:"Funk",
     icon:'<circle cx="12" cy="7" r="2.2"/><path d="M12 9.2V21M8.5 21h7"/><path d="M7.2 2.6a7.4 7.4 0 0 0 0 8.8M16.8 2.6a7.4 7.4 0 0 1 0 8.8"/>' },
-  { id:"skizze",   label:"Funkskizze",
+  { id:"skizze",   label:"Funkskizze", nurGross:true,
     icon:'<rect x="8.5" y="3" width="7" height="5" rx="1"/><rect x="2.5" y="16" width="7" height="5" rx="1"/><rect x="14.5" y="16" width="7" height="5" rx="1"/><path d="M12 8v4M6 16v-4h12v4"/>' },
   { id:"bespr",    label:"Besprechung",
     icon:'<path d="M4 4.5h16a1 1 0 0 1 1 1V15a1 1 0 0 1-1 1h-9l-5 4v-4H4a1 1 0 0 1-1-1V5.5a1 1 0 0 1 1-1z"/><path d="M7.5 8.5h9M7.5 12h6"/>' },
   { id:"listen",   label:"Checklisten",
     icon:'<path d="M4 6.5 5.5 8 8 5M4 12.5 5.5 14 8 11M4 18.5 5.5 20 8 17"/><path d="M11 6.5h9M11 12.5h9M11 18.5h9"/>' },
-  { id:"monitor",  label:"Monitor",
+  { id:"monitor",  label:"Monitor", nurGross:true,
     icon:'<rect x="3" y="4.5" width="18" height="12.5" rx="1.5"/><path d="M9 21h6M12 17v4"/>' },
-  { id:"lagekarte",label:"Lagekarte",
+  { id:"lagekarte",label:"Lagekarte", nurGross:true,
     icon:'<path d="M9 4 3.5 6v14L9 18l6 2 5.5-2V4L15 6 9 4zM9 4v14M15 6v14"/>' },
 ];
+// Auf kleinen Geräten (Handy) geht es nur um die Kräfteerfassung – Monitor, Lagekarte
+// und Funkskizze brauchen mindestens ein 10-Zoll-Gerät.
+function istGrossesGeraet(){ return window.matchMedia("(min-width:900px)").matches; }
+function sichtbareTabs(){ return istGrossesGeraet() ? TABS : TABS.filter(t => !t.nurGross); }
 
 function defaultConfig(){
   return {
@@ -275,16 +279,42 @@ $("#btnSettings").addEventListener("click", renderSettingsSheet);
 
 /* ---------------- Navigation ---------------- */
 function buildNav(){
+  // Seitenleiste (ab 10 Zoll): alle Ansichten
   const btn = t => `
     <button data-tab="${t.id}">
       <svg viewBox="0 0 24 24" aria-hidden="true">${t.icon}</svg>${t.label}
     </button>`;
-  document.querySelector("nav.tabs").innerHTML = TABS.map(btn).join("");
   document.querySelector("nav.rail").insertAdjacentHTML("beforeend", TABS.map(btn).join(""));
-  document.querySelectorAll("nav [data-tab]").forEach(b =>
+  document.querySelectorAll("nav.rail [data-tab]").forEach(b =>
     b.addEventListener("click", () => { state.view = b.dataset.tab; save(); render(); }));
 }
 buildNav();
+
+/* Burger-Menü (Handy) – nur die auf kleinen Geräten sinnvollen Ansichten */
+function openMenu(){
+  const tabs = sichtbareTabs();
+  $("#menuHost").innerHTML = `
+  <div class="drawer-backdrop" data-menuclose="1"></div>
+  <div class="drawer" role="dialog" aria-modal="true" aria-label="Menü">
+    <div class="drawer-head">
+      <div class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 64 64" style="width:22px;height:22px;stroke:#fff;fill:none;stroke-width:5;stroke-linecap:round">
+          <path d="M32 28v22M21 50h22"></path><path d="M20.5 12a16 16 0 0 0 0 20M43.5 12a16 16 0 0 1 0 20"></path>
+          <circle cx="32" cy="21" r="5.5" fill="#fff" stroke="none"></circle></svg>
+      </div>
+      <h2><span class="n-elw">ELW</span><span class="n-is">IS</span></h2>
+    </div>
+    ${tabs.map(t => `
+      <button data-tab="${t.id}" class="${state.view===t.id?"active":""}">
+        <svg viewBox="0 0 24 24" aria-hidden="true">${t.icon}</svg>${t.label}
+      </button>`).join("")}
+  </div>`;
+  const close = () => { $("#menuHost").innerHTML = ""; };
+  $("#menuHost").querySelector("[data-menuclose]").addEventListener("click", close);
+  $("#menuHost").querySelectorAll("[data-tab]").forEach(b =>
+    b.addEventListener("click", () => { state.view = b.dataset.tab; close(); save(); render(); }));
+}
+$("#btnMenu").addEventListener("click", openMenu);
 
 /* ---------------- Einstellungen (mandantenfähig) ---------------- */
 function renderSettingsSheet(){
@@ -2855,6 +2885,10 @@ function doPrint(data){
 /* ---------------- Render-Hauptschleife ---------------- */
 function render(){
   lgMapTeardown();  // Leaflet-Karte vor dem Neuaufbau des DOM sauber entfernen
+  // Auf kleinen Geräten sind Monitor/Lagekarte/Funkskizze nicht verfügbar
+  if(!istGrossesGeraet() && (TABS.find(t => t.id === state.view) || {}).nurGross){
+    state.view = "kraefte";
+  }
   renderHeader();
   document.querySelectorAll("nav [data-tab]").forEach(b =>
     b.classList.toggle("active", b.dataset.tab === state.view));
@@ -2875,6 +2909,11 @@ function render(){
 if(!state.einsatz.beginn) state.einsatz.beginn = nowLocalInput();
 if(!TABS.some(t => t.id === state.view)) state.view = "einsatz";
 render();
+
+// Bei Größenwechsel (Drehen/Fenster) neu bewerten, falls die aktive Ansicht wegfällt
+window.matchMedia("(min-width:900px)").addEventListener("change", () => {
+  if(!istGrossesGeraet() && (TABS.find(t => t.id === state.view) || {}).nurGross){ render(); }
+});
 
 /* ---------------- PWA: Service Worker registrieren ---------------- */
 if("serviceWorker" in navigator && (location.protocol === "https:" || location.hostname === "localhost")){
