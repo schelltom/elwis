@@ -2215,9 +2215,7 @@ function renderMonitor(){
               <button class="ab-jump" id="monLgEdit" style="margin-left:10px">Karte bearbeiten</button>
               ${abPager}</div>
             ${state.lage.mode === "karte" ? `
-            <div class="lg-wrap" style="display:grid;place-items:center;text-align:center;padding:30px;pointer-events:none">
-              <p class="hint" style="margin:0">Online-Kartenmodus aktiv – Live-Karte über „Karte bearbeiten“.</p>
-            </div>` : `
+            <div class="lg-wrap" style="overflow:hidden"><div id="lgMonMap" style="width:100%;height:100%"></div></div>` : `
             <div class="lg-wrap" style="pointer-events:none;overflow:hidden">
               <div class="lg-canvas ${state.lage.bg ? "hasbg" : ""}" ${state.lage.bg ? `style="background-image:url('${state.lage.bg}')"` : ""}>
                 ${lgShapesSvg(state.lage.items, null)}
@@ -2375,6 +2373,7 @@ function wireMonitor(){
   });
   const lgEdit = $("#monLgEdit");
   if(lgEdit) lgEdit.addEventListener("click", () => { state.view = "lagekarte"; save(); render(); });
+  if(document.getElementById("lgMonMap")) lgMonMapSetup();   // Online-Karte auf dem Monitor
   const skEdit = $("#monSkEdit");
   if(skEdit) skEdit.addEventListener("click", () => { state.view = "skizze"; save(); render(); });
   // Vollbild aufs ganze Dokument – überlebt so die Neuzeichnung bei der 30-s-Rotation
@@ -2743,14 +2742,62 @@ function renderFunkskizze(){
   </div>`;
 }
 /* ==================== Lagekarte: Online-Karten-Modus (Leaflet) ==================== */
-let lgMapObj = null, lgMapLayer = null;
+let lgMapObj = null, lgMapLayer = null, lgMonObj = null;
 function lgMapTeardown(){
   if(lgMapObj){ try{ lgMapObj.remove(); }catch(e){} }
-  lgMapObj = null; lgMapLayer = null;
+  if(lgMonObj){ try{ lgMonObj.remove(); }catch(e){} }
+  lgMapObj = null; lgMapLayer = null; lgMonObj = null;
 }
 function lgAccentHex(name){
   const v = getComputedStyle(document.documentElement).getPropertyValue("--" + (LG_SHAPE_COLORS.includes(name)?name:"fw")).trim();
   return v || "#C4232B";
+}
+/* Kartengrundlage (OpenData) je Schlüssel als frische Leaflet-Ebene */
+function lgBaseLayer(key){
+  const bayVV = "Bayerische Vermessungsverwaltung – geodaten.bayern.de";
+  if(key === "basis") return L.tileLayer("https://wmtsod{s}.bayernwolke.de/wmts/by_webkarte/smerc/{z}/{x}/{y}",
+    { subdomains:["1","2","3","4","5","6","7"], maxZoom:20, attribution:bayVV });
+  if(key === "strasse") return L.tileLayer("https://sgx.geodatenzentrum.de/wmts_topplus_open/tile/1.0.0/web/default/WEBMERCATOR/{z}/{y}/{x}.png",
+    { maxZoom:18, attribution:"© Bundesamt für Kartographie und Geodäsie (TopPlusOpen)" });
+  return L.tileLayer.wms("https://geoservices.bayern.de/od/wms/dop/v1/dop40",
+    { layers:"by_dop40c", format:"image/png", version:"1.3.0", maxZoom:20, attribution:"Luftbild: " + bayVV });
+}
+function lgDivIcon(inner){
+  return L.divIcon({ html:`<div class="lg-mk">${inner}</div>`, className:"lg-divicon", iconSize:[0,0] });
+}
+/* Symbole/Linien/Flächen in eine Ebene zeichnen; interactive=false → schreibgeschützt (Monitor) */
+function lgAddItems(layer, interactive){
+  for(const i of state.lage.items){
+    if((i.type === "line" || i.type === "area") && Array.isArray(i.llpoints)){
+      const col = lgAccentHex(i.color);
+      const ll = i.llpoints.map(p => [p.lat, p.lng]);
+      const shp = i.type === "area"
+        ? L.polygon(ll, { color:col, weight:3.5, fillOpacity:0.22, interactive })
+        : L.polyline(ll, { color:col, weight:3.5, interactive });
+      if(interactive) shp.on("click", ev => { L.DomEvent.stop(ev); openLgShapeEdit(i.id); });
+      shp.addTo(layer);
+      if(i.type === "area" && i.abschnittId){
+        const a = state.abschnitte.find(x => x.id === i.abschnittId);
+        if(a){
+          const pos = i.labelLL ? [i.labelLL.lat, i.labelLL.lng] : shp.getBounds().getCenter();
+          const lcol = LG_SHAPE_COLORS.includes(i.color) ? i.color : "fw";
+          const lm = L.marker(pos, { draggable:interactive, interactive,
+            icon: lgDivIcon(`<span class="lg-ealbl" style="position:static;transform:none;color:var(--${lcol})">${esc(abKuerzel(i.abschnittId))}<small>${esc(a.name)}</small></span>`) });
+          if(interactive) lm.on("dragend", () => { const p = lm.getLatLng(); i.labelLL = { lat:p.lat, lng:p.lng }; markChange(); });
+          lm.addTo(layer);
+        }
+      }
+    }
+  }
+  for(const i of state.lage.items){
+    if(!i.ll) continue;
+    const m = L.marker(i.ll, { draggable:interactive, interactive, icon: lgDivIcon(lgMarkerInner(i)) });
+    if(interactive){
+      m.on("click", () => openLgEdit(i.id));
+      m.on("dragend", () => { const p = m.getLatLng(); i.ll = [p.lat, p.lng]; markChange(); });
+    }
+    m.addTo(layer);
+  }
 }
 function lgMapSetup(){
   const el = document.getElementById("lgMap");
@@ -2758,23 +2805,7 @@ function lgMapSetup(){
   lgMapTeardown();
   const v = state.lage.mapView || { center:[49.6767, 12.1625], zoom:14 };
   lgMapObj = L.map(el, { zoomControl:true }).setView(v.center, v.zoom);
-
-  // Wählbare Kartengrundlagen (alle OpenData)
-  const bayVV = "Bayerische Vermessungsverwaltung – geodaten.bayern.de";
-  const bases = {
-    luftbild: { name:"Luftbild (Bayern)", layer: L.tileLayer.wms(
-      "https://geoservices.bayern.de/od/wms/dop/v1/dop40",
-      { layers:"by_dop40c", format:"image/png", version:"1.3.0", maxZoom:20, attribution:"Luftbild: " + bayVV }) },
-    basis: { name:"Bayern-Karte", layer: L.tileLayer(
-      "https://wmtsod{s}.bayernwolke.de/wmts/by_webkarte/smerc/{z}/{x}/{y}",
-      { subdomains:["1","2","3","4","5","6","7"], maxZoom:20, attribution:bayVV }) },
-    strasse: { name:"Straßenkarte", layer: L.tileLayer(
-      "https://sgx.geodatenzentrum.de/wmts_topplus_open/tile/1.0.0/web/default/WEBMERCATOR/{z}/{y}/{x}.png",
-      { maxZoom:18, attribution:"© Bundesamt für Kartographie und Geodäsie (TopPlusOpen)" }) },
-  };
-  const cur = bases[state.lage.mapLayer] ? state.lage.mapLayer : "luftbild";
-  bases[cur].layer.addTo(lgMapObj);   // Umschaltung über die kleine App-Auswahl oben (nicht über eine Karten-Steuerung)
-
+  lgBaseLayer(state.lage.mapLayer).addTo(lgMapObj);   // Umschaltung über die kleine App-Auswahl oben
   lgMapLayer = L.layerGroup().addTo(lgMapObj);
   lgMapObj.on("moveend zoomend", () => {
     if(!lgMapObj) return;
@@ -2786,43 +2817,22 @@ function lgMapSetup(){
   setTimeout(() => { if(lgMapObj) lgMapObj.invalidateSize(); }, 60);
   lgMapRenderLayers();
 }
-function lgDivIcon(inner){
-  return L.divIcon({ html:`<div class="lg-mk">${inner}</div>`, className:"lg-divicon", iconSize:[0,0] });
+/* Read-only-Karte auf dem Einsatzmonitor */
+function lgMonMapSetup(){
+  const el = document.getElementById("lgMonMap");
+  if(!el || typeof L === "undefined") return;
+  if(lgMonObj){ try{ lgMonObj.remove(); }catch(e){} lgMonObj = null; }
+  const v = state.lage.mapView || { center:[49.6767, 12.1625], zoom:14 };
+  lgMonObj = L.map(el, { zoomControl:false, attributionControl:true, dragging:false,
+    scrollWheelZoom:false, doubleClickZoom:false, boxZoom:false, keyboard:false, touchZoom:false, tap:false }).setView(v.center, v.zoom);
+  lgBaseLayer(state.lage.mapLayer).addTo(lgMonObj);
+  lgAddItems(L.layerGroup().addTo(lgMonObj), false);
+  setTimeout(() => { if(lgMonObj) lgMonObj.invalidateSize(); }, 60);
 }
 function lgMapRenderLayers(){
   if(!lgMapLayer) return;
   lgMapLayer.clearLayers();
-  // Linien & Flächen (Geo)
-  for(const i of state.lage.items){
-    if((i.type === "line" || i.type === "area") && Array.isArray(i.llpoints)){
-      const col = lgAccentHex(i.color);
-      const ll = i.llpoints.map(p => [p.lat, p.lng]);
-      const shp = i.type === "area"
-        ? L.polygon(ll, { color:col, weight:3.5, fillOpacity:0.22 })
-        : L.polyline(ll, { color:col, weight:3.5 });
-      shp.on("click", ev => { L.DomEvent.stop(ev); openLgShapeEdit(i.id); });
-      shp.addTo(lgMapLayer);
-      if(i.type === "area" && i.abschnittId){
-        const a = state.abschnitte.find(x => x.id === i.abschnittId);
-        if(a){
-          const pos = i.labelLL ? [i.labelLL.lat, i.labelLL.lng] : shp.getBounds().getCenter();
-          const lcol = LG_SHAPE_COLORS.includes(i.color) ? i.color : "fw";
-          const lm = L.marker(pos, { draggable:true,
-            icon: lgDivIcon(`<span class="lg-ealbl" style="position:static;transform:none;color:var(--${lcol})">${esc(abKuerzel(i.abschnittId))}<small>${esc(a.name)}</small></span>`) });
-          lm.on("dragend", () => { const p = lm.getLatLng(); i.labelLL = { lat:p.lat, lng:p.lng }; markChange(); });
-          lm.addTo(lgMapLayer);
-        }
-      }
-    }
-  }
-  // Marker (Geo)
-  for(const i of state.lage.items){
-    if(!i.ll) continue;
-    const m = L.marker(i.ll, { draggable:true, icon: lgDivIcon(lgMarkerInner(i)) });
-    m.on("click", () => openLgEdit(i.id));
-    m.on("dragend", () => { const p = m.getLatLng(); i.ll = [p.lat, p.lng]; markChange(); });
-    m.addTo(lgMapLayer);
-  }
+  lgAddItems(lgMapLayer, true);
   // Zeichnung in Arbeit
   if(lgDraw && lgDraw.geo && lgDraw.points.length){
     const pts = lgDraw.points.map(p => [p.lat, p.lng]);
