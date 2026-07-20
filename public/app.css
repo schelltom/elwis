@@ -416,6 +416,8 @@
   .mon-clockbox{margin-left:auto;text-align:right}
   .mon-clock{font-size:clamp(1.6rem,3vw,2.2rem);font-weight:800;line-height:1}
   .mon-dauer{color:var(--ink2);font-size:.82rem;margin-top:3px}
+  .mon-lb{color:var(--warn);font-size:.82rem;font-weight:650;margin-top:4px}
+  .mon-lb strong{color:var(--warn)}
   .mon-dauer strong{color:var(--ink)}
 
   /* Kompakte Kennzahlen-Leiste – spart Höhe für die Abschnitte */

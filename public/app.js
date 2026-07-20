@@ -2184,6 +2184,7 @@ function renderMonitor(){
         <div class="mon-clockbox">
           <div class="mon-clock mono" id="monClock">--:--</div>
           <div class="mon-dauer" id="monDauer"></div>
+          ${e.lagebespr ? `<div class="mon-lb">Nächste Lagebesprechung <strong class="mono">${esc(e.lagebespr)}</strong> <span id="monLbRel"></span></div>` : ""}
         </div>
       </div>
       <div class="kpis-compact">
@@ -2194,7 +2195,6 @@ function renderMonitor(){
         <div class="kpic"><span class="k">Führungskräfte</span><span class="v mono">${state.fuehrung.length}</span></div>
         ${brUnits.length ? `<div class="kpic"><span class="k">Bereitstellung</span><span class="v mono">${brUnits.length}</span><span class="s">Einheiten</span></div>` : ""}
         ${state.anforderungen.some(a => a.status !== "eingetroffen") ? `<div class="kpic warn"><span class="k">Anrollend</span><span class="v mono">${state.anforderungen.filter(a => a.status !== "eingetroffen").length}</span><span class="s">nachgefordert</span></div>` : ""}
-        ${e.lagebespr ? `<div class="kpic warn"><span class="k">Nächste Lagebesprechung</span><span class="v mono">${esc(e.lagebespr)}</span><span class="s" id="monLbRel"></span></div>` : ""}
       </div>
       ${isLagePage ? (() => {
         const nums = state.lage.items.filter(i => i.type === "num").sort((a,b) => a.num - b.num);
@@ -2399,7 +2399,7 @@ function tickClock(){
     const [h,m] = state.einsatz.lagebespr.split(":").map(Number);
     const t = new Date(); t.setHours(h, m, 0, 0);
     const diff = Math.round((t - Date.now())/60000);
-    lb.textContent = diff >= 0 ? `in ${diff} min` : `vor ${-diff} min`;
+    lb.textContent = diff >= 0 ? `(in ${diff} min)` : `(vor ${-diff} min)`;
   }
   const cd = $("#monAbCd");
   if(cd) cd.textContent = monAbPaused ? "Pause"
