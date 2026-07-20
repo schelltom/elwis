@@ -98,6 +98,8 @@
     padding:10px 26px;font-weight:750;font-size:.95rem;letter-spacing:.3em;
     text-transform:uppercase;color:#F2EFEA;background:rgba(255,255,255,.02);
     position:relative;overflow:hidden}
+  #splash .copy{color:#847E75;font-size:.66rem;font-weight:600;letter-spacing:.22em;
+    text-transform:uppercase;margin-top:16px}
   #splash .load{width:min(260px,60vw);height:4px;border-radius:2px;background:#3A3531;margin-top:44px;overflow:hidden}
   #splash .load i{display:block;height:100%;width:0;background:#D93A32;border-radius:2px;animation:splashload 5s linear forwards}
   @keyframes splashload{to{width:100%}}
@@ -120,6 +122,7 @@
   #splash h1 .p-is{animation:is-in .75s .35s cubic-bezier(.2,.8,.3,1) both}
   #splash h1{animation:join-pulse .32s 1.08s ease}
   #splash .tag{animation:splash-in .55s 1.2s ease-out both}
+  #splash .copy{animation:splash-in .6s 1.5s ease-out both}
   #splash .load,#splash .skip{animation:splash-in .6s 1.7s ease-out both}
   /* UG-Badge: Buchstaben laufen aus der Sperrung zusammen, dann Glanz + roter Puls */
   @keyframes ug-in{
@@ -137,7 +140,7 @@
   @media (prefers-reduced-motion:reduce){
     #splash .load i{animation:none;width:100%}
     #splash .strip,#splash .mark,#splash h1,#splash h1 .p-elw,#splash h1 .p-is,
-    #splash .tag,#splash .load,#splash .skip,#splash .ug{animation:none}
+    #splash .tag,#splash .load,#splash .skip,#splash .ug,#splash .copy{animation:none}
     #splash .ug::after{animation:none}
   }
 
