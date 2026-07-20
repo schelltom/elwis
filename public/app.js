@@ -983,7 +983,11 @@ function openEditor(id){
   }
   renderSheet();
 }
-function closeEditor(){ editing = null; editingFk = null; editingAb = null; $("#sheetHost").innerHTML = ""; }
+function closeEditor(){
+  editing = null; editingFk = null; editingAb = null;
+  if(lgSnapObj){ try{ lgSnapObj.remove(); }catch(e){} lgSnapObj = null; }
+  $("#sheetHost").innerHTML = "";
+}
 
 function orgPickHtml(current){
   return Object.entries(ORGS).map(([key,o]) => `
@@ -2717,7 +2721,9 @@ document.addEventListener("paste", e => {
 });
 function lgFreeze(){
   const s = { id:uid(), zeit:new Date().toISOString(),
-    bg: state.lage.bg, items: state.lage.items.map(i => ({...i})) };
+    bg: state.lage.bg, mode: state.lage.mode, mapLayer: state.lage.mapLayer,
+    mapView: state.lage.mapView ? { center:[...state.lage.mapView.center], zoom: state.lage.mapView.zoom } : null,
+    items: state.lage.items.map(i => ({...i})) };
   state.lage.snapshots.push(s);
   markChange();
   return s;
@@ -2774,7 +2780,7 @@ function renderFunkskizze(){
   </div>`;
 }
 /* ==================== Lagekarte: Online-Karten-Modus (Leaflet) ==================== */
-let lgMapObj = null, lgMapLayer = null, lgMonObj = null;
+let lgMapObj = null, lgMapLayer = null, lgMonObj = null, lgSnapObj = null;
 function lgMapTeardown(){
   if(lgMapObj){ try{ lgMapObj.remove(); }catch(e){} }
   if(lgMonObj){ try{ lgMonObj.remove(); }catch(e){} }
@@ -2808,8 +2814,9 @@ function lgGeocode(q, cb){
 }
 function lgEinsatzAdresse(){ return (state.einsatz.ort || state.einsatz.objekt || "").trim(); }
 /* Symbole/Linien/Flächen in eine Ebene zeichnen; interactive=false → schreibgeschützt (Monitor) */
-function lgAddItems(layer, interactive){
-  for(const i of state.lage.items){
+function lgAddItems(layer, interactive, items){
+  items = items || state.lage.items;
+  for(const i of items){
     if((i.type === "line" || i.type === "area") && Array.isArray(i.llpoints)){
       const col = lgAccentHex(i.color);
       const ll = i.llpoints.map(p => [p.lat, p.lng]);
@@ -2831,7 +2838,7 @@ function lgAddItems(layer, interactive){
       }
     }
   }
-  for(const i of state.lage.items){
+  for(const i of items){
     if(!i.ll) continue;
     const m = L.marker(i.ll, { draggable:interactive, interactive, icon: lgDivIcon(lgMarkerInner(i)) });
     if(interactive){
@@ -3148,12 +3155,14 @@ function openLgSnapshot(id){
       <button class="sheet-close" data-close="1" aria-label="Schließen">×</button>
     </div>
     <div class="sheet-body">
+      ${s.mode === "karte" ? `
+      <div class="lg-wrap" style="overflow:hidden"><div id="lgSnapMap" style="width:100%;height:100%"></div></div>` : `
       <div class="lg-wrap" style="pointer-events:none;overflow:hidden">
         <div class="lg-canvas ${s.bg ? "hasbg" : ""}" ${s.bg ? `style="background-image:url('${s.bg}')"` : ""}>
           ${lgShapesSvg(s.items, null)}
           ${s.items.filter(i => i.x != null).map(lgMarkerHtml).join("")}
         </div>
-      </div>
+      </div>`}
       ${nums.length ? `
       <div class="lg-legend" style="margin-top:12px">
         <h3>Legende</h3>
@@ -3171,6 +3180,18 @@ function openLgSnapshot(id){
     </div>
   </div>`;
   document.querySelectorAll("[data-close]").forEach(el => el.addEventListener("click", closeEditor));
+  if(s.mode === "karte" && typeof L !== "undefined"){
+    const el = document.getElementById("lgSnapMap");
+    if(el){
+      if(lgSnapObj){ try{ lgSnapObj.remove(); }catch(e){} }
+      const v = s.mapView || { center:[49.6767, 12.1625], zoom:15 };
+      lgSnapObj = L.map(el, { zoomControl:false, dragging:false, scrollWheelZoom:false,
+        doubleClickZoom:false, boxZoom:false, keyboard:false, touchZoom:false, tap:false }).setView(v.center, v.zoom);
+      lgBaseLayer(s.mapLayer).addTo(lgSnapObj);
+      lgAddItems(L.layerGroup().addTo(lgSnapObj), false, s.items);
+      setTimeout(() => { if(lgSnapObj) lgSnapObj.invalidateSize(); }, 60);
+    }
+  }
 }
 /* Symbolsuche: die gängigsten taktischen Zeichen (DV 102) mit Filterfeld */
 function openSymSearch(){
