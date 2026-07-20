@@ -70,7 +70,15 @@ function defaultConfig(){
     prefixes:{ FW:"Florian", BRK:"RK", POL:"Donau", THW:"Heros", SON:"" },
     ilsName:"ILS Nordoberpfalz",
     ilsGruppe:"",
+    theme:"auto",   // auto (Systemeinstellung) | hell | dunkel
   };
+}
+function applyTheme(){
+  const t = (state.config && state.config.theme) || "auto";
+  const root = document.documentElement;
+  if(t === "hell") root.setAttribute("data-theme", "light");
+  else if(t === "dunkel") root.setAttribute("data-theme", "dark");
+  else root.removeAttribute("data-theme");   // auto → prefers-color-scheme
 }
 function defaultState(){
   return {
@@ -90,6 +98,7 @@ const stored = load() || {};
 let state = Object.assign(defaultState(), stored);
 state.config = Object.assign(defaultConfig(), stored.config || {});
 state.config.prefixes = Object.assign(defaultConfig().prefixes, (stored.config||{}).prefixes || {});
+applyTheme();
 if(!state.lage || !Array.isArray(state.lage.items)) state.lage = { items: [], bg: "" };
 if(!Array.isArray(state.lage.snapshots)) state.lage.snapshots = [];
 if(!state.lage.mode) state.lage.mode = state.lage.bg ? "bild" : "raster";
@@ -340,6 +349,14 @@ function renderSettingsSheet(){
       <button class="sheet-close" data-close="1" aria-label="Schließen">×</button>
     </div>
     <div class="sheet-body">
+      <div class="field"><label style="margin-bottom:10px">Darstellung</label>
+        <div class="seg" style="max-width:none">
+          <button type="button" data-theme-opt="auto" class="${(c.theme||'auto')==='auto'?'active':''}">Automatisch</button>
+          <button type="button" data-theme-opt="hell" class="${c.theme==='hell'?'active':''}">Hell</button>
+          <button type="button" data-theme-opt="dunkel" class="${c.theme==='dunkel'?'active':''}">Dunkel</button>
+        </div>
+        <p class="hint">„Automatisch“ folgt der Systemeinstellung des Geräts.</p>
+      </div>
       <div class="field">
         <label for="cfg-ug">Name der Einheit / Organisation</label>
         <input id="cfg-ug" value="${esc(c.ugName)}" placeholder="z. B. UG-Weiden" autocomplete="off">
@@ -363,6 +380,11 @@ function renderSettingsSheet(){
     </div>
   </div>`;
   document.querySelectorAll("[data-close]").forEach(el => el.addEventListener("click", closeEditor));
+  document.querySelectorAll("[data-theme-opt]").forEach(b => b.addEventListener("click", () => {
+    state.config.theme = b.dataset.themeOpt;
+    document.querySelectorAll("[data-theme-opt]").forEach(x => x.classList.toggle("active", x.dataset.themeOpt===state.config.theme));
+    applyTheme(); save();   // sofort sichtbar und gespeichert
+  }));
   $("#cfg-save").addEventListener("click", () => {
     state.config.ugName = $("#cfg-ug").value.trim();
     state.config.ilsName = $("#cfg-ils").value.trim();
