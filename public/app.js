@@ -2644,7 +2644,8 @@ function renderLagekarte(){
         <button data-lglayer="luftbild" class="${state.lage.mapLayer==="luftbild"?"active":""}">Luftbild</button>
         <button data-lglayer="basis" class="${state.lage.mapLayer==="basis"?"active":""}">Bayern-Karte</button>
         <button data-lglayer="strasse" class="${state.lage.mapLayer==="strasse"?"active":""}">Straße</button>
-      </div>` : ""}
+      </div>
+      ${lgEinsatzAdresse() ? `<button class="btn btn-ghost" id="lgToAddr" style="min-height:42px;padding:6px 14px;font-size:.85rem">⌖ Einsatzadresse</button>` : ""}` : ""}
     </div>
     <div class="lg-toolbar">${tools}</div>
     ${statusText ? `<div class="lg-status">${esc(statusText)}<span style="margin-left:auto">${drawButtons}</span><button id="lgCancel">Abbrechen</button></div>` : ""}
@@ -2791,6 +2792,16 @@ function lgBaseLayer(key){
 function lgDivIcon(inner){
   return L.divIcon({ html:`<div class="lg-mk">${inner}</div>`, className:"lg-divicon", iconSize:[0,0] });
 }
+/* Adresse → Koordinaten (OpenStreetMap/Nominatim, nur online) */
+function lgGeocode(q, cb){
+  if(!q){ cb(null); return; }
+  fetch("https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=de&q=" + encodeURIComponent(q),
+    { headers:{ "Accept":"application/json" } })
+    .then(r => r.ok ? r.json() : [])
+    .then(a => cb(a && a[0] ? [parseFloat(a[0].lat), parseFloat(a[0].lon)] : null))
+    .catch(() => cb(null));
+}
+function lgEinsatzAdresse(){ return (state.einsatz.ort || state.einsatz.objekt || "").trim(); }
 /* Symbole/Linien/Flächen in eine Ebene zeichnen; interactive=false → schreibgeschützt (Monitor) */
 function lgAddItems(layer, interactive){
   for(const i of state.lage.items){
@@ -2842,6 +2853,12 @@ function lgMapSetup(){
   lgMapObj.on("click", e => lgMapClick(e.latlng));
   setTimeout(() => { if(lgMapObj) lgMapObj.invalidateSize(); }, 60);
   lgMapRenderLayers();
+  // Beim ersten Öffnen automatisch auf die Einsatzadresse zoomen (Luftbild)
+  if(!state.lage.mapView && lgEinsatzAdresse()){
+    lgGeocode(lgEinsatzAdresse(), ll => {
+      if(ll && lgMapObj){ lgMapObj.setView(ll, 17); state.lage.mapView = { center:ll, zoom:17 }; save(); }
+    });
+  }
 }
 /* Read-only-Karte auf dem Einsatzmonitor */
 function lgMonMapSetup(){
@@ -2924,6 +2941,15 @@ function wireLagekarte(){
     state.lage.mapLayer = b.dataset.lglayer;
     markChange(); render();
   }));
+  const toAddr = $("#lgToAddr");
+  if(toAddr) toAddr.addEventListener("click", () => {
+    const q = lgEinsatzAdresse();
+    if(!q){ modalInfo("Kein Einsatzort in den Stammdaten hinterlegt."); return; }
+    lgGeocode(q, ll => {
+      if(ll && lgMapObj){ lgMapObj.setView(ll, 17); state.lage.mapView = { center:ll, zoom:17 }; save(); }
+      else modalInfo("Adresse konnte nicht gefunden werden – bitte Einsatzort prüfen.");
+    });
+  });
   $("#lgSnapBtn").addEventListener("click", () => { lgFreeze(); render(); });
   document.querySelectorAll("[data-lgsnap]").forEach(b =>
     b.addEventListener("click", () => openLgSnapshot(b.dataset.lgsnap)));
