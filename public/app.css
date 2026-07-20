@@ -432,13 +432,14 @@
   .kpic.warn{border-color:color-mix(in oklab,var(--warn) 55%,var(--line))}
   .kpic.warn .v{color:var(--warn)}
 
-  .mon-grid{display:grid;grid-template-columns:minmax(230px,.8fr) minmax(340px,3.2fr);gap:12px}
+  .mon-grid{display:grid;grid-template-columns:minmax(230px,.8fr) minmax(0,3.2fr);gap:12px}
+  .mon-grid > *{min-width:0}
   @media (max-width:760px){.mon-grid{grid-template-columns:1fr}}
 
   /* Abschnitts-Kacheln – Hauptfläche auf dem 30-Zoll-Monitor, 6 Stück ohne Scrollen */
-  .ab-grid{display:grid;grid-template-columns:1fr;gap:10px;align-items:start}
-  @media (min-width:1000px){.ab-grid{grid-template-columns:repeat(2,1fr)}}
-  @media (min-width:1400px){.ab-grid{grid-template-columns:repeat(3,1fr)}}
+  .ab-grid{display:grid;grid-template-columns:1fr;gap:10px;align-items:start;min-width:0}
+  @media (min-width:1000px){.ab-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+  @media (min-width:1400px){.ab-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}
   .ab-pager{display:flex;align-items:center;gap:8px;margin-left:auto;font-size:.72rem;
     font-weight:700;color:var(--ink3);letter-spacing:.05em}
   .ab-pager .dot{width:8px;height:8px;border-radius:50%;background:var(--line)}
@@ -459,7 +460,8 @@
   .ab-table td{padding:3px 6px;font-size:.82rem}
   .ab-table .chip{font-size:.64rem;padding:1px 6px}
   .ab-card{background:var(--surface);border:1px solid var(--line);border-radius:12px;
-    padding:11px 13px;border-top:4px solid var(--accent)}
+    padding:11px 13px;border-top:4px solid var(--accent);min-width:0}
+  .ab-card .name{max-width:100%;overflow:hidden;text-overflow:ellipsis}
   .ab-card.none{border-top-color:var(--line)}
   .ab-card .ab-head{display:flex;align-items:flex-start;gap:10px;margin-bottom:4px}
   .ab-card h4{margin:0;font-size:1rem;font-weight:800;line-height:1.2;flex:1;text-wrap:balance}
