@@ -52,6 +52,8 @@ const TABS = [
     icon:'<path d="M4 4.5h16a1 1 0 0 1 1 1V15a1 1 0 0 1-1 1h-9l-5 4v-4H4a1 1 0 0 1-1-1V5.5a1 1 0 0 1 1-1z"/><path d="M7.5 8.5h9M7.5 12h6"/>' },
   { id:"listen",   label:"Checklisten",
     icon:'<path d="M4 6.5 5.5 8 8 5M4 12.5 5.5 14 8 11M4 18.5 5.5 20 8 17"/><path d="M11 6.5h9M11 12.5h9M11 18.5h9"/>' },
+  { id:"atemschutz",label:"Atemschutz",
+    icon:'<path d="M12 3v8"/><path d="M9.5 11a4.5 4.5 0 0 0-4.5 4.5V18a2 2 0 0 0 4 0v-7"/><path d="M14.5 11a4.5 4.5 0 0 1 4.5 4.5V18a2 2 0 0 1-4 0v-7"/>' },
   { id:"monitor",  label:"Monitor", nurGross:true,
     icon:'<rect x="3" y="4.5" width="18" height="12.5" rx="1.5"/><path d="M9 21h6M12 17v4"/>' },
   { id:"lagekarte",label:"Lagekarte", nurGross:true,
@@ -78,6 +80,7 @@ function defaultState(){
     einheiten: [], fuehrung: [], abschnitte: [], archiv: [],
     lage: { items: [], bg: "", snapshots: [], mode: "raster", mapView: null, mapLayer: "luftbild" },
     funk: [], besprechungen: [], anforderungen: [], checks: [], fotos: [],
+    asTraeger: [], asTrupps: [], asSub: "sammelstelle",
     monHide: { panels: {}, ab: {} },
     config: defaultConfig(),
     wlan:false, pending:0, view:"einsatz", ksub:"einheiten",
@@ -96,6 +99,9 @@ if(!Array.isArray(state.besprechungen)) state.besprechungen = [];
 if(!Array.isArray(state.anforderungen)) state.anforderungen = [];
 if(!Array.isArray(state.checks)) state.checks = [];
 if(!Array.isArray(state.fotos)) state.fotos = [];
+if(!Array.isArray(state.asTraeger)) state.asTraeger = [];
+if(!Array.isArray(state.asTrupps)) state.asTrupps = [];
+if(!state.asSub) state.asSub = "sammelstelle";
 if(!state.monHide || typeof state.monHide !== "object") state.monHide = { panels: {}, ab: {} };
 state.monHide.panels = state.monHide.panels || {};
 state.monHide.ab = state.monHide.ab || {};
@@ -494,6 +500,7 @@ function wireEinsatz(){
     doPrint({ einsatz:state.einsatz, einheiten:state.einheiten, fuehrung:state.fuehrung,
       abschnitte:state.abschnitte, funk:state.funk, besprechungen:state.besprechungen,
       anforderungen:state.anforderungen, checks:state.checks,
+      asTraeger:state.asTraeger, asTrupps:state.asTrupps,
       lage:state.lage, fotos:state.fotos, ende:null }));
   $("#btnEnde").addEventListener("click", endeEinsatz);
   document.querySelectorAll("[data-aakt]").forEach(b =>
@@ -517,6 +524,7 @@ function exportEinsatz(){
     abschnitte: state.abschnitte, lage: state.lage, funk: state.funk,
     besprechungen: state.besprechungen, anforderungen: state.anforderungen,
     checks: state.checks, fotos: state.fotos,
+    asTraeger: state.asTraeger, asTrupps: state.asTrupps,
   };
   const blob = new Blob([JSON.stringify(data)], { type: "application/json" });
   const a = document.createElement("a");
@@ -546,6 +554,8 @@ function importEinsatz(file){
       state.anforderungen = d.anforderungen || [];
       state.checks = d.checks || [];
       state.fotos = d.fotos || [];
+      state.asTraeger = d.asTraeger || [];
+      state.asTrupps = d.asTrupps || [];
       state.einsatzId = uid(); state.einsatzStart = new Date().toISOString();
       try{ markChange(); }catch(err){
         state.fotos = []; state.lage.bg = "";
@@ -602,6 +612,8 @@ function baueArchivEintrag(){
     besprechungen: state.besprechungen.map(b => ({...b})),
     anforderungen: state.anforderungen.map(a => ({...a})),
     checks: state.checks.map(c => ({...c, punkte:c.punkte.map(p => ({...p}))})),
+    asTraeger: state.asTraeger.map(t => ({...t})),
+    asTrupps: state.asTrupps.map(t => ({...t, memberIds:[...(t.memberIds||[])]})),
     lage: { bg: state.lage.bg, mode: state.lage.mode, mapView: state.lage.mapView, mapLayer: state.lage.mapLayer,
       items: state.lage.items.map(i => ({...i})),
       snapshots: state.lage.snapshots.map(s => ({...s, items: s.items.map(i => ({...i}))})) },
@@ -632,6 +644,8 @@ async function aktiviereArchiv(id){
         snapshots: (a.lage.snapshots || []).map(s => ({...s, items:(s.items || []).map(x => ({...x}))})) }
     : { items: [], bg: "", snapshots: [] };
   state.fotos = (a.fotos || []).map(x => ({...x}));
+  state.asTraeger = (a.asTraeger || []).map(x => ({...x}));
+  state.asTrupps = (a.asTrupps || []).map(x => ({...x, memberIds:[...(x.memberIds||[])]}));
   // Neue Sync-Identität: der reaktivierte Einsatz wird zum aktuellen (auch am Server)
   state.einsatzId = uid();
   state.einsatzStart = new Date().toISOString();
@@ -650,6 +664,7 @@ async function endeEinsatz(){
   state.lage = { items: [], bg: "", snapshots: [], mode: "raster", mapView: null, mapLayer: "luftbild" };
   state.funk = []; state.besprechungen = [];
   state.anforderungen = []; state.checks = []; state.fotos = [];
+  state.asTraeger = []; state.asTrupps = [];
   try{ markChange(); }catch(err){
     // Speicher voll: Bilder aus dem Archiveintrag entfernen und erneut versuchen
     entry.fotos = []; entry.lage.bg = ""; entry.lage.snapshots = [];
@@ -1448,6 +1463,285 @@ function wireListen(){
   }));
 }
 
+/* ---------------- Ansicht: Atemschutz (Sammelstelle + Überwachung) ---------------- */
+const AS_GERAETETYPEN = ["200/300 bar", "2×300 bar (Langzeit)"];
+let editingTraeger = null, editingTrupp = null;
+
+function asNextTruppNr(){
+  // AST beginnt bei 10; jeder (auch wiederholte) Einsatz bekommt eine neue Nummer
+  return state.asTrupps.reduce((m,t) => Math.max(m, t.nr||0), 9) + 1;
+}
+function asTraegerName(id){ const t = state.asTraeger.find(x => x.id === id); return t ? t.name : "?"; }
+function asTruppOf(traegerId){
+  return state.asTrupps.find(t => t.status !== "zurueck" && (t.memberIds||[]).includes(traegerId));
+}
+function asFreieTraeger(){ return state.asTraeger.filter(t => !asTruppOf(t.id)); }
+
+function renderAtemschutz(){
+  const seg = `
+  <div class="seg" role="tablist">
+    <button role="tab" data-assub="sammelstelle" class="${state.asSub==="sammelstelle"?"active":""}">Sammelstelle</button>
+    <button role="tab" data-assub="ueberwachung" class="${state.asSub==="ueberwachung"?"active":""}">Überwachung (${state.asTrupps.filter(t=>t.status==="einsatz").length})</button>
+  </div>`;
+  return seg + (state.asSub === "ueberwachung" ? renderASUeberwachung() : renderASSammelstelle());
+}
+
+function asNrBadge(t, big){
+  return `<span class="as-nr ${t.status} ${big?"big":""}">${t.nr}</span>`;
+}
+function truppCard(t){
+  const mitglieder = (t.memberIds||[]).map(id => {
+    const tr = state.asTraeger.find(x => x.id === id);
+    return tr ? `${esc(tr.name)}${tr.geraetetyp?` <span class="as-typ">${esc(tr.geraetetyp)}</span>`:""}` : "?";
+  }).join(" · ");
+  const zeile = [
+    t.abschnitt ? `Abschnitt: <strong>${esc(t.abschnitt)}</strong>` : "",
+    t.funkruf ? `Funk: <strong>${esc(t.funkruf)}</strong>` : "",
+    t.ausgerueckt ? `ab ${fmtZeit(t.ausgerueckt)}` : "",
+    t.rueckkehr ? `zurück ${fmtZeit(t.rueckkehr)}` : "",
+  ].filter(Boolean).join(" · ");
+  const aktionen = t.status === "registriert"
+    ? `<button class="btn btn-primary" data-asein="${t.id}">Ausrücken</button>
+       <button class="btn btn-ghost" data-astruppedit="${t.id}">Bearbeiten</button>
+       <button class="btn btn-danger-ghost" data-astruppdel="${t.id}" aria-label="Trupp auflösen">✕</button>`
+    : t.status === "einsatz"
+    ? `<button class="btn btn-primary" data-aszurueck="${t.id}">Zurückgemeldet</button>
+       <button class="btn btn-ghost" data-astruppedit="${t.id}">Bearbeiten</button>`
+    : `<button class="btn btn-ghost" data-aswieder="${t.id}">Erneut einsetzen</button>
+       <button class="btn btn-danger-ghost" data-astruppdel="${t.id}" aria-label="Löschen">✕</button>`;
+  return `
+  <div class="as-trupp status-${t.status}">
+    <div class="as-trupp-head">
+      ${asNrBadge(t)}
+      <div style="flex:1;min-width:0">
+        <div class="as-mit">${mitglieder || "<span style='color:var(--ink3)'>keine Mitglieder</span>"}</div>
+        ${zeile ? `<div class="as-sub2">${zeile}</div>` : ""}
+        ${t.zusatz ? `<div class="as-sub2">Zusatz: ${esc(t.zusatz)}</div>` : ""}
+      </div>
+    </div>
+    <div class="as-actions">${aktionen}</div>
+  </div>`;
+}
+function renderASSammelstelle(){
+  const trupps = [...state.asTrupps].sort((a,b) =>
+    ({registriert:0,einsatz:1,zurueck:2}[a.status]) - ({registriert:0,einsatz:1,zurueck:2}[b.status]) || (a.nr-b.nr));
+  const frei = asFreieTraeger();
+  const truppList = trupps.length ? trupps.map(truppCard).join("")
+    : `<div class="empty"><p>Noch keine Trupps gebildet.<br>Träger registrieren, dann zu einem Trupp (2–3 Mann) zusammenführen.</p></div>`;
+  const traegerList = state.asTraeger.length ? `<div class="as-traeger-list">${state.asTraeger.map(tr => {
+    const trupp = asTruppOf(tr.id);
+    return `
+    <button class="as-traeger ${trupp?"gebunden":""}" data-astraegeredit="${tr.id}">
+      <div style="flex:1;min-width:0">
+        <div class="as-tr-name">${esc(tr.name) || "<span style='color:var(--ink3)'>ohne Name</span>"}</div>
+        <div class="as-sub2">${esc(tr.feuerwehr||"")}${tr.geraetetyp?` · ${esc(tr.geraetetyp)}`:""}${tr.zusatz?` · ${esc(tr.zusatz)}`:""}</div>
+      </div>
+      ${trupp ? `<span class="chip">Trupp ${trupp.nr}</span>` : `<span class="chip chip-POL">frei</span>`}
+    </button>`;
+  }).join("")}</div>` : `<p class="hint" style="margin:0">Noch keine Geräteträger registriert.</p>`;
+  return `
+  <div class="statstrip" role="status">
+    <div class="stat"><div class="k">Träger</div><div class="v mono">${state.asTraeger.length}</div><div class="s">${frei.length} frei</div></div>
+    <div class="stat"><div class="k">Trupps</div><div class="v mono">${state.asTrupps.length}</div><div class="s">gesamt</div></div>
+    <div class="stat"><div class="k">Im Einsatz</div><div class="v mono">${state.asTrupps.filter(t=>t.status==="einsatz").length}</div><div class="s">unter PA</div></div>
+  </div>
+  <div class="card">
+    <h2>Trupps</h2>
+    <button class="btn btn-primary btn-block" id="btnTruppBilden" style="margin-bottom:14px" ${frei.length<2?"disabled":""}>＋&nbsp; Trupp bilden${frei.length<2?" (min. 2 freie Träger)":""}</button>
+    ${truppList}
+  </div>
+  <div class="card">
+    <h2>Geräteträger</h2>
+    <button class="btn btn-ghost btn-block" id="btnTraegerReg" style="margin-bottom:14px">＋&nbsp; Träger registrieren</button>
+    ${traegerList}
+  </div>`;
+}
+function renderASUeberwachung(){
+  const aktiv = state.asTrupps.filter(t => t.status === "einsatz").sort((a,b) => a.nr-b.nr);
+  if(!aktiv.length) return `<div class="empty"><p>Kein Trupp im Einsatz.<br>Trupps unter PA erscheinen hier mit laufender Einsatzzeit.</p></div>`;
+  const cards = aktiv.map(t => {
+    const mit = (t.memberIds||[]).map(id => esc(asTraegerName(id))).join(" · ");
+    const typ = (t.memberIds||[]).map(id => (state.asTraeger.find(x=>x.id===id)||{}).geraetetyp).filter(Boolean)[0] || "";
+    return `
+    <div class="as-ueber">
+      ${asNrBadge(t, true)}
+      <div style="flex:1;min-width:0">
+        <div class="as-mit">${mit}</div>
+        <div class="as-sub2">${typ?esc(typ)+" · ":""}Abschnitt ${esc(t.abschnitt||"–")}${t.funkruf?` · Funk ${esc(t.funkruf)}`:""}</div>
+      </div>
+      <div class="as-timer"><span class="mono" data-as-elapsed="${esc(t.ausgerueckt||"")}">–</span>
+        <button class="btn btn-primary" data-aszurueck="${t.id}" style="min-height:44px">Zurück</button></div>
+    </div>`;
+  }).join("");
+  return `
+  <p class="hint" style="margin:0 0 12px">Laufende Einsatzzeit seit Ausrücken. <strong>Ersetzt keine normgerechte Atemschutzüberwachung</strong> – dient der Übersicht an der Sammelstelle.</p>
+  <div class="as-ueber-list">${cards}</div>`;
+}
+function asElapsedStr(iso){
+  const d = iso ? new Date(iso) : null;
+  if(!d || isNaN(d)) return "–";
+  const s = Math.max(0, Math.floor((Date.now()-d.getTime())/1000));
+  return `${String(Math.floor(s/60)).padStart(2,"0")}:${String(s%60).padStart(2,"0")} min`;
+}
+function asTick(){
+  document.querySelectorAll("[data-as-elapsed]").forEach(el => {
+    el.textContent = asElapsedStr(el.dataset.asElapsed);
+    const min = el.dataset.asElapsed ? (Date.now()-new Date(el.dataset.asElapsed).getTime())/60000 : 0;
+    el.classList.toggle("warn", min >= 20);   // Orientierungswarnung (kein Ersatz für echte Überwachung)
+    el.classList.toggle("krit", min >= 30);
+  });
+}
+setInterval(() => { if(state.view === "atemschutz" && state.asSub === "ueberwachung") asTick(); }, 1000);
+
+function wireAtemschutz(){
+  document.querySelectorAll("[data-assub]").forEach(b =>
+    b.addEventListener("click", () => { state.asSub = b.dataset.assub; save(); render(); }));
+  const reg = $("#btnTraegerReg"); if(reg) reg.addEventListener("click", () => openTraegerEditor(null));
+  const bild = $("#btnTruppBilden"); if(bild) bild.addEventListener("click", () => openTruppEditor(null));
+  document.querySelectorAll("[data-astraegeredit]").forEach(b =>
+    b.addEventListener("click", () => openTraegerEditor(b.dataset.astraegeredit)));
+  document.querySelectorAll("[data-astruppedit]").forEach(b =>
+    b.addEventListener("click", () => openTruppEditor(b.dataset.astruppedit)));
+  document.querySelectorAll("[data-asein]").forEach(b => b.addEventListener("click", () => {
+    const t = state.asTrupps.find(x => x.id === b.dataset.asein);
+    if(t){ t.status = "einsatz"; t.ausgerueckt = new Date().toISOString(); markChange(); render(); }
+  }));
+  document.querySelectorAll("[data-aszurueck]").forEach(b => b.addEventListener("click", () => {
+    const t = state.asTrupps.find(x => x.id === b.dataset.aszurueck);
+    if(t){ t.status = "zurueck"; t.rueckkehr = new Date().toISOString(); markChange(); render(); }
+  }));
+  document.querySelectorAll("[data-aswieder]").forEach(b => b.addEventListener("click", () => {
+    const t = state.asTrupps.find(x => x.id === b.dataset.aswieder);
+    if(!t) return;
+    openTruppEditor(null, t.memberIds);   // neuer Trupp, neue Nummer, Mitglieder vorbelegt
+  }));
+  document.querySelectorAll("[data-astruppdel]").forEach(b => b.addEventListener("click", () => {
+    modalConfirm("Diesen Trupp wirklich entfernen? Die Träger werden wieder frei.").then(ok => { if(!ok) return;
+      state.asTrupps = state.asTrupps.filter(x => x.id !== b.dataset.astruppdel);
+      markChange(); render();
+    });
+  }));
+  if(state.asSub === "ueberwachung") asTick();
+}
+
+function openTraegerEditor(id){
+  const neu = !id;
+  const tr = id ? {...state.asTraeger.find(x => x.id === id)}
+    : { id:uid(), name:"", feuerwehr:"", geraetetyp:AS_GERAETETYPEN[0], zusatz:"" };
+  $("#sheetHost").innerHTML = `
+  <div class="sheet-backdrop" data-close="1"></div>
+  <div class="sheet" role="dialog" aria-modal="true" aria-label="${neu?"Träger registrieren":"Träger bearbeiten"}">
+    <div class="sheet-head"><h2>${neu?"Geräteträger registrieren":"Geräteträger"}</h2>
+      <button class="sheet-close" data-close="1" aria-label="Schließen">×</button></div>
+    <div class="sheet-body">
+      <div class="field"><label for="tr-name">Name</label>
+        <input id="tr-name" value="${esc(tr.name)}" placeholder="Nachname, Vorname" autocomplete="off"></div>
+      <div class="field"><label for="tr-fw">Feuerwehr</label>
+        <input id="tr-fw" value="${esc(tr.feuerwehr)}" list="tr-fw-list" placeholder="Name der Feuerwehr" autocomplete="off">
+        <datalist id="tr-fw-list">${[...new Set(state.asTraeger.map(x=>x.feuerwehr).filter(Boolean))].map(x=>`<option value="${esc(x)}">`).join("")}</datalist></div>
+      <div class="field"><label>Gerätetyp</label>
+        <div class="seg" style="max-width:none">
+          ${AS_GERAETETYPEN.map(g => `<button type="button" data-tr-typ="${esc(g)}" class="${tr.geraetetyp===g?"active":""}">${esc(g)}</button>`).join("")}
+        </div>
+        <p class="hint">2×300 = Langzeitatmer (doppelte Einsatzzeit).</p></div>
+      <div class="field"><label for="tr-zusatz">Zusatz / Sonderausbildung <span style="text-transform:none;font-weight:500">(optional)</span></label>
+        <input id="tr-zusatz" value="${esc(tr.zusatz)}" placeholder="z. B. Rettungstrupp, Absturzsicherung, Zusatzmaterial" autocomplete="off"></div>
+    </div>
+    <div class="sheet-foot">
+      ${neu?"":`<button class="btn btn-danger-ghost" id="tr-del">Löschen</button>`}
+      <button class="btn btn-primary" id="tr-save" style="flex:1">Speichern</button>
+    </div>
+  </div>`;
+  document.querySelectorAll("[data-close]").forEach(el => el.addEventListener("click", closeEditor));
+  document.querySelectorAll("[data-tr-typ]").forEach(b => b.addEventListener("click", () => {
+    tr.geraetetyp = b.dataset.trTyp;
+    document.querySelectorAll("[data-tr-typ]").forEach(x => x.classList.toggle("active", x.dataset.trTyp===tr.geraetetyp));
+  }));
+  const del = $("#tr-del");
+  if(del) del.addEventListener("click", () => {
+    const trupp = asTruppOf(tr.id);
+    if(trupp){ modalInfo(`Träger ist in Trupp ${trupp.nr} eingeteilt – erst dort entfernen.`); return; }
+    state.asTraeger = state.asTraeger.filter(x => x.id !== tr.id);
+    markChange(); closeEditor(); render();
+  });
+  $("#tr-save").addEventListener("click", () => {
+    tr.name = $("#tr-name").value.trim();
+    tr.feuerwehr = $("#tr-fw").value.trim();
+    tr.zusatz = $("#tr-zusatz").value.trim();
+    if(!tr.name){ $("#tr-name").focus(); return; }
+    const i = state.asTraeger.findIndex(x => x.id === tr.id);
+    if(i>=0) state.asTraeger[i] = tr; else state.asTraeger.push(tr);
+    markChange(); closeEditor(); render();
+  });
+}
+
+function openTruppEditor(id, vorbelegt){
+  const neu = !id;
+  const t = id ? {...state.asTrupps.find(x => x.id === id), memberIds:[...(state.asTrupps.find(x=>x.id===id).memberIds||[])]}
+    : { id:uid(), nr:asNextTruppNr(), memberIds:[...(vorbelegt||[])], abschnitt:"", funkruf:"", zusatz:"",
+        status:"registriert", ausgerueckt:"", rueckkehr:"" };
+  // Auswählbare Träger: freie + die bereits in diesem Trupp
+  const waehlbar = state.asTraeger.filter(tr => {
+    const trupp = asTruppOf(tr.id);
+    return !trupp || trupp.id === t.id || t.memberIds.includes(tr.id);
+  });
+  $("#sheetHost").innerHTML = `
+  <div class="sheet-backdrop" data-close="1"></div>
+  <div class="sheet" role="dialog" aria-modal="true" aria-label="${neu?"Trupp bilden":"Trupp bearbeiten"}">
+    <div class="sheet-head"><h2>Trupp ${t.nr}</h2>
+      <button class="sheet-close" data-close="1" aria-label="Schließen">×</button></div>
+    <div class="sheet-body">
+      <div class="field"><label>Mitglieder (2–3 Träger)</label>
+        <div class="as-pick">
+          ${waehlbar.length ? waehlbar.map(tr => `
+            <button type="button" data-pick="${tr.id}" class="${t.memberIds.includes(tr.id)?"active":""}">
+              <span>${esc(tr.name)}</span><small>${esc(tr.feuerwehr||"")}${tr.geraetetyp?` · ${esc(tr.geraetetyp)}`:""}</small>
+            </button>`).join("") : `<p class="hint" style="margin:0">Keine freien Träger – erst welche registrieren.</p>`}
+        </div>
+        <p class="hint" id="tr-count">${t.memberIds.length} ausgewählt</p></div>
+      <div class="field"><label for="tp-ab">Einsatzabschnitt</label>
+        <input id="tp-ab" value="${esc(t.abschnitt)}" list="tp-ab-list" placeholder="Abschnitt, der den Trupp angefordert hat" autocomplete="off">
+        <datalist id="tp-ab-list">${state.abschnitte.map(a=>`<option value="${esc(a.name)}">`).join("")}</datalist></div>
+      <div class="field"><label for="tp-funk">Funkruf Abschnitt</label>
+        <input id="tp-funk" class="mono" value="${esc(t.funkruf)}" placeholder="Funkrufname des Abschnittsleiters" autocomplete="off"></div>
+      <div class="field"><label for="tp-zusatz">Auftrag / Bemerkung <span style="text-transform:none;font-weight:500">(optional)</span></label>
+        <input id="tp-zusatz" value="${esc(t.zusatz)}" placeholder="Einsatzauftrag" autocomplete="off"></div>
+      ${!neu ? `<div class="field" style="display:flex;gap:10px;flex-wrap:wrap">
+        <div style="width:150px"><label for="tp-aus">Ausgerückt</label><input id="tp-aus" type="time" class="mono" value="${fmtZeit(t.ausgerueckt)==="–"?"":fmtZeit(t.ausgerueckt)}"></div>
+        <div style="width:150px"><label for="tp-ret">Zurück</label><input id="tp-ret" type="time" class="mono" value="${fmtZeit(t.rueckkehr)==="–"?"":fmtZeit(t.rueckkehr)}"></div>
+      </div>` : ""}
+    </div>
+    <div class="sheet-foot">
+      <button class="btn btn-primary" id="tp-save" style="flex:1">${neu?"Trupp bilden":"Speichern"}</button>
+    </div>
+  </div>`;
+  document.querySelectorAll("[data-close]").forEach(el => el.addEventListener("click", closeEditor));
+  document.querySelectorAll("[data-pick]").forEach(b => b.addEventListener("click", () => {
+    const pid = b.dataset.pick;
+    if(t.memberIds.includes(pid)) t.memberIds = t.memberIds.filter(x => x !== pid);
+    else if(t.memberIds.length < 3) t.memberIds.push(pid);
+    document.querySelectorAll("[data-pick]").forEach(x => x.classList.toggle("active", t.memberIds.includes(x.dataset.pick)));
+    $("#tr-count").textContent = `${t.memberIds.length} ausgewählt`;
+  }));
+  const setTime = (field, val) => {
+    if(!val) return;
+    const [h,m] = val.split(":").map(Number);
+    const d = t[field] ? new Date(t[field]) : new Date();
+    d.setHours(h,m,0,0); t[field] = d.toISOString();
+  };
+  $("#tp-save").addEventListener("click", () => {
+    if(t.memberIds.length < 2){ modalInfo("Ein Trupp braucht mindestens 2 Träger."); return; }
+    t.abschnitt = $("#tp-ab").value.trim();
+    t.funkruf = $("#tp-funk").value.trim();
+    t.zusatz = $("#tp-zusatz").value.trim();
+    if($("#tp-aus")) setTime("ausgerueckt", $("#tp-aus").value);
+    if($("#tp-ret")) setTime("rueckkehr", $("#tp-ret").value);
+    const i = state.asTrupps.findIndex(x => x.id === t.id);
+    if(i>=0) state.asTrupps[i] = t; else state.asTrupps.push(t);
+    markChange(); closeEditor(); render();
+  });
+}
+
 /* ---------------- Ansicht: Lagebesprechungen ---------------- */
 let editingBespr = null; // { b, isNew }
 function renderBespr(){
@@ -2181,12 +2475,7 @@ function renderLagekarte(){
     </div>`).join("")}
     <p class="hint">Ein Snapshot friert den aktuellen Kartenstand ein – die Lagekarte entwickelt sich danach normal weiter (z. B. für die Dokumentation je Lagebesprechung).</p>
   </div>` : ""}
-  <div class="card">
-    <h2>Ausbaustufe</h2>
-    <p class="hint" style="margin:0">Hintergrund umschaltbar: <strong>Raster</strong> · <strong>Bild</strong>
-    (Screenshot/Foto, auch aus der Zwischenablage) · <strong>Karte (online)</strong>. Der Online-Kartenmodus
-    (Leaflet mit TopPlusOpen/BayernAtlas) folgt als nächster Ausbauschritt; danach optional Offline-Kacheln.</p>
-  </div>`;
+  `;
 }
 function setLgBg(data){
   state.lage.bg = data;
@@ -2835,6 +3124,20 @@ function doPrint(data){
     ${fkRows ? `<table><thead><tr><th>Name</th><th>Funktion</th><th>Organisation</th><th>Einheit / Abschnitt</th></tr></thead><tbody>${fkRows}</tbody></table>` : "<p>Keine erfasst.</p>"}
     <h2>Einheiten (${data.einheiten.length})</h2>
     ${unitRows ? `<table><thead><tr><th>Ankunft</th><th>Organisation</th><th>Funkrufname</th>${showAb?"<th>Abschnitt</th>":""}<th>Stärke</th><th>AGT</th><th>Status</th></tr></thead><tbody>${unitRows}</tbody></table>` : "<p>Keine erfasst.</p>"}
+    ${(data.asTrupps||[]).length ? `
+    <h2>Atemschutz – Trupps (${data.asTrupps.length})</h2>
+    <table><thead><tr><th>Nr.</th><th>Mitglieder</th><th>Gerätetyp</th><th>Abschnitt / Funk</th><th>Ausgerückt</th><th>Zurück</th></tr></thead><tbody>
+      ${[...data.asTrupps].sort((a,b)=>a.nr-b.nr).map(t => {
+        const mem = (t.memberIds||[]).map(id => { const tr=(data.asTraeger||[]).find(x=>x.id===id); return tr?esc(tr.name):"?"; }).join(", ");
+        const typ = (t.memberIds||[]).map(id => ((data.asTraeger||[]).find(x=>x.id===id)||{}).geraetetyp).filter(Boolean)[0] || "";
+        return `<tr>
+          <td class="p-mono">${t.nr}</td><td>${mem}</td><td>${esc(typ)}</td>
+          <td>${esc(t.abschnitt||"–")}${t.funkruf?" / "+esc(t.funkruf):""}</td>
+          <td class="p-mono">${t.ausgerueckt?fmtZeit(t.ausgerueckt):"–"}</td>
+          <td class="p-mono">${t.rueckkehr?fmtZeit(t.rueckkehr):"–"}</td>
+        </tr>`;
+      }).join("")}
+    </tbody></table>` : ""}
     <h2>Nachforderungen (${(data.anforderungen||[]).length})</h2>
     ${(data.anforderungen||[]).length ? `<table><thead><tr><th>Was</th><th>Status</th><th>Angefordert</th><th>Alarmiert</th><th>Eingetroffen</th></tr></thead><tbody>
       ${[...data.anforderungen].sort((a,b) => (a.angefordert||"").localeCompare(b.angefordert||"")).map(a => `
@@ -2930,6 +3233,7 @@ function render(){
   else if(state.view === "funk"){ main.innerHTML = renderFunk(); wireFunk(); }
   else if(state.view === "bespr"){ main.innerHTML = renderBespr(); wireBespr(); }
   else if(state.view === "listen"){ main.innerHTML = renderListen(); wireListen(); }
+  else if(state.view === "atemschutz"){ main.innerHTML = renderAtemschutz(); wireAtemschutz(); }
   else if(state.view === "skizze"){ main.innerHTML = renderSkizzeView(); }
   else if(state.view === "lagekarte"){ main.innerHTML = renderLagekarte(); wireLagekarte(); }
   else { main.innerHTML = renderMonitor(); wireMonitor(); }
@@ -2961,7 +3265,7 @@ if("serviceWorker" in navigator && (location.protocol === "https:" || location.h
    ================================================================ */
 const SYNC = { aktiv:false, verbunden:false, seq:0, urls:[], clients:1, pending:0, busy:false };
 const SYNC_COLS = ["einheiten","fuehrung","abschnitte","funk","besprechungen",
-  "anforderungen","checks","fotos","lageItems","lageSnapshots"];
+  "anforderungen","checks","fotos","asTraeger","asTrupps","lageItems","lageSnapshots"];
 
 function syncClientId(){
   let id = localStorage.getItem("elwis-client-id");

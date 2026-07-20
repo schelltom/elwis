@@ -782,3 +782,55 @@
   font-weight:650;color:var(--ink2)}
 .lg-layerpick button.active{background:var(--surface);color:var(--ink);box-shadow:var(--shadow)}
 @media (max-width:899px){.lg-layerpick button{min-height:42px}}
+
+/* ---------- Atemschutz: Sammelstelle & Überwachung ---------- */
+.as-nr{position:relative;flex:none;width:46px;height:46px;border-radius:50%;
+  display:grid;place-items:center;font-weight:800;font-size:1.2rem;
+  font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  background:var(--surface2);color:var(--ink);border:2.5px solid var(--ink3)}
+.as-nr.big{width:62px;height:62px;font-size:1.7rem}
+/* im Einsatz: einmal durchgestrichen */
+.as-nr.einsatz{border-color:var(--warn);color:var(--warn)}
+.as-nr.einsatz::after{content:"";position:absolute;left:8%;right:8%;top:50%;height:3px;
+  background:var(--warn);transform:rotate(-20deg)}
+/* zurück: gekreuzt durchgestrichen */
+.as-nr.zurueck{border-color:var(--ink3);color:var(--ink3);opacity:.7}
+.as-nr.zurueck::before,.as-nr.zurueck::after{content:"";position:absolute;left:6%;right:6%;top:50%;height:3px;background:var(--ink3)}
+.as-nr.zurueck::before{transform:rotate(35deg)}
+.as-nr.zurueck::after{transform:rotate(-35deg)}
+
+.as-trupp{background:var(--surface);border:1px solid var(--line);border-left:5px solid var(--ink3);
+  border-radius:14px;box-shadow:var(--shadow);padding:13px 14px;margin-bottom:10px}
+.as-trupp.status-einsatz{border-left-color:var(--warn)}
+.as-trupp.status-zurueck{border-left-color:var(--line);opacity:.7}
+.as-trupp-head{display:flex;align-items:center;gap:14px}
+.as-mit{font-weight:750;font-size:1.02rem;line-height:1.25}
+.as-typ{font-weight:600;font-size:.78rem;color:var(--ink2)}
+.as-sub2{font-size:.82rem;color:var(--ink2);margin-top:3px}
+.as-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+.as-actions .btn{min-height:46px;padding:8px 16px;font-size:.9rem}
+
+.as-traeger-list{display:grid;grid-template-columns:1fr;gap:8px}
+@media (min-width:640px){.as-traeger-list{grid-template-columns:1fr 1fr}}
+.as-traeger{display:flex;align-items:center;gap:12px;width:100%;text-align:left;
+  background:var(--surface);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow);padding:11px 14px}
+.as-traeger.gebunden{opacity:.6}
+.as-tr-name{font-weight:700}
+
+.as-pick{display:grid;grid-template-columns:1fr;gap:8px}
+@media (min-width:520px){.as-pick{grid-template-columns:1fr 1fr}}
+.as-pick button{display:flex;flex-direction:column;align-items:flex-start;gap:2px;
+  min-height:56px;padding:10px 14px;border:2px solid var(--line);border-radius:12px;
+  background:var(--surface);color:var(--ink);font-weight:650;text-align:left}
+.as-pick button small{font-weight:500;color:var(--ink3);font-size:.76rem}
+.as-pick button.active{border-color:var(--accent);background:color-mix(in oklab,var(--accent) 9%,var(--surface))}
+
+.as-ueber-list{display:grid;grid-template-columns:1fr;gap:12px}
+@media (min-width:900px){.as-ueber-list{grid-template-columns:1fr 1fr}}
+.as-ueber{display:flex;align-items:center;gap:14px;background:var(--surface);
+  border:1px solid var(--line);border-left:5px solid var(--warn);border-radius:14px;
+  box-shadow:var(--shadow);padding:14px 16px}
+.as-timer{display:flex;flex-direction:column;align-items:flex-end;gap:8px}
+.as-timer .mono{font-size:1.5rem;font-weight:800}
+.as-timer .mono.warn{color:var(--warn)}
+.as-timer .mono.krit{color:var(--accent)}
