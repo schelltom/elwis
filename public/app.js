@@ -1492,8 +1492,11 @@ function asNrBadge(t, big){
 function truppCard(t){
   const mitglieder = (t.memberIds||[]).map(id => {
     const tr = state.asTraeger.find(x => x.id === id);
-    return tr ? `${esc(tr.name)}${tr.geraetetyp?` <span class="as-typ">${esc(tr.geraetetyp)}</span>`:""}` : "?";
-  }).join(" · ");
+    if(!tr) return "?";
+    const d = (t.druck||{})[id] || {};
+    const dr = (d.start || d.end) ? ` <span class="as-druck">${d.start?esc(d.start):"–"}${d.end?"→"+esc(d.end):""} bar</span>` : "";
+    return `${esc(tr.name)}${tr.geraetetyp?` <span class="as-typ">${esc(tr.geraetetyp)}</span>`:""}${dr}`;
+  }).join("<br>");
   const zeile = [
     t.abschnitt ? `Abschnitt: <strong>${esc(t.abschnitt)}</strong>` : "",
     t.funkruf ? `Funk: <strong>${esc(t.funkruf)}</strong>` : "",
@@ -1534,7 +1537,7 @@ function renderASSammelstelle(){
     <button class="as-traeger ${trupp?"gebunden":""}" data-astraegeredit="${tr.id}">
       <div style="flex:1;min-width:0">
         <div class="as-tr-name">${esc(tr.name) || "<span style='color:var(--ink3)'>ohne Name</span>"}</div>
-        <div class="as-sub2">${esc(tr.feuerwehr||"")}${tr.geraetetyp?` · ${esc(tr.geraetetyp)}`:""}${tr.zusatz?` · ${esc(tr.zusatz)}`:""}</div>
+        <div class="as-sub2">${esc(tr.feuerwehr||"")}${tr.geraetetyp?` · ${esc(tr.geraetetyp)}`:""}${tr.geraeteNr?` · Gerät ${esc(tr.geraeteNr)}`:""}${tr.maskeNr?` · Maske ${esc(tr.maskeNr)}`:""}${tr.zusatz?` · ${esc(tr.zusatz)}`:""}</div>
       </div>
       ${trupp ? `<span class="chip">Trupp ${trupp.nr}</span>` : `<span class="chip chip-POL">frei</span>`}
     </button>`;
@@ -1560,7 +1563,10 @@ function renderASUeberwachung(){
   const aktiv = state.asTrupps.filter(t => t.status === "einsatz").sort((a,b) => a.nr-b.nr);
   if(!aktiv.length) return `<div class="empty"><p>Kein Trupp im Einsatz.<br>Trupps unter PA erscheinen hier mit laufender Einsatzzeit.</p></div>`;
   const cards = aktiv.map(t => {
-    const mit = (t.memberIds||[]).map(id => esc(asTraegerName(id))).join(" · ");
+    const mit = (t.memberIds||[]).map(id => {
+      const d = (t.druck||{})[id] || {};
+      return esc(asTraegerName(id)) + (d.start ? ` <span class="as-druck">${esc(d.start)} bar</span>` : "");
+    }).join("<br>");
     const typ = (t.memberIds||[]).map(id => (state.asTraeger.find(x=>x.id===id)||{}).geraetetyp).filter(Boolean)[0] || "";
     return `
     <div class="as-ueber">
@@ -1606,10 +1612,8 @@ function wireAtemschutz(){
     const t = state.asTrupps.find(x => x.id === b.dataset.asein);
     if(t){ t.status = "einsatz"; t.ausgerueckt = new Date().toISOString(); markChange(); render(); }
   }));
-  document.querySelectorAll("[data-aszurueck]").forEach(b => b.addEventListener("click", () => {
-    const t = state.asTrupps.find(x => x.id === b.dataset.aszurueck);
-    if(t){ t.status = "zurueck"; t.rueckkehr = new Date().toISOString(); markChange(); render(); }
-  }));
+  document.querySelectorAll("[data-aszurueck]").forEach(b =>
+    b.addEventListener("click", () => openRueckmeldung(b.dataset.aszurueck)));
   document.querySelectorAll("[data-aswieder]").forEach(b => b.addEventListener("click", () => {
     const t = state.asTrupps.find(x => x.id === b.dataset.aswieder);
     if(!t) return;
@@ -1624,10 +1628,48 @@ function wireAtemschutz(){
   if(state.asSub === "ueberwachung") asTick();
 }
 
+function openRueckmeldung(id){
+  const t = state.asTrupps.find(x => x.id === id);
+  if(!t) return;
+  const jetzt = fmtZeit(new Date().toISOString());
+  const rows = (t.memberIds||[]).map(mid => {
+    const tr = state.asTraeger.find(x => x.id === mid) || {};
+    const d = t.druck[mid] || {};
+    return `<div class="as-druckrow">
+      <span>${esc(tr.name||"?")}<br><small class="mono" style="color:var(--ink3)">Start ${d.start?esc(d.start)+" bar":"–"}</small></span>
+      <input data-endd="${esc(mid)}" class="mono" inputmode="numeric" value="${esc(d.end||"")}" placeholder="Enddruck bar"></div>`;
+  }).join("");
+  $("#sheetHost").innerHTML = `
+  <div class="sheet-backdrop" data-close="1"></div>
+  <div class="sheet" role="dialog" aria-modal="true" aria-label="Trupp zurückgemeldet">
+    <div class="sheet-head"><h2>Trupp ${t.nr} zurückgemeldet</h2>
+      <button class="sheet-close" data-close="1" aria-label="Schließen">×</button></div>
+    <div class="sheet-body">
+      <div class="field" style="max-width:170px"><label for="rm-zeit">Rückkehr-Uhrzeit</label>
+        <input id="rm-zeit" type="time" class="mono" value="${jetzt}"></div>
+      <div class="field"><label>Enddruck je Träger (bar)</label><div>${rows}</div></div>
+    </div>
+    <div class="sheet-foot">
+      <button class="btn btn-primary btn-block" id="rm-save" style="flex:1">Rückmeldung speichern</button>
+    </div>
+  </div>`;
+  document.querySelectorAll("[data-close]").forEach(el => el.addEventListener("click", closeEditor));
+  $("#rm-save").addEventListener("click", () => {
+    document.querySelectorAll("[data-endd]").forEach(inp => {
+      t.druck[inp.dataset.endd] = t.druck[inp.dataset.endd] || {};
+      t.druck[inp.dataset.endd].end = inp.value.trim();
+    });
+    const tv = $("#rm-zeit").value;
+    const d = new Date();
+    if(tv){ const [h,m] = tv.split(":").map(Number); d.setHours(h,m,0,0); }
+    t.status = "zurueck"; t.rueckkehr = d.toISOString();
+    markChange(); closeEditor(); render();
+  });
+}
 function openTraegerEditor(id){
   const neu = !id;
   const tr = id ? {...state.asTraeger.find(x => x.id === id)}
-    : { id:uid(), name:"", feuerwehr:"", geraetetyp:AS_GERAETETYPEN[0], zusatz:"" };
+    : { id:uid(), name:"", feuerwehr:"", geraetetyp:AS_GERAETETYPEN[0], geraeteNr:"", maskeNr:"", zusatz:"" };
   $("#sheetHost").innerHTML = `
   <div class="sheet-backdrop" data-close="1"></div>
   <div class="sheet" role="dialog" aria-modal="true" aria-label="${neu?"Träger registrieren":"Träger bearbeiten"}">
@@ -1644,6 +1686,13 @@ function openTraegerEditor(id){
           ${AS_GERAETETYPEN.map(g => `<button type="button" data-tr-typ="${esc(g)}" class="${tr.geraetetyp===g?"active":""}">${esc(g)}</button>`).join("")}
         </div>
         <p class="hint">2×300 = Langzeitatmer (doppelte Einsatzzeit).</p></div>
+      <div class="field"><label style="margin-bottom:8px">Gerät &amp; Maske</label>
+        <div style="display:flex;gap:10px;flex-wrap:wrap">
+          <div style="flex:1;min-width:130px"><label for="tr-gnr" style="font-size:.72rem">Gerätenummer</label>
+            <input id="tr-gnr" class="mono" value="${esc(tr.geraeteNr||"")}" placeholder="PA-Nr." autocomplete="off"></div>
+          <div style="flex:1;min-width:130px"><label for="tr-mnr" style="font-size:.72rem">Maskennummer</label>
+            <input id="tr-mnr" class="mono" value="${esc(tr.maskeNr||"")}" placeholder="Masken-Nr." autocomplete="off"></div>
+        </div></div>
       <div class="field"><label for="tr-zusatz">Zusatz / Sonderausbildung <span style="text-transform:none;font-weight:500">(optional)</span></label>
         <input id="tr-zusatz" value="${esc(tr.zusatz)}" placeholder="z. B. Rettungstrupp, Absturzsicherung, Zusatzmaterial" autocomplete="off"></div>
     </div>
@@ -1667,6 +1716,8 @@ function openTraegerEditor(id){
   $("#tr-save").addEventListener("click", () => {
     tr.name = $("#tr-name").value.trim();
     tr.feuerwehr = $("#tr-fw").value.trim();
+    tr.geraeteNr = $("#tr-gnr").value.trim();
+    tr.maskeNr = $("#tr-mnr").value.trim();
     tr.zusatz = $("#tr-zusatz").value.trim();
     if(!tr.name){ $("#tr-name").focus(); return; }
     const i = state.asTraeger.findIndex(x => x.id === tr.id);
@@ -1677,9 +1728,10 @@ function openTraegerEditor(id){
 
 function openTruppEditor(id, vorbelegt){
   const neu = !id;
-  const t = id ? {...state.asTrupps.find(x => x.id === id), memberIds:[...(state.asTrupps.find(x=>x.id===id).memberIds||[])]}
+  const src = id ? state.asTrupps.find(x => x.id === id) : null;
+  const t = id ? {...src, memberIds:[...(src.memberIds||[])], druck: JSON.parse(JSON.stringify(src.druck||{}))}
     : { id:uid(), nr:asNextTruppNr(), memberIds:[...(vorbelegt||[])], abschnitt:"", funkruf:"", zusatz:"",
-        status:"registriert", ausgerueckt:"", rueckkehr:"" };
+        status:"registriert", ausgerueckt:"", rueckkehr:"", druck:{} };
   // Auswählbare Träger: freie + die bereits in diesem Trupp
   const waehlbar = state.asTraeger.filter(tr => {
     const trupp = asTruppOf(tr.id);
@@ -1699,6 +1751,8 @@ function openTruppEditor(id, vorbelegt){
             </button>`).join("") : `<p class="hint" style="margin:0">Keine freien Träger – erst welche registrieren.</p>`}
         </div>
         <p class="hint" id="tr-count">${t.memberIds.length} ausgewählt</p></div>
+      <div class="field" id="tp-druck-feld"><label>Startdruck je Träger (bar)</label>
+        <div id="tp-druck"></div></div>
       <div class="field"><label for="tp-ab">Einsatzabschnitt</label>
         <input id="tp-ab" value="${esc(t.abschnitt)}" list="tp-ab-list" placeholder="Abschnitt, der den Trupp angefordert hat" autocomplete="off">
         <datalist id="tp-ab-list">${state.abschnitte.map(a=>`<option value="${esc(a.name)}">`).join("")}</datalist></div>
@@ -1716,12 +1770,29 @@ function openTruppEditor(id, vorbelegt){
     </div>
   </div>`;
   document.querySelectorAll("[data-close]").forEach(el => el.addEventListener("click", closeEditor));
+  const leseDruck = () => document.querySelectorAll("[data-druck]").forEach(inp => {
+    t.druck[inp.dataset.druck] = t.druck[inp.dataset.druck] || {};
+    t.druck[inp.dataset.druck].start = inp.value.trim();
+  });
+  const baueDruck = () => {
+    $("#tp-druck-feld").style.display = t.memberIds.length ? "" : "none";
+    $("#tp-druck").innerHTML = t.memberIds.map(mid => {
+      const tr = state.asTraeger.find(x => x.id === mid) || {};
+      const d = (t.druck[mid]||{}).start || "";
+      return `<div class="as-druckrow">
+        <span>${esc(tr.name||"?")}${tr.geraeteNr?` <small class="mono">(${esc(tr.geraeteNr)})</small>`:""}</span>
+        <input data-druck="${esc(mid)}" class="mono" inputmode="numeric" value="${esc(d)}" placeholder="bar"></div>`;
+    }).join("");
+  };
+  baueDruck();
   document.querySelectorAll("[data-pick]").forEach(b => b.addEventListener("click", () => {
+    leseDruck();  // aktuelle Eingaben sichern, bevor neu aufgebaut wird
     const pid = b.dataset.pick;
     if(t.memberIds.includes(pid)) t.memberIds = t.memberIds.filter(x => x !== pid);
     else if(t.memberIds.length < 3) t.memberIds.push(pid);
     document.querySelectorAll("[data-pick]").forEach(x => x.classList.toggle("active", t.memberIds.includes(x.dataset.pick)));
     $("#tr-count").textContent = `${t.memberIds.length} ausgewählt`;
+    baueDruck();
   }));
   const setTime = (field, val) => {
     if(!val) return;
@@ -1731,6 +1802,9 @@ function openTruppEditor(id, vorbelegt){
   };
   $("#tp-save").addEventListener("click", () => {
     if(t.memberIds.length < 2){ modalInfo("Ein Trupp braucht mindestens 2 Träger."); return; }
+    leseDruck();
+    // Druck-Einträge auf aktuelle Mitglieder begrenzen
+    Object.keys(t.druck).forEach(k => { if(!t.memberIds.includes(k)) delete t.druck[k]; });
     t.abschnitt = $("#tp-ab").value.trim();
     t.funkruf = $("#tp-funk").value.trim();
     t.zusatz = $("#tp-zusatz").value.trim();
@@ -3126,16 +3200,23 @@ function doPrint(data){
     ${unitRows ? `<table><thead><tr><th>Ankunft</th><th>Organisation</th><th>Funkrufname</th>${showAb?"<th>Abschnitt</th>":""}<th>Stärke</th><th>AGT</th><th>Status</th></tr></thead><tbody>${unitRows}</tbody></table>` : "<p>Keine erfasst.</p>"}
     ${(data.asTrupps||[]).length ? `
     <h2>Atemschutz – Trupps (${data.asTrupps.length})</h2>
-    <table><thead><tr><th>Nr.</th><th>Mitglieder</th><th>Gerätetyp</th><th>Abschnitt / Funk</th><th>Ausgerückt</th><th>Zurück</th></tr></thead><tbody>
+    <table><thead><tr><th>Nr.</th><th>Träger</th><th>Feuerwehr</th><th>Gerät</th><th>Maske</th><th>Typ</th><th>Start</th><th>Ende</th><th>Abschnitt / Funk</th><th>ab</th><th>zurück</th></tr></thead><tbody>
       ${[...data.asTrupps].sort((a,b)=>a.nr-b.nr).map(t => {
-        const mem = (t.memberIds||[]).map(id => { const tr=(data.asTraeger||[]).find(x=>x.id===id); return tr?esc(tr.name):"?"; }).join(", ");
-        const typ = (t.memberIds||[]).map(id => ((data.asTraeger||[]).find(x=>x.id===id)||{}).geraetetyp).filter(Boolean)[0] || "";
-        return `<tr>
-          <td class="p-mono">${t.nr}</td><td>${mem}</td><td>${esc(typ)}</td>
-          <td>${esc(t.abschnitt||"–")}${t.funkruf?" / "+esc(t.funkruf):""}</td>
-          <td class="p-mono">${t.ausgerueckt?fmtZeit(t.ausgerueckt):"–"}</td>
-          <td class="p-mono">${t.rueckkehr?fmtZeit(t.rueckkehr):"–"}</td>
-        </tr>`;
+        const ids = t.memberIds||[];
+        return ids.map((id,idx) => {
+          const tr = (data.asTraeger||[]).find(x=>x.id===id) || {};
+          const d = (t.druck||{})[id] || {};
+          return `<tr>
+            <td class="p-mono">${idx===0?t.nr:""}</td>
+            <td>${esc(tr.name||"?")}</td><td>${esc(tr.feuerwehr||"")}</td>
+            <td class="p-mono">${esc(tr.geraeteNr||"")}</td><td class="p-mono">${esc(tr.maskeNr||"")}</td>
+            <td>${esc(tr.geraetetyp||"")}</td>
+            <td class="p-mono">${d.start?esc(d.start):""}</td><td class="p-mono">${d.end?esc(d.end):""}</td>
+            <td>${idx===0?esc(t.abschnitt||"–")+(t.funkruf?" / "+esc(t.funkruf):""):""}</td>
+            <td class="p-mono">${idx===0&&t.ausgerueckt?fmtZeit(t.ausgerueckt):""}</td>
+            <td class="p-mono">${idx===0&&t.rueckkehr?fmtZeit(t.rueckkehr):""}</td>
+          </tr>`;
+        }).join("");
       }).join("")}
     </tbody></table>` : ""}
     <h2>Nachforderungen (${(data.anforderungen||[]).length})</h2>

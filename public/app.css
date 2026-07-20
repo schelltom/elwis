@@ -1,7 +1,7 @@
 :root{
-    --bg:#FAF9F7; --surface:#FFFFFF; --surface2:#F1EEE8;
-    --ink:#26221F; --ink2:#5C564F; --ink3:#8A837A;
-    --line:#E4E0D8; --shadow:0 1px 3px rgba(38,34,31,.08),0 4px 14px rgba(38,34,31,.06);
+    --bg:#E9E6E0; --surface:#FFFFFF; --surface2:#DBD6CC;
+    --ink:#211E1B; --ink2:#544E47; --ink3:#7E776D;
+    --line:#BFB8AB; --shadow:0 1px 2px rgba(38,34,31,.12),0 4px 14px rgba(38,34,31,.10);
     --accent:#C4232B; --accent-ink:#FFFFFF; --accent-press:#A31B22;
     --fw:#C4232B; --brk:#B8720F; --pol:#256B3D; --thw:#23539E; --son:#6E6862;
     --good:#1E7A3C; --good-bg:#E1F0E4;
@@ -11,9 +11,9 @@
   }
   @media (prefers-color-scheme:dark){
     :root{
-      --bg:#1A1817; --surface:#242120; --surface2:#2D2A27;
-      --ink:#F2EFEA; --ink2:#B5AFA6; --ink3:#847E75;
-      --line:#3A3531; --shadow:0 1px 3px rgba(0,0,0,.4),0 4px 14px rgba(0,0,0,.3);
+      --bg:#121110; --surface:#221F1D; --surface2:#2F2B27;
+      --ink:#F3F0EB; --ink2:#B9B3A9; --ink3:#8C857B;
+      --line:#493F38; --shadow:0 1px 3px rgba(0,0,0,.5),0 6px 18px rgba(0,0,0,.42);
       --accent:#D93A32; --accent-ink:#FFFFFF; --accent-press:#B72C26;
       --fw:#D93A32; --brk:#BE8A18; --pol:#2E9560; --thw:#5D93E3; --son:#8A857E;
       --good:#4CAF6E; --good-bg:#22352A;
@@ -22,9 +22,9 @@
     }
   }
   :root[data-theme="dark"]{
-    --bg:#1A1817; --surface:#242120; --surface2:#2D2A27;
-    --ink:#F2EFEA; --ink2:#B5AFA6; --ink3:#847E75;
-    --line:#3A3531; --shadow:0 1px 3px rgba(0,0,0,.4),0 4px 14px rgba(0,0,0,.3);
+    --bg:#121110; --surface:#221F1D; --surface2:#2F2B27;
+    --ink:#F3F0EB; --ink2:#B9B3A9; --ink3:#8C857B;
+    --line:#493F38; --shadow:0 1px 3px rgba(0,0,0,.5),0 6px 18px rgba(0,0,0,.42);
     --accent:#D93A32; --accent-ink:#FFFFFF; --accent-press:#B72C26;
     --fw:#D93A32; --brk:#BE8A18; --pol:#2E9560; --thw:#5D93E3; --son:#8A857E;
     --good:#4CAF6E; --good-bg:#22352A;
@@ -32,9 +32,9 @@
     color-scheme:dark;
   }
   :root[data-theme="light"]{
-    --bg:#FAF9F7; --surface:#FFFFFF; --surface2:#F1EEE8;
-    --ink:#26221F; --ink2:#5C564F; --ink3:#8A837A;
-    --line:#E4E0D8; --shadow:0 1px 3px rgba(38,34,31,.08),0 4px 14px rgba(38,34,31,.06);
+    --bg:#E9E6E0; --surface:#FFFFFF; --surface2:#DBD6CC;
+    --ink:#211E1B; --ink2:#544E47; --ink3:#7E776D;
+    --line:#BFB8AB; --shadow:0 1px 2px rgba(38,34,31,.12),0 4px 14px rgba(38,34,31,.10);
     --accent:#C4232B; --accent-ink:#FFFFFF; --accent-press:#A31B22;
     --fw:#C4232B; --brk:#B8720F; --pol:#256B3D; --thw:#23539E; --son:#6E6862;
     --good:#1E7A3C; --good-bg:#E1F0E4;
@@ -43,9 +43,9 @@
   }
   /* Der Einsatzmonitor ist bewusst immer dunkel – Wandschirm im ELW */
   .theme-dark{
-    --bg:#1A1817; --surface:#242120; --surface2:#2D2A27;
-    --ink:#F2EFEA; --ink2:#B5AFA6; --ink3:#847E75;
-    --line:#3A3531; --shadow:0 1px 3px rgba(0,0,0,.4),0 4px 14px rgba(0,0,0,.3);
+    --bg:#121110; --surface:#221F1D; --surface2:#2F2B27;
+    --ink:#F3F0EB; --ink2:#B9B3A9; --ink3:#8C857B;
+    --line:#493F38; --shadow:0 1px 3px rgba(0,0,0,.5),0 6px 18px rgba(0,0,0,.42);
     --accent:#D93A32; --accent-ink:#FFFFFF; --accent-press:#B72C26;
     --fw:#D93A32; --brk:#BE8A18; --pol:#2E9560; --thw:#5D93E3; --son:#8A857E;
     --good:#4CAF6E; --good-bg:#22352A;
@@ -834,3 +834,13 @@
 .as-timer .mono{font-size:1.5rem;font-weight:800}
 .as-timer .mono.warn{color:var(--warn)}
 .as-timer .mono.krit{color:var(--accent)}
+
+/* Atemschutz: Druck-Eingaben & Anzeige */
+.as-druckrow{display:flex;align-items:center;gap:12px;padding:6px 0;border-bottom:1px solid var(--line)}
+.as-druckrow:last-child{border-bottom:none}
+.as-druckrow span{flex:1;min-width:0;font-weight:650}
+.as-druckrow input{width:120px;flex:none}
+.as-druck{display:inline-block;font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  font-weight:700;font-size:.8rem;color:var(--thw);
+  background:color-mix(in oklab,var(--thw) 12%,var(--surface));border-radius:5px;padding:1px 6px}
+.as-mit{line-height:1.5}
