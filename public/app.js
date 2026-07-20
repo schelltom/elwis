@@ -2169,7 +2169,7 @@ function renderMonitor(){
     </div>` : "";
 
   return `
-  <div class="theme-dark">
+  <div class="mon-root">
     <div class="mon-toolbar">
       <button class="btn btn-ghost" id="btnMonHide" style="margin-right:8px">Kacheln ein-/ausblenden</button>
       <button class="btn btn-ghost" id="btnFull">Vollbild</button>
