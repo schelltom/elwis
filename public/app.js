@@ -103,7 +103,7 @@ function defaultState(){
   return {
     einsatzId: uid(),                      // Identität für den Sync (welcher Einsatz?)
     einsatzStart: new Date().toISOString(),
-    einsatz: { stichwort:"", ort:"", objekt:"", beginn:"", ende:"", leiter:"", bemerkung:"" },
+    einsatz: { stichwort:"", ort:"", objekt:"", beginn:"", ende:"", leiter:"", bemerkung:"", ilsGruppe:"TMO 2772" },
     einheiten: [], fuehrung: [], abschnitte: [], archiv: [],
     lage: { items: [], bg: "", snapshots: [], mode: "raster", mapView: null, mapLayer: "luftbild" },
     funk: [], besprechungen: [], anforderungen: [], checks: [], fotos: [],
@@ -131,6 +131,12 @@ if(!Array.isArray(state.checks)) state.checks = [];
 if(!Array.isArray(state.fotos)) state.fotos = [];
 if(!Array.isArray(state.asTraeger)) state.asTraeger = [];
 if(!Array.isArray(state.asTrupps)) state.asTrupps = [];
+// Abschnitte: alte TMO/DMO-Felder auf Führungs-/Arbeitsgruppe (je Modus + Gruppe) migrieren
+state.abschnitte.forEach(a => {
+  if(!a.fuehrung) a.fuehrung = { mode:"TMO", gruppe: a.tmo || "" };
+  if(!a.arbeit)   a.arbeit   = { mode:"DMO", gruppe: a.dmo || "" };
+});
+if(state.einsatz.ilsGruppe == null) state.einsatz.ilsGruppe = "TMO 2772";
 if(!state.asSub) state.asSub = "sammelstelle";
 if(!state.monHide || typeof state.monHide !== "object") state.monHide = { panels: {}, ab: {} };
 state.monHide.panels = state.monHide.panels || {};
@@ -203,6 +209,8 @@ function abNameOf(id, list){
   const a = (list || state.abschnitte).find(x => x.id === id);
   return a ? a.name : "";
 }
+/* Funkgruppe „<TMO|DMO> <Gruppe>“ (leer wenn keine Gruppe hinterlegt) */
+function gruppeStr(g){ return (g && g.gruppe) ? `${g.mode || "TMO"} ${g.gruppe}` : ""; }
 /* Kurzkürzel für eine Abschnittsfläche: „EA <Nr>“ (Nr. aus dem Namen, sonst Reihenfolge) */
 function abKuerzel(id){
   const idx = state.abschnitte.findIndex(a => a.id === id);
@@ -469,7 +477,7 @@ function renderEinsatz(){
   const abRows = state.abschnitte.map(a => {
     const n = state.einheiten.filter(u => u.abschnitt === a.id).length;
     const funk = [a.ansprechpartner ? `AP ${a.ansprechpartner}` : "",
-      a.tmo ? `TMO ${a.tmo}` : "", a.dmo ? `DMO ${a.dmo}` : ""].filter(Boolean).join(" · ");
+      gruppeStr(a.fuehrung), gruppeStr(a.arbeit)].filter(Boolean).join(" · ");
     return `
     <div class="arch">
       <div class="a-main">
@@ -514,6 +522,8 @@ function renderEinsatz(){
   </div>
   <div class="card">
     <h2>Einsatzabschnitte</h2>
+    <div class="field"><label for="f-ils">Kommunikation zur Leitstelle</label>
+      <input id="f-ils" data-ez="ilsGruppe" class="mono" value="${esc(e.ilsGruppe||"")}" placeholder="z. B. TMO 2772"></div>
     ${abRows || `<p class="hint" style="margin:0 0 12px">Noch keine Abschnitte – Einheiten lassen sich bei der Erfassung einem Abschnitt zuordnen.</p>`}
     <button class="btn btn-ghost btn-block" id="abAdd" style="margin-top:${abRows?"12px":"0"}">＋&nbsp; Abschnitt anlegen</button>
   </div>
@@ -753,7 +763,7 @@ async function endeEinsatz(){
   const entry = baueArchivEintrag();
   state.archiv.push(entry);
   state.einsatzId = uid(); state.einsatzStart = new Date().toISOString();
-  state.einsatz = { stichwort:"", ort:"", objekt:"", beginn:nowLocalInput(), ende:"", leiter:"", bemerkung:"" };
+  state.einsatz = { stichwort:"", ort:"", objekt:"", beginn:nowLocalInput(), ende:"", leiter:"", bemerkung:"", ilsGruppe:"TMO 2772" };
   state.einheiten = []; state.fuehrung = []; state.abschnitte = [];
   state.lage = { items: [], bg: "", snapshots: [], mode: "raster", mapView: null, mapLayer: "luftbild" };
   state.funk = []; state.besprechungen = [];
@@ -778,8 +788,8 @@ function loadDemo(){
     lagebespr: `${String(lbT.getHours()).padStart(2,"0")}:${String(lbT.getMinutes()).padStart(2,"0")}`,
   };
   state.abschnitte = [
-    { id:a1, name:"Abschnitt 1 – Brandbekämpfung",  ansprechpartner:"Florian Weiden 3/1",      tmo:"2901", dmo:"307_F" },
-    { id:a2, name:"Abschnitt 2 – Wasserversorgung", ansprechpartner:"Florian Rothenstadt 10/1", tmo:"2902", dmo:"308_F" },
+    { id:a1, name:"Abschnitt 1 – Brandbekämpfung",  ansprechpartner:"Florian Weiden 3/1",      fuehrung:{mode:"TMO",gruppe:"2901"}, arbeit:{mode:"DMO",gruppe:"307_F"} },
+    { id:a2, name:"Abschnitt 2 – Wasserversorgung", ansprechpartner:"Florian Rothenstadt 10/1", fuehrung:{mode:"TMO",gruppe:"2902"}, arbeit:{mode:"DMO",gruppe:"308_F"} },
   ];
   state.einheiten = [
     { id:uid(), org:"FW",  name:"Florian Weiden",      kennung:"40/1", f:0,u:1,m:8, agt:4, ankunft:t(42), abgerueckt:false, abschnitt:a1 },
@@ -894,7 +904,7 @@ function renderKraefte(){
     list = groups.map(g => {
       const us = sorted.filter(u => (u.abschnitt||"") === g.id);
       if(!us.length) return "";
-      const funk = [g.tmo ? `TMO ${g.tmo}` : "", g.dmo ? `DMO ${g.dmo}` : ""].filter(Boolean).join(" · ");
+      const funk = [gruppeStr(g.fuehrung), gruppeStr(g.arbeit)].filter(Boolean).join(" · ");
       return `<h3 class="group-h">${esc(g.name)} <span>· ${us.length}${funk ? " · " + esc(funk) : ""}</span></h3>
         <div class="unit-list">${us.map(unitCard).join("")}</div>`;
     }).join("");
@@ -1217,9 +1227,9 @@ function openAbEditor(id){
   if(id){
     const a = state.abschnitte.find(x => x.id === id);
     if(!a) return;
-    editingAb = { ab: {...a}, isNew:false };
+    editingAb = { ab: {...a, fuehrung:{...(a.fuehrung||{mode:"TMO",gruppe:""})}, arbeit:{...(a.arbeit||{mode:"DMO",gruppe:""})}}, isNew:false };
   }else{
-    editingAb = { ab: { id:uid(), name:"", ansprechpartner:"", tmo:"", dmo:"" }, isNew:true };
+    editingAb = { ab: { id:uid(), name:"", ansprechpartner:"", fuehrung:{mode:"TMO",gruppe:""}, arbeit:{mode:"DMO",gruppe:""} }, isNew:true };
   }
   renderAbSheet();
 }
@@ -1239,14 +1249,23 @@ function renderAbSheet(){
       <div class="field"><label for="ab-ap">Ansprechpartner</label>
         <input id="ab-ap" class="mono" value="${esc(a.ansprechpartner||"")}" placeholder="z. B. Florian Weiden 3/1" autocomplete="off">
         <p class="hint">Funkrufname oder Name des Abschnittsleiters / Ansprechpartners.</p></div>
-      <div class="field"><label style="margin-bottom:10px">Erreichbarkeit (Digitalfunk)</label>
-        <div class="form-grid">
-          <div class="field"><label for="ab-tmo">TMO-Gruppe</label>
-            <input id="ab-tmo" class="mono" value="${esc(a.tmo||"")}" placeholder="z. B. 2901" autocomplete="off"></div>
-          <div class="field"><label for="ab-dmo">DMO-Gruppe</label>
-            <input id="ab-dmo" class="mono" value="${esc(a.dmo||"")}" placeholder="z. B. 307_F" autocomplete="off"></div>
+      <div class="field"><label for="ab-fg-mode">Führungsgruppe <span style="text-transform:none;font-weight:500">(zur Einsatzleitung)</span></label>
+        <div style="display:flex;gap:8px">
+          <select id="ab-fg-mode" style="width:110px;flex:none">
+            <option value="TMO" ${a.fuehrung.mode==="TMO"?"selected":""}>TMO</option>
+            <option value="DMO" ${a.fuehrung.mode==="DMO"?"selected":""}>DMO</option>
+          </select>
+          <input id="ab-fg-grp" class="mono" value="${esc(a.fuehrung.gruppe||"")}" placeholder="z. B. 2901" autocomplete="off">
+        </div></div>
+      <div class="field"><label for="ab-ag-mode">Arbeitsgruppe <span style="text-transform:none;font-weight:500">(im Abschnitt)</span></label>
+        <div style="display:flex;gap:8px">
+          <select id="ab-ag-mode" style="width:110px;flex:none">
+            <option value="TMO" ${a.arbeit.mode==="TMO"?"selected":""}>TMO</option>
+            <option value="DMO" ${a.arbeit.mode==="DMO"?"selected":""}>DMO</option>
+          </select>
+          <input id="ab-ag-grp" class="mono" value="${esc(a.arbeit.gruppe||"")}" placeholder="z. B. 307_F" autocomplete="off">
         </div>
-        <p class="hint">TMO z. B. Sondergruppe „2901“ (SoGr 1), DMO z. B. „307_F“. Wird auf dem Einsatzmonitor beim Abschnitt angezeigt.</p>
+        <p class="hint">Führungsgruppe steht in der Funkskizze an der Linie zur Einsatzleitung, die Arbeitsgruppe im Abschnitts-Kästchen.</p>
       </div>
     </div>
     <div class="sheet-foot">
@@ -1267,8 +1286,9 @@ function renderAbSheet(){
     a.name = $("#ab-name").value.trim();
     if(!a.name){ $("#ab-name").focus(); return; }
     a.ansprechpartner = $("#ab-ap").value.trim();
-    a.tmo = $("#ab-tmo").value.trim();
-    a.dmo = $("#ab-dmo").value.trim();
+    a.fuehrung = { mode: $("#ab-fg-mode").value, gruppe: $("#ab-fg-grp").value.trim() };
+    a.arbeit   = { mode: $("#ab-ag-mode").value, gruppe: $("#ab-ag-grp").value.trim() };
+    delete a.tmo; delete a.dmo;
     const idx = state.abschnitte.findIndex(x => x.id === a.id);
     if(idx >= 0) state.abschnitte[idx] = a; else state.abschnitte.push(a);
     markChange(); closeEditor(); render();
@@ -2110,8 +2130,8 @@ function renderMonitor(){
         <td class="num mono">${u.agt||"–"}</td>
       </tr>`).join("");
     const funk = [
-      opts.tmo ? `<span class="funk-badge"><small>TMO</small>${esc(opts.tmo)}</span>` : "",
-      opts.dmo ? `<span class="funk-badge"><small>DMO</small>${esc(opts.dmo)}</span>` : "",
+      gruppeStr(opts.fuehrung) ? `<span class="funk-badge"><small>Führung</small>${esc(gruppeStr(opts.fuehrung))}</span>` : "",
+      gruppeStr(opts.arbeit) ? `<span class="funk-badge"><small>Arbeit</small>${esc(gruppeStr(opts.arbeit))}</span>` : "",
     ].join("");
     return `
     <div class="ab-card ${opts.none ? "none" : ""} ${opts.br ? "br" : ""}">
@@ -2276,7 +2296,7 @@ function monCardsData(){
   if(state.abschnitte.length){
     state.abschnitte.forEach(a => { if(!hid[a.id]) cards.push({
       key:a.id, title:a.name, units:act.filter(u => u.abschnitt === a.id),
-      opts:{ tmo:a.tmo, dmo:a.dmo, ansprechpartner:a.ansprechpartner } }); });
+      opts:{ fuehrung:a.fuehrung, arbeit:a.arbeit, ansprechpartner:a.ansprechpartner } }); });
     const rest = act.filter(u => u.abschnitt !== "BR" &&
       (!u.abschnitt || !state.abschnitte.some(a => a.id === u.abschnitt)));
     if(rest.length && !hid.rest) cards.push({ key:"rest", title:"Ohne Abschnitt", units:rest, opts:{ none:true } });
@@ -2717,7 +2737,7 @@ function renderFunkskizze(){
     </div>`;
   const ilsTeil = `
     <div class="fkbox ils"><strong>${esc(c.ilsName || "Leitstelle")}</strong><small>Leitstelle</small></div>
-    <div class="fk-vline"><span class="fk-grp">TMO ${esc(c.ilsGruppe || "—")}</span></div>`;
+    <div class="fk-vline"><span class="fk-grp">${esc(state.einsatz.ilsGruppe || c.ilsGruppe || "—")}</span></div>`;
   if(!state.abschnitte.length){
     return `<div class="fk-skizze">${ilsTeil}${elBox}</div>
       <p class="hint" style="text-align:center">Noch keine Einsatzabschnitte angelegt – die Skizze wächst automatisch mit (Tab „Einsatz“).</p>`;
@@ -2727,13 +2747,13 @@ function renderFunkskizze(){
     const units = act.filter(u => u.abschnitt === a.id);
     return `
     <div class="fk-branch">
-      <div class="fk-vline"><span class="fk-grp">${a.tmo ? "TMO " + esc(a.tmo) : "—"}</span></div>
+      <div class="fk-vline"><span class="fk-grp">${gruppeStr(a.fuehrung) ? esc(gruppeStr(a.fuehrung)) : "—"}</span></div>
       <div class="fkbox">
         <strong>${esc(a.name)}</strong>
         ${a.ansprechpartner ? `<small class="mono">${esc(a.ansprechpartner)}</small>` : ""}
         <small>${units.length} Einheit${units.length===1?"":"en"}</small>
         <div class="fk-badges">
-          ${a.dmo ? `<span class="funk-badge"><small>DMO</small>${esc(a.dmo)}</span>` : `<span class="hint" style="margin:0">keine DMO-Gruppe</span>`}
+          ${gruppeStr(a.arbeit) ? `<span class="funk-badge"><small>Arbeit</small>${esc(gruppeStr(a.arbeit))}</span>` : `<span class="hint" style="margin:0">keine Arbeitsgruppe</span>`}
         </div>
       </div>
     </div>`;
@@ -3328,9 +3348,10 @@ function doPrint(data){
       <tr><td>Einsatzdauer</td><td>${dauerStr(e.beginn, pEnde) || "–"}</td></tr>
       <tr><td>Einsatzleiter</td><td>${esc(e.leiter) || "–"}</td></tr>
       ${(!pEnde && e.lagebespr) ? `<tr><td>Nächste Lagebesprechung</td><td>${esc(e.lagebespr)} Uhr</td></tr>` : ""}
+      ${e.ilsGruppe ? `<tr><td>Leitstelle</td><td>${esc(e.ilsGruppe)}</td></tr>` : ""}
       ${showAb ? `<tr><td>Abschnitte</td><td>${abs.map(a=>{
         const funk=[a.ansprechpartner?`AP ${a.ansprechpartner}`:"",
-          a.tmo?`TMO ${a.tmo}`:"",a.dmo?`DMO ${a.dmo}`:""].filter(Boolean).join(", ");
+          gruppeStr(a.fuehrung), gruppeStr(a.arbeit)].filter(Boolean).join(", ");
         return esc(a.name)+(funk?` (${esc(funk)})`:"");
       }).join(" · ")}</td></tr>` : ""}
       ${e.bemerkung ? `<tr><td>Bemerkungen</td><td>${esc(e.bemerkung)}</td></tr>` : ""}
