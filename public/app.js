@@ -1961,9 +1961,18 @@ function lgShapesSvg(items, draw){
     tmp = `<${draw.type === "area" ? "polygon" : "polyline"} class="tmp" points="${pts}"></${draw.type === "area" ? "polygon" : "polyline"}>`
       + draw.points.map(p => `<circle class="tmp-dot" cx="${p.x}" cy="${p.y}" r="1.1"></circle>`).join("");
   }
-  return `<svg class="lg-shapes" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+  const svg = `<svg class="lg-shapes" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
     ${items.filter(i => i.type === "line" || i.type === "area").map(shape).join("")}${tmp}
   </svg>`;
+  // Beschriftung verknüpfter Abschnittsflächen (HTML-Overlay, damit Text nicht verzerrt)
+  const labels = items.filter(i => i.type === "area" && i.abschnittId).map(i => {
+    const a = state.abschnitte.find(x => x.id === i.abschnittId);
+    if(!a) return "";
+    const cx = i.points.reduce((s,p) => s + p.x, 0) / i.points.length;
+    const cy = i.points.reduce((s,p) => s + p.y, 0) / i.points.length;
+    return `<span class="lg-arealbl" style="left:${cx}%;top:${cy}%">${esc(a.name)}</span>`;
+  }).join("");
+  return svg + labels;
 }
 const LG_ORG_OF = { fw:"--fw", thw:"--thw", brk:"--brk", pol:"--pol" };
 function lgFlameSvg(){
@@ -2459,6 +2468,14 @@ function openLgShapeEdit(id){
         </div>
         <p class="hint">z. B. Blau = Schlauchleitung/Wasser, Rot = Absperrung, Gold = Fläche/Bereitstellung, Grün = Abschnitt.</p>
       </div>
+      ${it.type === "area" ? `
+      <div class="field"><label for="sh-abschnitt">Einsatzabschnitt</label>
+        <select id="sh-abschnitt">
+          <option value="">– keiner –</option>
+          ${state.abschnitte.map(a => `<option value="${esc(a.id)}" ${it.abschnittId===a.id?"selected":""}>${esc(a.name)}</option>`).join("")}
+        </select>
+        <p class="hint">${state.abschnitte.length ? "Die Fläche wird mit dem Abschnitt verknüpft und dessen Name auf der Karte angezeigt." : "Noch keine Abschnitte angelegt (Tab „Einsatz“)."}</p>
+      </div>` : ""}
     </div>
     <div class="sheet-foot">
       <button class="btn btn-danger-ghost" id="sh-del">Entfernen</button>
@@ -2472,6 +2489,13 @@ function openLgShapeEdit(id){
       x.setAttribute("aria-pressed", x.dataset.shcolor === it.color));
     markChange();
   }));
+  const abSel = $("#sh-abschnitt");
+  if(abSel) abSel.addEventListener("change", () => {
+    it.abschnittId = abSel.value || "";
+    // Fläche in der Abschnittsfarbe (rot=Accent) einfärben, wenn verknüpft
+    if(it.abschnittId){ it.color = "fw"; }
+    markChange();
+  });
   $("#sh-del").addEventListener("click", () => {
     state.lage.items = state.lage.items.filter(i => i.id !== it.id);
     markChange(); closeEditor(); render();

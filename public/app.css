@@ -727,3 +727,9 @@
 .modal p{margin:0 0 18px;color:var(--ink2);line-height:1.5;white-space:pre-line}
 .modal-btns{display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap}
 .modal-btns .btn{min-height:48px}
+
+/* Beschriftung verknüpfter Abschnittsflächen auf der Lagekarte */
+.lg-arealbl{position:absolute;transform:translate(-50%,-50%);z-index:1;pointer-events:none;
+  font-size:.8rem;font-weight:800;color:var(--fw);text-align:center;white-space:nowrap;
+  background:color-mix(in oklab,var(--surface) 82%,transparent);padding:2px 8px;border-radius:6px}
+@media (min-width:1500px){.lg-arealbl{font-size:1rem}}
