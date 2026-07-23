@@ -1778,7 +1778,7 @@ function renderASUeberwachung(){
           <span class="as-chip hot"><b>Rückzugsdruck ${help(tipRz)}</b><i>${rzGov?rzGov.bar+" bar":"–"}${rzGov&&!rzGov.dyn?` <span class="as-vorlauf">vorl.</span>`:""}</i></span>
           <span class="as-chip"><b>Reserve ${help(tipReserve)}</b><i>${reserve} bar</i></span>
           <span class="as-chip"><b>erwartet ${help(tipErwartet)}</b><i>${erwartet} min</i></span>
-          <span class="as-chip"><b>ausgerückt ${help(tipAus)}</b><i>${fmtZeit(t.ausgerueckt)}</i></span>
+          <span class="as-chip"><b>ausgerückt ${help(tipAus)}</b><i>${fmtZeit(t.ausgerueckt)} Uhr</i></span>
           ${connected?`<span class="as-chip"><b>gesamt ${help(tipGesamt)}</b><i data-as-aus="${esc(t.ausgerueckt||"")}">–</i></span>`:""}
         </div>
         <div class="as-phase" data-as-phase>–</div>
