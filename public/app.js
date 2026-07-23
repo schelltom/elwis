@@ -209,8 +209,15 @@ function abNameOf(id, list){
   const a = (list || state.abschnitte).find(x => x.id === id);
   return a ? a.name : "";
 }
-/* Funkgruppe „<TMO|DMO> <Gruppe>“ (leer wenn keine Gruppe hinterlegt) */
+/* Rufgruppe „<TMO|DMO> <Gruppe>“ (leer wenn keine Gruppe hinterlegt) */
 function gruppeStr(g){ return (g && g.gruppe) ? `${g.mode || "TMO"} ${g.gruppe}` : ""; }
+/* Freitext „TMO 2772“ ⇄ Objekt {mode,gruppe,via}; robust gegen Alt-/Neuformat */
+function parseGruppe(v){
+  if(v && typeof v === "object") return { mode:v.mode||"TMO", gruppe:v.gruppe||"", via:v.via||"" };
+  const s = String(v||"").trim();
+  const m = s.match(/^(TMO|DMO)\s+(.*)$/i);
+  return m ? { mode:m[1].toUpperCase(), gruppe:m[2].trim(), via:"" } : { mode:"TMO", gruppe:s, via:"" };
+}
 /* Kurzkürzel für eine Abschnittsfläche: „EA <Nr>“ (Nr. aus dem Namen, sonst Reihenfolge) */
 function abKuerzel(id){
   const idx = state.abschnitte.findIndex(a => a.id === id);
@@ -1762,15 +1769,22 @@ function renderASUeberwachung(){
     const anchor = asMonitorStart(t);
     const rzGov = asRzTrupp(t);
     const checks = t.checks || {};
+    // Rückzug fällig, sobald EIN Träger seinen eigenen Umkehrdruck erreicht/unterschreitet (maßgeblich = wer zuerst)
+    const below = (t.memberIds||[]).some(id => {
+      const d = (t.druck||{})[id] || {}; const rz = asRzMember(d.start, d.ziel, reserve); const ist = d.k23 || d.k13;
+      return rz && ist && Number(ist) <= rz.bar;
+    });
     const mit = (t.memberIds||[]).map(id => {
       const tr = state.asTraeger.find(x => x.id === id) || {};
       const d = (t.druck||{})[id] || {};
       const rz = asRzMember(d.start, d.ziel, reserve);
+      const ist = d.k23 || d.k13;   // gemeldeter Ist-Druck bei der Druckkontrolle
+      const istLow = ist && rz && Number(ist) <= rz.bar;
       return `<div class="as-uz">${esc(tr.name||"?")}${tr.csa?` <span class="as-typ">CSA</span>`:""}
-        <span class="as-druck">${d.start?esc(d.start)+" bar":"– bar"}${d.ziel?` → Ziel ${esc(d.ziel)}`:""}${rz?` → Umkehr ${rz.bar}`:""}</span></div>`;
+        <span class="as-druck">${d.start?esc(d.start)+" bar":"– bar"}${d.ziel?` → Ziel ${esc(d.ziel)}`:""}${ist?` → jetzt <b class="${istLow?"as-low":""}">${esc(ist)}</b>`:""}${rz?` → Umkehr ${rz.bar}`:""}</span></div>`;
     }).join("");
     return `
-    <div class="as-ueber" data-as-card data-as-elapsed="${esc(anchor)}" data-as-connected="${connected?1:0}" data-as-erwartet="${erwartet}" data-as-c13="${checks.drittel?1:0}" data-as-c23="${checks.zweidrittel?1:0}">
+    <div class="as-ueber" data-as-card data-as-elapsed="${esc(anchor)}" data-as-connected="${connected?1:0}" data-as-erwartet="${erwartet}" data-as-c13="${checks.drittel?1:0}" data-as-c23="${checks.zweidrittel?1:0}" data-as-below="${below?1:0}">
       ${asNrBadge(t, true)}
       <div style="flex:1;min-width:0">
         <div class="as-mit">${mit}</div>
@@ -1830,11 +1844,15 @@ function asTick(){
       clock.classList.toggle("krit", connected && min >= erwartet);
     }
     const info = asPhaseInfo(min, erwartet, connected, c13, c23);
+    const checkDue = !!info.due;                         // 1/3- oder 2/3-Druckabfrage offen
+    const below = card.dataset.asBelow === "1";          // ein Träger hat den Umkehrdruck erreicht
+    const ph = below ? { txt:"⚠ Rückzugsdruck erreicht – Rückzug einleiten!", cls:"krit" } : info;
     const phase = card.querySelector("[data-as-phase]");
-    if(phase){ phase.textContent = info.txt; phase.className = "as-phase " + info.cls; }
-    card.classList.toggle("blink", !!info.due);          // Kachel blinkt, bis die Druckabfrage quittiert ist
+    if(phase){ phase.textContent = ph.txt; phase.className = "as-phase " + ph.cls; }
+    card.classList.toggle("blink", checkDue || below);   // Kachel blinkt bei fälliger Druckabfrage oder Rückzug
+    card.classList.toggle("danger", below);              // rot, wenn Rückzugsdruck erreicht
     const ack = card.querySelector("[data-asack]");
-    if(ack) ack.style.display = info.due ? "" : "none";
+    if(ack) ack.style.display = checkDue ? "" : "none";  // „Druck geprüft" nur bei fälliger Kontrolle
     const aus = card.querySelector("[data-as-aus]");
     if(aus) aus.textContent = asElapsedStr(aus.dataset.asAus);
   });
@@ -1863,18 +1881,8 @@ function wireAtemschutz(){
     b.addEventListener("click", () => openRueckmeldung(b.dataset.aszurueck)));
   document.querySelectorAll("[data-asziel]").forEach(b =>
     b.addEventListener("click", () => openZielmeldung(b.dataset.asziel)));
-  document.querySelectorAll("[data-asack]").forEach(b => b.addEventListener("click", () => {
-    const t = state.asTrupps.find(x => x.id === b.dataset.asack);
-    if(!t) return;
-    const erwartet = asErwartet(t);
-    const anchor = asMonitorStart(t);
-    const min = anchor ? (Date.now()-new Date(anchor).getTime())/60000 : 0;
-    t.checks = t.checks || {};
-    const now = new Date().toISOString();   // FwDV 7: Uhrzeit der Druckkontrolle bei 1/3 bzw. 2/3 registrieren
-    if(min >= erwartet/3 && !t.checks.drittel) t.checks.drittel = now;
-    else if(min >= erwartet*2/3 && !t.checks.zweidrittel) t.checks.zweidrittel = now;
-    markChange(); render();
-  }));
+  document.querySelectorAll("[data-asack]").forEach(b =>
+    b.addEventListener("click", () => openDruckkontrolle(b.dataset.asack)));
   document.querySelectorAll("[data-aswieder]").forEach(b => b.addEventListener("click", () => {
     const t = state.asTrupps.find(x => x.id === b.dataset.aswieder);
     if(!t) return;
@@ -1965,6 +1973,58 @@ function openZielmeldung(id){
     const d = new Date();
     if(tv){ const [h,m] = tv.split(":").map(Number); d.setHours(h,m,0,0); }
     t.zielZeit = d.toISOString();
+    markChange(); closeEditor(); render();
+  });
+}
+// FwDV 7: Druckkontrolle bei 1/3 bzw. 2/3 – gemeldeten Ist-Druck je Träger erfassen und Zeit registrieren
+function openDruckkontrolle(id){
+  const t = state.asTrupps.find(x => x.id === id);
+  if(!t) return;
+  t.checks = t.checks || {};
+  const erwartet = asErwartet(t);
+  const anchor = asMonitorStart(t);
+  const min = anchor ? (Date.now()-new Date(anchor).getTime())/60000 : 0;
+  // fällige Stufe = früheste offene (1/3 vor 2/3)
+  const stage = (min >= erwartet/3 && !t.checks.drittel) ? "drittel"
+    : (min >= erwartet*2/3 && !t.checks.zweidrittel) ? "zweidrittel" : "drittel";
+  const stageKey = stage === "drittel" ? "k13" : "k23";
+  const stageLbl = stage === "drittel" ? "1/3" : "2/3";
+  const reserve = asReserve(t);
+  const jetzt = fmtZeit(new Date().toISOString());
+  const rows = (t.memberIds||[]).map(mid => {
+    const tr = state.asTraeger.find(x => x.id === mid) || {};
+    const d = t.druck[mid] || {};
+    const rz = asRzMember(d.start, d.ziel, reserve);
+    return `<div class="as-druckrow">
+      <span>${esc(tr.name||"?")}<br><small class="mono" style="color:var(--ink3)">Start ${d.start?esc(d.start):"–"} · Umkehr ${rz?rz.bar:"–"} bar</small></span>
+      <input data-kd="${esc(mid)}" class="mono" inputmode="numeric" value="${esc(d[stageKey]||"")}" placeholder="Ist-Druck bar"></div>`;
+  }).join("");
+  $("#sheetHost").innerHTML = `
+  <div class="sheet-backdrop" data-close="1"></div>
+  <div class="sheet" role="dialog" aria-modal="true" aria-label="Druckkontrolle">
+    <div class="sheet-head"><h2>Trupp ${t.nr} – Druckkontrolle ${stageLbl}</h2>
+      <button class="sheet-close" data-close="1" aria-label="Schließen">×</button></div>
+    <div class="sheet-body">
+      <div class="field" style="max-width:170px"><label for="kd-zeit">Uhrzeit</label>
+        <input id="kd-zeit" type="time" class="mono" value="${jetzt}"></div>
+      <div class="field"><label>Gemeldeter Behälterdruck je Träger (bar)</label><div>${rows}</div>
+        <p class="hint">FwDV 7: Hinweis bei ${stageLbl} der Einsatzzeit. Maßgeblich ist der niedrigste Druck; erreicht er den Umkehr-/Rückzugsdruck, ist der Rückzug einzuleiten.</p></div>
+    </div>
+    <div class="sheet-foot">
+      <button class="btn btn-primary btn-block" id="kd-save" style="flex:1">Druckkontrolle ${stageLbl} speichern</button>
+    </div>
+  </div>`;
+  document.querySelectorAll("[data-close]").forEach(el => el.addEventListener("click", closeEditor));
+  $("#kd-save").addEventListener("click", () => {
+    document.querySelectorAll("[data-kd]").forEach(inp => {
+      t.druck[inp.dataset.kd] = t.druck[inp.dataset.kd] || {};
+      const v = inp.value.trim();
+      if(v) t.druck[inp.dataset.kd][stageKey] = v;
+    });
+    const tv = $("#kd-zeit").value;
+    const d = new Date();
+    if(tv){ const [h,m] = tv.split(":").map(Number); d.setHours(h,m,0,0); }
+    t.checks[stage] = d.toISOString();
     markChange(); closeEditor(); render();
   });
 }
