@@ -88,7 +88,7 @@ function defaultConfig(){
     ugName:"UG-Weiden",
     prefixes:{ FW:"Florian", BRK:"RK", POL:"Donau", THW:"Heros", SON:"" },
     ilsName:"ILS Nordoberpfalz",
-    ilsGruppe:"",
+    ilsGruppe:{mode:"TMO",gruppe:""},
     theme:"auto",   // auto (Systemeinstellung) | hell | dunkel
   };
 }
@@ -103,7 +103,7 @@ function defaultState(){
   return {
     einsatzId: uid(),                      // Identität für den Sync (welcher Einsatz?)
     einsatzStart: new Date().toISOString(),
-    einsatz: { stichwort:"", ort:"", objekt:"", beginn:"", ende:"", leiter:"", bereitstellungsraum:"", bemerkung:"", ilsGruppe:"TMO 2772" },
+    einsatz: { stichwort:"", ort:"", objekt:"", beginn:"", ende:"", leiter:"", bereitstellungsraum:"", bemerkung:"", ilsGruppe:{mode:"TMO",gruppe:"2772"} },
     einheiten: [], fuehrung: [], abschnitte: [], archiv: [],
     lage: { items: [], bg: "", snapshots: [], mode: "raster", mapView: null, mapLayer: "luftbild" },
     funk: [], besprechungen: [], anforderungen: [], checks: [], fotos: [],
@@ -131,12 +131,15 @@ if(!Array.isArray(state.checks)) state.checks = [];
 if(!Array.isArray(state.fotos)) state.fotos = [];
 if(!Array.isArray(state.asTraeger)) state.asTraeger = [];
 if(!Array.isArray(state.asTrupps)) state.asTrupps = [];
-// Abschnitte: alte TMO/DMO-Felder auf Führungs-/Arbeitsgruppe (je Modus + Gruppe) migrieren
+// Abschnitte: alte TMO/DMO-Felder auf Führungs-/Arbeitsrufgruppe (je Modus + Gruppe) migrieren
 state.abschnitte.forEach(a => {
   if(!a.fuehrung) a.fuehrung = { mode:"TMO", gruppe: a.tmo || "" };
   if(!a.arbeit)   a.arbeit   = { mode:"DMO", gruppe: a.dmo || "" };
+  if(a.arbeit.via == null) a.arbeit.via = "";   // "", "gateway" oder "repeater"
 });
-if(state.einsatz.ilsGruppe == null) state.einsatz.ilsGruppe = "TMO 2772";
+// Leitstellen-Rufgruppe (Einsatz + Config) von Freitext „TMO 2772“ auf {mode,gruppe} migrieren
+state.einsatz.ilsGruppe = parseGruppe(state.einsatz.ilsGruppe);
+state.config.ilsGruppe  = parseGruppe(state.config.ilsGruppe);
 if(!state.asSub) state.asSub = "sammelstelle";
 if(!state.monHide || typeof state.monHide !== "object") state.monHide = { panels: {}, ab: {} };
 state.monHide.panels = state.monHide.panels || {};
@@ -428,8 +431,14 @@ function renderSettingsSheet(){
         <div class="form-grid">
           <div class="field"><label for="cfg-ils">Leitstelle</label>
             <input id="cfg-ils" value="${esc(c.ilsName||"")}" placeholder="z. B. ILS Nordoberpfalz" autocomplete="off"></div>
-          <div class="field"><label for="cfg-ilsgrp">TMO-Betriebsgruppe zur Leitstelle</label>
-            <input id="cfg-ilsgrp" class="mono" value="${esc(c.ilsGruppe||"")}" placeholder="z. B. NOP 1" autocomplete="off"></div>
+          <div class="field"><label for="cfg-ilsgrp">Rufgruppe zur Leitstelle</label>
+            <div style="display:flex;gap:8px">
+              <select id="cfg-ils-mode" style="width:100px;flex:none">
+                <option value="TMO" ${(c.ilsGruppe||{}).mode!=="DMO"?"selected":""}>TMO</option>
+                <option value="DMO" ${(c.ilsGruppe||{}).mode==="DMO"?"selected":""}>DMO</option>
+              </select>
+              <input id="cfg-ilsgrp" class="mono" value="${esc((c.ilsGruppe||{}).gruppe||"")}" placeholder="z. B. 2772" autocomplete="off">
+            </div></div>
         </div>
       </div>
       <div class="field"><label style="margin-bottom:10px">Funkrufnamen-Präfixe je Organisation</label>
@@ -456,7 +465,7 @@ function renderSettingsSheet(){
   const leseSettings = () => {
     state.config.ugName = $("#cfg-ug").value.trim();
     state.config.ilsName = $("#cfg-ils").value.trim();
-    state.config.ilsGruppe = $("#cfg-ilsgrp").value.trim();
+    state.config.ilsGruppe = { mode: $("#cfg-ils-mode").value, gruppe: $("#cfg-ilsgrp").value.trim() };
     document.querySelectorAll("[data-pfx]").forEach(inp => {
       state.config.prefixes[inp.dataset.pfx] = inp.value.trim();
     });
@@ -531,8 +540,13 @@ function renderEinsatz(){
   </div>
   <div class="card">
     <h2>Einsatzabschnitte</h2>
-    <div class="field"><label for="f-ils">Kommunikation zur Leitstelle</label>
-      <input id="f-ils" data-ez="ilsGruppe" class="mono" value="${esc(e.ilsGruppe||"")}" placeholder="z. B. TMO 2772"></div>
+    <div class="field"><label for="f-ils-grp">Rufgruppe zur Leitstelle</label>
+      <div style="display:flex;gap:8px;max-width:320px">
+        <select id="f-ils-mode" style="width:100px;flex:none">
+          <option value="TMO" ${(e.ilsGruppe||{}).mode!=="DMO"?"selected":""}>TMO</option>
+          <option value="DMO" ${(e.ilsGruppe||{}).mode==="DMO"?"selected":""}>DMO</option>
+        </select>
+        <input id="f-ils-grp" class="mono" value="${esc((e.ilsGruppe||{}).gruppe||"")}" placeholder="z. B. 2772"></div></div>
     ${abRows || `<p class="hint" style="margin:0 0 12px">Noch keine Abschnitte – Einheiten lassen sich bei der Erfassung einem Abschnitt zuordnen.</p>`}
     <button class="btn btn-ghost btn-block" id="abAdd" style="margin-top:${abRows?"12px":"0"}">＋&nbsp; Abschnitt anlegen</button>
   </div>
@@ -577,6 +591,10 @@ function wireEinsatz(){
       markChange(); renderHeader();
     });
   });
+  const ilsMode = $("#f-ils-mode"), ilsGrp = $("#f-ils-grp");
+  const saveIls = () => { state.einsatz.ilsGruppe = { mode: ilsMode.value, gruppe: ilsGrp.value.trim() }; markChange(); };
+  if(ilsMode) ilsMode.addEventListener("change", saveIls);
+  if(ilsGrp) ilsGrp.addEventListener("change", saveIls);
   $("#abAdd").addEventListener("click", () => openAbEditor(null));
   document.querySelectorAll("[data-abedit]").forEach(b =>
     b.addEventListener("click", () => openAbEditor(b.dataset.abedit)));
@@ -772,7 +790,7 @@ async function endeEinsatz(){
   const entry = baueArchivEintrag();
   state.archiv.push(entry);
   state.einsatzId = uid(); state.einsatzStart = new Date().toISOString();
-  state.einsatz = { stichwort:"", ort:"", objekt:"", beginn:nowLocalInput(), ende:"", leiter:"", bereitstellungsraum:"", bemerkung:"", ilsGruppe:"TMO 2772" };
+  state.einsatz = { stichwort:"", ort:"", objekt:"", beginn:nowLocalInput(), ende:"", leiter:"", bereitstellungsraum:"", bemerkung:"", ilsGruppe:{mode:"TMO",gruppe:"2772"} };
   state.einheiten = []; state.fuehrung = []; state.abschnitte = [];
   state.lage = { items: [], bg: "", snapshots: [], mode: "raster", mapView: null, mapLayer: "luftbild" };
   state.funk = []; state.besprechungen = [];
@@ -1262,23 +1280,30 @@ function renderAbSheet(){
       <div class="field"><label for="ab-ap">Ansprechpartner</label>
         <input id="ab-ap" class="mono" value="${esc(a.ansprechpartner||"")}" placeholder="z. B. Florian Weiden 3/1" autocomplete="off">
         <p class="hint">Funkrufname oder Name des Abschnittsleiters / Ansprechpartners.</p></div>
-      <div class="field"><label for="ab-fg-mode">Führungsgruppe <span style="text-transform:none;font-weight:500">(zur Einsatzleitung)</span></label>
+      <div class="field"><label for="ab-fg-mode">Führungsrufgruppe <span style="text-transform:none;font-weight:500">(zur Einsatzleitung)</span></label>
         <div style="display:flex;gap:8px">
           <select id="ab-fg-mode" style="width:110px;flex:none">
             <option value="TMO" ${a.fuehrung.mode==="TMO"?"selected":""}>TMO</option>
             <option value="DMO" ${a.fuehrung.mode==="DMO"?"selected":""}>DMO</option>
           </select>
           <input id="ab-fg-grp" class="mono" value="${esc(a.fuehrung.gruppe||"")}" placeholder="z. B. 2901" autocomplete="off">
-        </div></div>
-      <div class="field"><label for="ab-ag-mode">Arbeitsgruppe <span style="text-transform:none;font-weight:500">(im Abschnitt)</span></label>
+        </div>
+        <p class="hint">Tipp: Gleiche Führungsrufgruppe bei allen Abschnitten → die Skizze fasst sie zu einer gemeinsamen Linie zusammen.</p></div>
+      <div class="field"><label for="ab-ag-mode">Arbeitsrufgruppe <span style="text-transform:none;font-weight:500">(im Abschnitt)</span></label>
         <div style="display:flex;gap:8px">
           <select id="ab-ag-mode" style="width:110px;flex:none">
             <option value="TMO" ${a.arbeit.mode==="TMO"?"selected":""}>TMO</option>
             <option value="DMO" ${a.arbeit.mode==="DMO"?"selected":""}>DMO</option>
           </select>
           <input id="ab-ag-grp" class="mono" value="${esc(a.arbeit.gruppe||"")}" placeholder="z. B. 307_F" autocomplete="off">
-        </div>
-        <p class="hint">Führungsgruppe steht in der Funkskizze an der Linie zur Einsatzleitung, die Arbeitsgruppe im Abschnitts-Kästchen.</p>
+        </div></div>
+      <div class="field"><label for="ab-ag-via">Verbindung der Arbeitsrufgruppe</label>
+        <select id="ab-ag-via">
+          <option value="" ${!a.arbeit.via?"selected":""}>direkt (keine)</option>
+          <option value="gateway" ${a.arbeit.via==="gateway"?"selected":""}>über Gateway (DMO ↔ TMO)</option>
+          <option value="repeater" ${a.arbeit.via==="repeater"?"selected":""}>über Repeater</option>
+        </select>
+        <p class="hint">Führungsrufgruppe steht in der Skizze an der Linie zur Einsatzleitung, die Arbeitsrufgruppe im Abschnitts-Kästchen. Gateway/Repeater wird als Hinweis dargestellt (FwDV 810).</p>
       </div>
     </div>
     <div class="sheet-foot">
@@ -1300,7 +1325,7 @@ function renderAbSheet(){
     if(!a.name){ $("#ab-name").focus(); return; }
     a.ansprechpartner = $("#ab-ap").value.trim();
     a.fuehrung = { mode: $("#ab-fg-mode").value, gruppe: $("#ab-fg-grp").value.trim() };
-    a.arbeit   = { mode: $("#ab-ag-mode").value, gruppe: $("#ab-ag-grp").value.trim() };
+    a.arbeit   = { mode: $("#ab-ag-mode").value, gruppe: $("#ab-ag-grp").value.trim(), via: $("#ab-ag-via").value };
     delete a.tmo; delete a.dmo;
     const idx = state.abschnitte.findIndex(x => x.id === a.id);
     if(idx >= 0) state.abschnitte[idx] = a; else state.abschnitte.push(a);
@@ -3069,13 +3094,23 @@ function renderSkizzeView(){
     <h2>Funkskizze / Kommunikationsskizze</h2>
     ${renderFunkskizze()}
     <p class="hint">Wird automatisch aus den Einsatzabschnitten und deren TMO-/DMO-Rufgruppen erzeugt
-    (Abschnitte pflegen im Tab „Einsatz“). Leitstelle und Betriebsgruppe stehen in den Einstellungen (Zahnrad).</p>
+    (Abschnitte pflegen im Tab „Einsatz“). Leitstelle und Rufgruppe stehen in den Einstellungen (Zahnrad).</p>
   </div>`;
 }
 /* Kommunikationsskizze: ILS → Einsatzleitung → Abschnitte, Rufgruppen an den Linien */
+/* Rufgruppe als farbig markierter Chip (Betriebsart TMO/DMO) */
+function fkGrpHtml(g){
+  const s = gruppeStr(g); if(!s) return "";
+  return `<span class="fk-grp mode-${(g && g.mode)||"TMO"}">${esc(s)}</span>`;
+}
+function fkVia(via){
+  return via==="gateway" ? `<span class="fk-via">⇄ Gateway ↔ TMO</span>`
+    : via==="repeater" ? `<span class="fk-via">⟳ Repeater</span>` : "";
+}
 function renderFunkskizze(){
   const c = state.config;
   const act = aktive();
+  const ilsG = (state.einsatz.ilsGruppe && state.einsatz.ilsGruppe.gruppe) ? state.einsatz.ilsGruppe : c.ilsGruppe;
   const elBox = `
     <div class="fkbox el">
       <strong>Einsatzleitung</strong>
@@ -3083,23 +3118,32 @@ function renderFunkskizze(){
     </div>`;
   const ilsTeil = `
     <div class="fkbox ils"><strong>${esc(c.ilsName || "Leitstelle")}</strong><small>Leitstelle</small></div>
-    <div class="fk-vline"><span class="fk-grp">${esc(state.einsatz.ilsGruppe || c.ilsGruppe || "—")}</span></div>`;
+    <div class="fk-vline">${fkGrpHtml(ilsG) || `<span class="fk-grp">—</span>`}</div>`;
+  const legende = `<div class="fk-legende">
+    <span><i class="fk-dot mode-TMO"></i>TMO · Netzbetrieb</span>
+    <span><i class="fk-dot mode-DMO"></i>DMO · Direktbetrieb</span>
+    <span>⇄ Gateway · ⟳ Repeater</span></div>`;
   if(!state.abschnitte.length){
-    return `<div class="fk-skizze">${ilsTeil}${elBox}</div>
+    return `<div class="fk-skizze">${ilsTeil}${elBox}</div>${legende}
       <p class="hint" style="text-align:center">Noch keine Einsatzabschnitte angelegt – die Skizze wächst automatisch mit (Tab „Einsatz“).</p>`;
   }
   const n = state.abschnitte.length;
+  // Gemeinsame Führungsrufgruppe: haben alle Abschnitte dieselbe → einmal an der Sammellinie darstellen
+  const fgS = state.abschnitte.map(a => gruppeStr(a.fuehrung));
+  const commonFg = (n > 1 && fgS.every(s => s && s === fgS[0])) ? state.abschnitte[0].fuehrung : null;
   const branches = state.abschnitte.map(a => {
     const units = act.filter(u => u.abschnitt === a.id);
+    const via = a.arbeit && a.arbeit.via;
     return `
     <div class="fk-branch">
-      <div class="fk-vline"><span class="fk-grp">${gruppeStr(a.fuehrung) ? esc(gruppeStr(a.fuehrung)) : "—"}</span></div>
+      <div class="fk-vline">${commonFg ? "" : (fkGrpHtml(a.fuehrung) || `<span class="fk-grp">—</span>`)}</div>
       <div class="fkbox">
         <strong>${esc(a.name)}</strong>
         ${a.ansprechpartner ? `<small class="mono">${esc(a.ansprechpartner)}</small>` : ""}
         <small>${units.length} Einheit${units.length===1?"":"en"}</small>
         <div class="fk-badges">
-          ${gruppeStr(a.arbeit) ? `<span class="funk-badge"><small>Arbeit</small>${esc(gruppeStr(a.arbeit))}</span>` : `<span class="hint" style="margin:0">keine Arbeitsgruppe</span>`}
+          ${gruppeStr(a.arbeit) ? `<span class="funk-badge mode-${(a.arbeit.mode)||"DMO"}"><small>Arbeit</small>${esc(gruppeStr(a.arbeit))}</span>` : `<span class="hint" style="margin:0">keine Arbeitsrufgruppe</span>`}
+          ${fkVia(via)}
         </div>
       </div>
     </div>`;
@@ -3108,10 +3152,11 @@ function renderFunkskizze(){
   <div class="fk-skizze">
     ${ilsTeil}
     ${elBox}
-    ${n > 1 ? `<div class="fk-vline" style="height:22px"></div>
+    ${n > 1 ? `<div class="fk-vline" style="height:26px">${commonFg ? fkGrpHtml(commonFg) : ""}</div>
     <div class="fk-hline" style="width:calc(100% - 100%/${n} - 14px)"></div>` : ""}
     <div class="fk-hwrap">${branches}</div>
-  </div>`;
+  </div>
+  ${legende}`;
 }
 /* ==================== Lagekarte: Online-Karten-Modus (Leaflet) ==================== */
 let lgMapObj = null, lgMapLayer = null, lgMonObj = null, lgSnapObj = null;
@@ -3734,7 +3779,7 @@ function doPrint(data){
       <tr><td>Einsatzdauer</td><td>${dauerStr(e.beginn, pEnde) || "–"}</td></tr>
       <tr><td>Einsatzleiter</td><td>${esc(e.leiter) || "–"}</td></tr>
       ${(!pEnde && e.lagebespr) ? `<tr><td>Nächste Lagebesprechung</td><td>${esc(e.lagebespr)} Uhr</td></tr>` : ""}
-      ${e.ilsGruppe ? `<tr><td>Leitstelle</td><td>${esc(e.ilsGruppe)}</td></tr>` : ""}
+      ${gruppeStr(e.ilsGruppe) ? `<tr><td>Leitstelle</td><td>${esc(state.config.ilsName||"Leitstelle")} · ${esc(gruppeStr(e.ilsGruppe))}</td></tr>` : ""}
       ${showAb ? `<tr><td>Abschnitte</td><td>${abs.map(a=>{
         const funk=[a.ansprechpartner?`AP ${a.ansprechpartner}`:"",
           gruppeStr(a.fuehrung), gruppeStr(a.arbeit)].filter(Boolean).join(", ");
