@@ -1661,8 +1661,9 @@ function asRzMember(start, ziel, reserve){
   const s = Number(start); if(!s) return null;
   const r = Number(reserve)||AS_RESERVE_DEFAULT;
   const z = Number(ziel);
-  if(z>0 && z<s) return { bar: Math.round(r + 2*(s-z)), dyn:true };
-  return { bar: Math.round((2*s + r)/3), dyn:false };
+  const roh = (z>0 && z<s) ? Math.round(r + 2*(s-z)) : Math.round((2*s + r)/3);
+  // Rückzugsdruck ≥ Startdruck ⇒ Hinweg zu verbrauchsintensiv, normgerechter Rückweg nicht mehr möglich → sofort umkehren
+  return { bar: Math.min(roh, s), dyn: (z>0 && z<s), sofort: roh >= s };
 }
 // Maßgeblicher Rückzugsdruck des Trupps = frühester Umkehrpunkt (höchster Wert).
 function asRzTrupp(t){
@@ -1672,7 +1673,15 @@ function asRzTrupp(t){
   }).filter(Boolean);
   if(!vals.length) return null;
   const top = vals.reduce((a,b) => b.bar>a.bar ? b : a);
-  return { bar: top.bar, dyn: vals.every(v => v.dyn) };  // dyn nur, wenn für alle Träger ein Zieldruck vorliegt
+  return { bar: top.bar, dyn: vals.every(v => v.dyn), sofort: vals.some(v => v.sofort) };
+}
+// Rückzug fällig: ein Träger hat seinen Umkehrdruck erreicht/unterschritten (oder Hinweg zu verbrauchsintensiv → sofort)
+function asBelow(t){
+  const r = asReserve(t);
+  return (t.memberIds||[]).some(id => {
+    const d = (t.druck||{})[id] || {}; const rz = asRzMember(d.start, d.ziel, r); const ist = d.k23 || d.k13 || d.ziel;
+    return rz && (rz.sofort || (ist && Number(ist) <= rz.bar));
+  });
 }
 // Referenzuhr der Überwachung: ab „angeschlossen" (Luftversorgung), sonst ab „ausgerückt".
 function asMonitorStart(t){ return t.angeschlossen || t.ausgerueckt || ""; }
@@ -1719,7 +1728,7 @@ function truppCard(t){
     t.ausgerueckt ? `ausgerückt ${fmtZeit(t.ausgerueckt)} Uhr` : "",
     t.angeschlossen ? `angeschl. ${fmtZeit(t.angeschlossen)} Uhr` : "",
     t.rueckkehr ? `zurück ${fmtZeit(t.rueckkehr)} Uhr` : "",
-    (t.status!=="zurueck" && rz) ? `Rückzugsdruck <strong>${rz.bar} bar</strong>${rz.dyn?"":" (vorläufig)"}` : "",
+    (t.status!=="zurueck" && rz) ? `Rückzugsdruck <strong>${rz.sofort?"sofort umkehren":rz.bar+" bar"}</strong>${(rz.dyn||rz.sofort)?"":" (vorläufig)"}` : "",
   ].filter(Boolean).join(" · ");
   const aktionen = t.status === "registriert"
     ? `<button class="btn btn-primary" data-asein="${t.id}">Ausrücken</button>
@@ -1786,7 +1795,7 @@ function renderASUeberwachung(){
   asOrderSig = asOrderKey();
   if(!aktiv.length) return `<div class="empty"><p>Kein Trupp im Einsatz.<br>Trupps unter PA erscheinen hier mit laufender Einsatzzeit.</p></div>`;
   const help = tip => `<span class="as-help" tabindex="0" role="button" aria-label="Erklärung" data-tip="${esc(tip)}">?</span>`;
-  const tipRz = "Umkehren, sobald ein Träger diesen Druck erreicht. Mit gemeldetem Zieldruck: Reserve + 2×(Start − Zieldruck). Ohne Zieldruck: konservativer Vorabwert (2×Start + Reserve)/3.";
+  const tipRz = "Umkehren, sobald ein Träger diesen Druck erreicht. Mit gemeldetem Zieldruck: Reserve + 2×(Start − Zieldruck). Ohne Zieldruck: Vorabwert (2×Start + Reserve)/3. „sofort“ = Hinweg zu verbrauchsintensiv, normgerechter Rückweg nicht mehr möglich → sofort umkehren.";
   const tipReserve = "Sicherheitsreserve / Warnschwelle (Restdruckwarner ~50–60 bar) – Druck, der beim Rückzug übrig bleiben soll.";
   const tipErwartet = "Richtwert der erwarteten Einsatzzeit ab Anschluss. FwDV 7: Hinweis an den Trupp bei 1/3 und 2/3 dieser Zeit.";
   const tipAus = "Uhrzeit, zu der der Trupp ausgerückt ist – Beginn der Gesamteinsatzzeit.";
@@ -1797,19 +1806,16 @@ function renderASUeberwachung(){
     const anchor = asMonitorStart(t);
     const rzGov = asRzTrupp(t);
     const checks = t.checks || {};
-    // Rückzug fällig, sobald EIN Träger seinen eigenen Umkehrdruck erreicht/unterschreitet (maßgeblich = wer zuerst)
-    const below = (t.memberIds||[]).some(id => {
-      const d = (t.druck||{})[id] || {}; const rz = asRzMember(d.start, d.ziel, reserve); const ist = d.k23 || d.k13;
-      return rz && ist && Number(ist) <= rz.bar;
-    });
+    const below = asBelow(t);   // Rückzug fällig (Umkehrdruck erreicht oder Hinweg zu verbrauchsintensiv)
     const mit = (t.memberIds||[]).map(id => {
       const tr = state.asTraeger.find(x => x.id === id) || {};
       const d = (t.druck||{})[id] || {};
       const rz = asRzMember(d.start, d.ziel, reserve);
       const ist = d.k23 || d.k13;   // gemeldeter Ist-Druck bei der Druckkontrolle
-      const istLow = ist && rz && Number(ist) <= rz.bar;
+      const istLow = rz && (rz.sofort || (ist && Number(ist) <= rz.bar));
+      const umkehr = rz ? (rz.sofort ? "sofort" : rz.bar) : null;
       return `<div class="as-uz">${esc(tr.name||"?")}${tr.csa?` <span class="as-typ">CSA</span>`:""}
-        <span class="as-druck">${d.start?esc(d.start)+" bar":"– bar"}${d.ziel?` → Ziel ${esc(d.ziel)}`:""}${ist?` → jetzt <b class="${istLow?"as-low":""}">${esc(ist)}</b>`:""}${rz?` → Umkehr ${rz.bar}`:""}</span></div>`;
+        <span class="as-druck">${d.start?esc(d.start)+" bar":"– bar"}${d.ziel?` → Ziel ${esc(d.ziel)}`:""}${ist?` → jetzt <b class="${istLow?"as-low":""}">${esc(ist)}</b>`:""}${umkehr!=null?` → Umkehr <b class="${rz.sofort?"as-low":""}">${umkehr}</b>`:""}</span></div>`;
     }).join("");
     return `
     <div class="as-ueber" data-as-card data-as-elapsed="${esc(anchor)}" data-as-connected="${connected?1:0}" data-as-erwartet="${erwartet}" data-as-c13="${checks.drittel?1:0}" data-as-c23="${checks.zweidrittel?1:0}" data-as-below="${below?1:0}">
@@ -1818,7 +1824,7 @@ function renderASUeberwachung(){
         <div class="as-mit">${mit}</div>
         <div class="as-loc"><strong>${esc(t.abschnitt||"–")}</strong>${t.funkruf?` <span class="as-loc-funk mono">${esc(t.funkruf)}</span>`:""}${t.zielZeit?` <span class="as-sub2">· Ziel ${fmtZeit(t.zielZeit)} Uhr</span>`:""}</div>
         <div class="as-meta">
-          <span class="as-chip hot"><b>Rückzugsdruck ${help(tipRz)}</b><i>${rzGov?rzGov.bar+" bar":"–"}${rzGov&&!rzGov.dyn?` <span class="as-vorlauf">vorl.</span>`:""}</i></span>
+          <span class="as-chip hot"><b>Rückzugsdruck ${help(tipRz)}</b><i>${rzGov?(rzGov.sofort?"sofort":rzGov.bar+" bar"):"–"}${rzGov&&!rzGov.dyn&&!rzGov.sofort?` <span class="as-vorlauf">vorl.</span>`:""}</i></span>
           <span class="as-chip"><b>Reserve ${help(tipReserve)}</b><i>${reserve} bar</i></span>
           <span class="as-chip"><b>erwartet ${help(tipErwartet)}</b><i>${erwartet} min</i></span>
           <span class="as-chip"><b>ausgerückt ${help(tipAus)}</b><i>${fmtZeit(t.ausgerueckt)} Uhr</i></span>
@@ -1850,14 +1856,10 @@ function asElapsedStr(iso){
 // Dringlichkeit eines Trupps für die Auto-Sortierung (3=Rückzug, 2=Druckabfrage fällig, 1=über 2/3, 0=normal)
 function asPrio(t){
   if(t.status !== "einsatz") return -1;
-  const reserve = asReserve(t), erwartet = asErwartet(t), connected = !!t.angeschlossen;
+  const erwartet = asErwartet(t), connected = !!t.angeschlossen;
   const anchor = asMonitorStart(t);
   const min = anchor ? (Date.now()-new Date(anchor).getTime())/60000 : 0;
-  const below = (t.memberIds||[]).some(id => {
-    const d = (t.druck||{})[id] || {}; const rz = asRzMember(d.start, d.ziel, reserve); const ist = d.k23 || d.k13;
-    return rz && ist && Number(ist) <= rz.bar;
-  });
-  if(below) return 3;
+  if(asBelow(t)) return 3;
   const c = t.checks || {};
   if(connected && ((min>=erwartet/3 && !c.drittel) || (min>=erwartet*2/3 && !c.zweidrittel))) return 2;
   if(connected && min>=erwartet*2/3) return 1;
@@ -2301,7 +2303,7 @@ function doPrintAtemschutz(){
         <td class="p-mono">${d.start?esc(d.start):""}</td>
         <td class="p-mono">${d.ziel?esc(d.ziel):""}</td>
         <td class="p-mono">${d.end?esc(d.end):""}</td>
-        <td class="p-mono">${idx===0&&rz?rz.bar+(rz.dyn?"":" (vorl.)"):""}</td>
+        <td class="p-mono">${idx===0&&rz?(rz.sofort?"sofort":rz.bar+(rz.dyn?"":" (vorl.)")):""}</td>
         <td>${idx===0?esc(t.abschnitt||"–")+(t.funkruf?" / "+esc(t.funkruf):""):""}</td>
         <td class="p-mono">${idx===0&&t.ausgerueckt?fmtZeit(t.ausgerueckt):""}</td>
         <td class="p-mono">${idx===0&&t.angeschlossen?fmtZeit(t.angeschlossen):""}</td>
