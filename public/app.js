@@ -1761,6 +1761,7 @@ function renderASUeberwachung(){
     const connected = !!t.angeschlossen;
     const anchor = asMonitorStart(t);
     const rzGov = asRzTrupp(t);
+    const checks = t.checks || {};
     const mit = (t.memberIds||[]).map(id => {
       const tr = state.asTraeger.find(x => x.id === id) || {};
       const d = (t.druck||{})[id] || {};
@@ -1769,7 +1770,7 @@ function renderASUeberwachung(){
         <span class="as-druck">${d.start?esc(d.start)+" bar":"– bar"}${d.ziel?` → Ziel ${esc(d.ziel)}`:""}${rz?` → Umkehr ${rz.bar}`:""}</span></div>`;
     }).join("");
     return `
-    <div class="as-ueber" data-as-card data-as-elapsed="${esc(anchor)}" data-as-connected="${connected?1:0}" data-as-erwartet="${erwartet}">
+    <div class="as-ueber" data-as-card data-as-elapsed="${esc(anchor)}" data-as-connected="${connected?1:0}" data-as-erwartet="${erwartet}" data-as-c13="${checks.drittel?1:0}" data-as-c23="${checks.zweidrittel?1:0}">
       ${asNrBadge(t, true)}
       <div style="flex:1;min-width:0">
         <div class="as-mit">${mit}</div>
@@ -1787,6 +1788,7 @@ function renderASUeberwachung(){
         <span class="mono" data-as-clock>–</span>
         <small class="as-sub2">${connected ? "an PA" : "seit Ausrücken"}</small>
         ${!connected ? `<button class="btn btn-primary" data-asang="${t.id}" style="min-height:44px">Angeschlossen</button>` : ""}
+        ${connected ? `<button class="btn as-ack" data-asack="${t.id}" style="min-height:44px;display:none">Druck geprüft</button>` : ""}
         <button class="btn btn-ghost" data-asziel="${t.id}" style="min-height:44px">Einsatzziel erreicht</button>
         <button class="btn ${connected?"btn-primary":"btn-ghost"}" data-aszurueck="${t.id}" style="min-height:44px">Zurück</button>
       </div>
@@ -1803,18 +1805,23 @@ function asElapsedStr(iso){
   const s = Math.max(0, Math.floor((Date.now()-d.getTime())/1000));
   return `${String(Math.floor(s/60)).padStart(2,"0")}:${String(s%60).padStart(2,"0")} min`;
 }
-function asPhaseInfo(min, erwartet, connected){
-  if(!connected) return { txt:"vor PA-Anschluss – Uhr läuft ab „Angeschlossen“", cls:"" };
-  if(min >= erwartet)     return { txt:`Richtwert ${erwartet} min erreicht – Rückzug einleiten`, cls:"krit" };
-  if(min >= erwartet*2/3) return { txt:`2/3 (${Math.round(erwartet*2/3)} min) – Druck prüfen, Rückzug vorbereiten`, cls:"warn" };
-  if(min >= erwartet/3)   return { txt:`1/3 (${Math.round(erwartet/3)} min) – auf Behälterdruck hinweisen`, cls:"warn" };
-  return { txt:"überwacht seit PA-Anschluss", cls:"ok" };
+function asPhaseInfo(min, erwartet, connected, c13, c23){
+  if(!connected) return { txt:"vor PA-Anschluss – Uhr läuft ab „Angeschlossen“", cls:"", due:false };
+  const due13 = min >= erwartet/3   && !c13;   // 1/3-Druckabfrage offen
+  const due23 = min >= erwartet*2/3 && !c23;   // 2/3-Druckabfrage offen
+  if(due23)               return { txt:`⚠ 2/3 (${Math.round(erwartet*2/3)} min) – Druckabfrage fällig!`, cls:"krit", due:true };
+  if(due13)               return { txt:`⚠ 1/3 (${Math.round(erwartet/3)} min) – Druckabfrage fällig!`, cls:"warn", due:true };
+  if(min >= erwartet)     return { txt:`Richtwert ${erwartet} min erreicht – Rückzug einleiten`, cls:"krit", due:false };
+  if(min >= erwartet*2/3) return { txt:`2/3-Kontrolle quittiert – Rückzug vorbereiten`, cls:"warn", due:false };
+  if(min >= erwartet/3)   return { txt:`1/3-Kontrolle quittiert`, cls:"ok", due:false };
+  return { txt:"überwacht seit PA-Anschluss", cls:"ok", due:false };
 }
 function asTick(){
   document.querySelectorAll("[data-as-card]").forEach(card => {
     const anchor = card.dataset.asElapsed;
     const connected = card.dataset.asConnected === "1";
     const erwartet = Number(card.dataset.asErwartet) || AS_ERWARTET_DEFAULT;
+    const c13 = card.dataset.asC13 === "1", c23 = card.dataset.asC23 === "1";
     const min = anchor ? (Date.now()-new Date(anchor).getTime())/60000 : 0;
     const clock = card.querySelector("[data-as-clock]");
     if(clock){
@@ -1822,8 +1829,12 @@ function asTick(){
       clock.classList.toggle("warn", connected && min >= erwartet*2/3 && min < erwartet);
       clock.classList.toggle("krit", connected && min >= erwartet);
     }
+    const info = asPhaseInfo(min, erwartet, connected, c13, c23);
     const phase = card.querySelector("[data-as-phase]");
-    if(phase){ const info = asPhaseInfo(min, erwartet, connected); phase.textContent = info.txt; phase.className = "as-phase " + info.cls; }
+    if(phase){ phase.textContent = info.txt; phase.className = "as-phase " + info.cls; }
+    card.classList.toggle("blink", !!info.due);          // Kachel blinkt, bis die Druckabfrage quittiert ist
+    const ack = card.querySelector("[data-asack]");
+    if(ack) ack.style.display = info.due ? "" : "none";
     const aus = card.querySelector("[data-as-aus]");
     if(aus) aus.textContent = asElapsedStr(aus.dataset.asAus);
   });
@@ -1852,6 +1863,18 @@ function wireAtemschutz(){
     b.addEventListener("click", () => openRueckmeldung(b.dataset.aszurueck)));
   document.querySelectorAll("[data-asziel]").forEach(b =>
     b.addEventListener("click", () => openZielmeldung(b.dataset.asziel)));
+  document.querySelectorAll("[data-asack]").forEach(b => b.addEventListener("click", () => {
+    const t = state.asTrupps.find(x => x.id === b.dataset.asack);
+    if(!t) return;
+    const erwartet = asErwartet(t);
+    const anchor = asMonitorStart(t);
+    const min = anchor ? (Date.now()-new Date(anchor).getTime())/60000 : 0;
+    t.checks = t.checks || {};
+    const now = new Date().toISOString();   // FwDV 7: Uhrzeit der Druckkontrolle bei 1/3 bzw. 2/3 registrieren
+    if(min >= erwartet/3 && !t.checks.drittel) t.checks.drittel = now;
+    else if(min >= erwartet*2/3 && !t.checks.zweidrittel) t.checks.zweidrittel = now;
+    markChange(); render();
+  }));
   document.querySelectorAll("[data-aswieder]").forEach(b => b.addEventListener("click", () => {
     const t = state.asTrupps.find(x => x.id === b.dataset.aswieder);
     if(!t) return;
