@@ -1603,8 +1603,31 @@ function wireListen(){
 }
 
 /* ---------------- Ansicht: Atemschutz (Sammelstelle + Überwachung) ---------------- */
-const AS_GERAETETYPEN = ["200/300 bar", "2×300 bar (Langzeit)"];
+const AS_GERAETETYP        = "300 bar";   // einheitlicher Gerätetyp
+const AS_START_DEFAULT     = 300;         // bar – Vorbelegung Startdruck
+const AS_START_MAX         = 350;         // bar – Höchstwert
+const AS_START_MIN         = 50;          // bar – Wert muss darüber liegen (> 50)
+const AS_RESERVE_DEFAULT   = 60;          // bar – Sicherheitsreserve / Warnschwelle (Restdruckwarner)
+const AS_ERWARTET_DEFAULT  = 30;          // min – Richtwert erwartete Einsatzzeit (300-bar-PA)
 let editingTraeger = null, editingTrupp = null;
+
+/* --- FwDV 7 – Druckberechnung & Überwachung (Hilfsmittel, ersetzt nicht die Eigenkontrolle) --- */
+function asReserve(t){ const v = Number(t && t.reserve); return v>0 ? v : AS_RESERVE_DEFAULT; }
+function asErwartet(t){ const v = Number(t && t.erwartetMin); return v>0 ? v : AS_ERWARTET_DEFAULT; }
+// Rückzugsdruck: FwDV 7 – für den Rückweg die doppelte Atemluftmenge wie für den Hinweg.
+// Vom nutzbaren Vorrat (Start − Reserve) wird 1/3 für den Hinweg verplant, 2/3 bleiben für Rückweg.
+// ⇒ Umkehren, sobald der Druck (2·Start + Reserve)/3 erreicht (z. B. 300/60 → 220 bar).
+function asRueckzugsdruck(start, reserve){
+  const s = Number(start); if(!s) return null;
+  return Math.round((2*s + (Number(reserve)||AS_RESERVE_DEFAULT)) / 3);
+}
+// Referenzuhr der Überwachung: ab „angeschlossen" (Luftversorgung), sonst ab „ausgerückt".
+function asMonitorStart(t){ return t.angeschlossen || t.ausgerueckt || ""; }
+// Kleinster Startdruck im Trupp = maßgeblicher Träger (größter Luftverbrauch bestimmt die Einsatzdauer).
+function asMinStart(t){
+  const werte = (t.memberIds||[]).map(id => Number((t.druck||{})[id]?.start)).filter(v => v>0);
+  return werte.length ? Math.min(...werte) : null;
+}
 
 function asNextTruppNr(){
   // AST beginnt bei 10; jeder (auch wiederholte) Einsatz bekommt eine neue Nummer
@@ -1634,20 +1657,24 @@ function truppCard(t){
     if(!tr) return "?";
     const d = (t.druck||{})[id] || {};
     const dr = (d.start || d.end) ? ` <span class="as-druck">${d.start?esc(d.start):"–"}${d.end?"→"+esc(d.end):""} bar</span>` : "";
-    return `${esc(tr.name)}${tr.geraetetyp?` <span class="as-typ">${esc(tr.geraetetyp)}</span>`:""}${dr}`;
+    return `${esc(tr.name)}${tr.csa?` <span class="as-typ">CSA</span>`:""}${dr}`;
   }).join("<br>");
+  const rz = asRueckzugsdruck(asMinStart(t), asReserve(t));
   const zeile = [
     t.abschnitt ? `Abschnitt: <strong>${esc(t.abschnitt)}</strong>` : "",
     t.funkruf ? `Funk: <strong>${esc(t.funkruf)}</strong>` : "",
-    t.ausgerueckt ? `ab ${fmtZeit(t.ausgerueckt)}` : "",
+    t.ausgerueckt ? `ausgerückt ${fmtZeit(t.ausgerueckt)}` : "",
+    t.angeschlossen ? `angeschl. ${fmtZeit(t.angeschlossen)}` : "",
     t.rueckkehr ? `zurück ${fmtZeit(t.rueckkehr)}` : "",
+    (t.status!=="zurueck" && rz) ? `Rückzugsdruck <strong>${rz} bar</strong>` : "",
   ].filter(Boolean).join(" · ");
   const aktionen = t.status === "registriert"
     ? `<button class="btn btn-primary" data-asein="${t.id}">Ausrücken</button>
        <button class="btn btn-ghost" data-astruppedit="${t.id}">Bearbeiten</button>
        <button class="btn btn-danger-ghost" data-astruppdel="${t.id}" aria-label="Trupp auflösen">✕</button>`
     : t.status === "einsatz"
-    ? `<button class="btn btn-primary" data-aszurueck="${t.id}">Zurückgemeldet</button>
+    ? `${!t.angeschlossen ? `<button class="btn btn-primary" data-asang="${t.id}">Angeschlossen</button>` : ""}
+       <button class="btn ${t.angeschlossen?"btn-primary":"btn-ghost"}" data-aszurueck="${t.id}">Zurückgemeldet</button>
        <button class="btn btn-ghost" data-astruppedit="${t.id}">Bearbeiten</button>`
     : `<button class="btn btn-ghost" data-aswieder="${t.id}">Erneut einsetzen</button>
        <button class="btn btn-danger-ghost" data-astruppdel="${t.id}" aria-label="Löschen">✕</button>`;
@@ -1676,8 +1703,9 @@ function renderASSammelstelle(){
     <button class="as-traeger ${trupp?"gebunden":""}" data-astraegeredit="${tr.id}">
       <div style="flex:1;min-width:0">
         <div class="as-tr-name">${esc(tr.name) || "<span style='color:var(--ink3)'>ohne Name</span>"}</div>
-        <div class="as-sub2">${esc(tr.feuerwehr||"")}${tr.geraetetyp?` · ${esc(tr.geraetetyp)}`:""}${tr.geraeteNr?` · Gerät ${esc(tr.geraeteNr)}`:""}${tr.maskeNr?` · Maske ${esc(tr.maskeNr)}`:""}${tr.zusatz?` · ${esc(tr.zusatz)}`:""}</div>
+        <div class="as-sub2">${esc(tr.feuerwehr||"")}${tr.geraeteNr?` · Gerät ${esc(tr.geraeteNr)}`:""}${tr.maskeNr?` · Maske ${esc(tr.maskeNr)}`:""}${tr.lungenNr?` · LA ${esc(tr.lungenNr)}`:""}</div>
       </div>
+      ${tr.csa ? `<span class="badge-agt" style="margin-right:6px">CSA</span>` : ""}
       ${trupp ? `<span class="chip">Trupp ${trupp.nr}</span>` : `<span class="chip chip-POL">frei</span>`}
     </button>`;
   }).join("")}</div>` : `<p class="hint" style="margin:0">Noch keine Geräteträger registriert.</p>`;
@@ -1702,24 +1730,38 @@ function renderASUeberwachung(){
   const aktiv = state.asTrupps.filter(t => t.status === "einsatz").sort((a,b) => a.nr-b.nr);
   if(!aktiv.length) return `<div class="empty"><p>Kein Trupp im Einsatz.<br>Trupps unter PA erscheinen hier mit laufender Einsatzzeit.</p></div>`;
   const cards = aktiv.map(t => {
+    const reserve = asReserve(t), erwartet = asErwartet(t);
+    const connected = !!t.angeschlossen;
+    const anchor = asMonitorStart(t);
+    const rzGov = asRueckzugsdruck(asMinStart(t), reserve);
     const mit = (t.memberIds||[]).map(id => {
+      const tr = state.asTraeger.find(x => x.id === id) || {};
       const d = (t.druck||{})[id] || {};
-      return esc(asTraegerName(id)) + (d.start ? ` <span class="as-druck">${esc(d.start)} bar</span>` : "");
-    }).join("<br>");
-    const typ = (t.memberIds||[]).map(id => (state.asTraeger.find(x=>x.id===id)||{}).geraetetyp).filter(Boolean)[0] || "";
+      const rz = asRueckzugsdruck(d.start, reserve);
+      return `<div class="as-uz">${esc(tr.name||"?")}${tr.csa?` <span class="as-typ">CSA</span>`:""}
+        <span class="as-druck">${d.start?esc(d.start)+" bar":"– bar"}${rz?` → Umkehr ${rz}`:""}</span></div>`;
+    }).join("");
     return `
-    <div class="as-ueber">
+    <div class="as-ueber" data-as-card data-as-elapsed="${esc(anchor)}" data-as-connected="${connected?1:0}" data-as-erwartet="${erwartet}">
       ${asNrBadge(t, true)}
       <div style="flex:1;min-width:0">
         <div class="as-mit">${mit}</div>
-        <div class="as-sub2">${typ?esc(typ)+" · ":""}Abschnitt ${esc(t.abschnitt||"–")}${t.funkruf?` · Funk ${esc(t.funkruf)}`:""}</div>
+        <div class="as-sub2">Abschnitt ${esc(t.abschnitt||"–")}${t.funkruf?` · Funk ${esc(t.funkruf)}`:""}</div>
+        <div class="as-sub2">Reserve ${reserve} bar · Rückzugsdruck <strong>${rzGov?rzGov+" bar":"–"}</strong> · erwartet ${erwartet} min</div>
+        <div class="as-sub2">ausgerückt ${fmtZeit(t.ausgerueckt)}${connected?` · gesamt <span data-as-aus="${esc(t.ausgerueckt||"")}">–</span>`:""}</div>
+        <div class="as-phase" data-as-phase>–</div>
       </div>
-      <div class="as-timer"><span class="mono" data-as-elapsed="${esc(t.ausgerueckt||"")}">–</span>
-        <button class="btn btn-primary" data-aszurueck="${t.id}" style="min-height:44px">Zurück</button></div>
+      <div class="as-timer">
+        <span class="mono" data-as-clock>–</span>
+        <small class="as-sub2">${connected ? "an PA" : "seit Ausrücken"}</small>
+        ${!connected ? `<button class="btn btn-primary" data-asang="${t.id}" style="min-height:44px">Angeschlossen</button>` : ""}
+        <button class="btn ${connected?"btn-primary":"btn-ghost"}" data-aszurueck="${t.id}" style="min-height:44px">Zurück</button>
+      </div>
     </div>`;
   }).join("");
   return `
-  <p class="hint" style="margin:0 0 12px">Laufende Einsatzzeit seit Ausrücken. <strong>Ersetzt keine normgerechte Atemschutzüberwachung</strong> – dient der Übersicht an der Sammelstelle.</p>
+  <p class="hint" style="margin:0 0 12px">FwDV 7: Überwachungsuhr läuft ab <strong>„Angeschlossen"</strong>; Hinweise an den Trupp bei 1/3 und 2/3 der erwarteten Zeit; Umkehren beim Rückzugsdruck.
+  <strong>Hilfsmittel – ersetzt nicht die Eigenkontrolle des Trupps.</strong></p>
   <div class="as-ueber-list">${cards}</div>`;
 }
 function asElapsedStr(iso){
@@ -1728,12 +1770,29 @@ function asElapsedStr(iso){
   const s = Math.max(0, Math.floor((Date.now()-d.getTime())/1000));
   return `${String(Math.floor(s/60)).padStart(2,"0")}:${String(s%60).padStart(2,"0")} min`;
 }
+function asPhaseInfo(min, erwartet, connected){
+  if(!connected) return { txt:"vor PA-Anschluss – Uhr läuft ab „Angeschlossen“", cls:"" };
+  if(min >= erwartet)     return { txt:`Richtwert ${erwartet} min erreicht – Rückzug einleiten`, cls:"krit" };
+  if(min >= erwartet*2/3) return { txt:`2/3 (${Math.round(erwartet*2/3)} min) – Druck prüfen, Rückzug vorbereiten`, cls:"warn" };
+  if(min >= erwartet/3)   return { txt:`1/3 (${Math.round(erwartet/3)} min) – auf Behälterdruck hinweisen`, cls:"warn" };
+  return { txt:"überwacht seit PA-Anschluss", cls:"ok" };
+}
 function asTick(){
-  document.querySelectorAll("[data-as-elapsed]").forEach(el => {
-    el.textContent = asElapsedStr(el.dataset.asElapsed);
-    const min = el.dataset.asElapsed ? (Date.now()-new Date(el.dataset.asElapsed).getTime())/60000 : 0;
-    el.classList.toggle("warn", min >= 20);   // Orientierungswarnung (kein Ersatz für echte Überwachung)
-    el.classList.toggle("krit", min >= 30);
+  document.querySelectorAll("[data-as-card]").forEach(card => {
+    const anchor = card.dataset.asElapsed;
+    const connected = card.dataset.asConnected === "1";
+    const erwartet = Number(card.dataset.asErwartet) || AS_ERWARTET_DEFAULT;
+    const min = anchor ? (Date.now()-new Date(anchor).getTime())/60000 : 0;
+    const clock = card.querySelector("[data-as-clock]");
+    if(clock){
+      clock.textContent = asElapsedStr(anchor);
+      clock.classList.toggle("warn", connected && min >= erwartet*2/3 && min < erwartet);
+      clock.classList.toggle("krit", connected && min >= erwartet);
+    }
+    const phase = card.querySelector("[data-as-phase]");
+    if(phase){ const info = asPhaseInfo(min, erwartet, connected); phase.textContent = info.txt; phase.className = "as-phase " + info.cls; }
+    const aus = card.querySelector("[data-as-aus]");
+    if(aus) aus.textContent = asElapsedStr(aus.dataset.asAus);
   });
 }
 setInterval(() => { if(state.view === "atemschutz" && state.asSub === "ueberwachung") asTick(); }, 1000);
@@ -1750,6 +1809,10 @@ function wireAtemschutz(){
   document.querySelectorAll("[data-asein]").forEach(b => b.addEventListener("click", () => {
     const t = state.asTrupps.find(x => x.id === b.dataset.asein);
     if(t){ t.status = "einsatz"; t.ausgerueckt = new Date().toISOString(); markChange(); render(); }
+  }));
+  document.querySelectorAll("[data-asang]").forEach(b => b.addEventListener("click", () => {
+    const t = state.asTrupps.find(x => x.id === b.dataset.asang);
+    if(t){ t.angeschlossen = new Date().toISOString(); markChange(); render(); }  // FwDV 7: Uhrzeit beim Anschließen der Luftversorgung → Überwachungsuhr startet
   }));
   document.querySelectorAll("[data-aszurueck]").forEach(b =>
     b.addEventListener("click", () => openRueckmeldung(b.dataset.aszurueck)));
@@ -1808,7 +1871,7 @@ function openRueckmeldung(id){
 function openTraegerEditor(id){
   const neu = !id;
   const tr = id ? {...state.asTraeger.find(x => x.id === id)}
-    : { id:uid(), name:"", feuerwehr:"", geraetetyp:AS_GERAETETYPEN[0], geraeteNr:"", maskeNr:"", zusatz:"" };
+    : { id:uid(), name:"", feuerwehr:"", geraetetyp:AS_GERAETETYP, geraeteNr:"", maskeNr:"", lungenNr:"", csa:false };
   $("#sheetHost").innerHTML = `
   <div class="sheet-backdrop" data-close="1"></div>
   <div class="sheet" role="dialog" aria-modal="true" aria-label="${neu?"Träger registrieren":"Träger bearbeiten"}">
@@ -1820,20 +1883,18 @@ function openTraegerEditor(id){
       <div class="field"><label for="tr-fw">Feuerwehr</label>
         <input id="tr-fw" value="${esc(tr.feuerwehr)}" list="tr-fw-list" placeholder="Name der Feuerwehr" autocomplete="off">
         <datalist id="tr-fw-list">${[...new Set(state.asTraeger.map(x=>x.feuerwehr).filter(Boolean))].map(x=>`<option value="${esc(x)}">`).join("")}</datalist></div>
-      <div class="field"><label>Gerätetyp</label>
-        <div class="seg" style="max-width:none">
-          ${AS_GERAETETYPEN.map(g => `<button type="button" data-tr-typ="${esc(g)}" class="${tr.geraetetyp===g?"active":""}">${esc(g)}</button>`).join("")}
-        </div>
-        <p class="hint">2×300 = Langzeitatmer (doppelte Einsatzzeit).</p></div>
-      <div class="field"><label style="margin-bottom:8px">Gerät &amp; Maske</label>
+      <div class="field"><label style="margin-bottom:8px">Gerät, Maske &amp; Lungenautomat <span style="text-transform:none;font-weight:500;color:var(--accent)">· Pflicht (${esc(AS_GERAETETYP)})</span></label>
         <div style="display:flex;gap:10px;flex-wrap:wrap">
-          <div style="flex:1;min-width:130px"><label for="tr-gnr" style="font-size:.72rem">Gerätenummer</label>
-            <input id="tr-gnr" class="mono" value="${esc(tr.geraeteNr||"")}" placeholder="PA-Nr." autocomplete="off"></div>
-          <div style="flex:1;min-width:130px"><label for="tr-mnr" style="font-size:.72rem">Maskennummer</label>
-            <input id="tr-mnr" class="mono" value="${esc(tr.maskeNr||"")}" placeholder="Masken-Nr." autocomplete="off"></div>
-        </div></div>
-      <div class="field"><label for="tr-zusatz">Zusatz / Sonderausbildung <span style="text-transform:none;font-weight:500">(optional)</span></label>
-        <input id="tr-zusatz" value="${esc(tr.zusatz)}" placeholder="z. B. Rettungstrupp, Absturzsicherung, Zusatzmaterial" autocomplete="off"></div>
+          <div style="flex:1;min-width:120px"><label for="tr-gnr" style="font-size:.72rem">Gerätenummer</label>
+            <input id="tr-gnr" class="mono" value="${esc(tr.geraeteNr||"")}" placeholder="PA-Nr." inputmode="numeric" autocomplete="off"></div>
+          <div style="flex:1;min-width:120px"><label for="tr-mnr" style="font-size:.72rem">Maskennummer</label>
+            <input id="tr-mnr" class="mono" value="${esc(tr.maskeNr||"")}" placeholder="Masken-Nr." inputmode="numeric" autocomplete="off"></div>
+          <div style="flex:1;min-width:120px"><label for="tr-lnr" style="font-size:.72rem">Lungenautomat-Nr.</label>
+            <input id="tr-lnr" class="mono" value="${esc(tr.lungenNr||"")}" placeholder="LA-Nr." inputmode="numeric" autocomplete="off"></div>
+        </div>
+        <p class="hint">Lungenautomat wird mit der Gerätenummer vorbelegt (oft identisch) – bei Bedarf überschreiben.</p></div>
+      <div class="field"><label>Zusatz</label>
+        <label class="as-check"><input type="checkbox" id="tr-csa" ${tr.csa?"checked":""}> CSA-Träger (Chemikalienschutzanzug)</label></div>
     </div>
     <div class="sheet-foot">
       ${neu?"":`<button class="btn btn-danger-ghost" id="tr-del">Löschen</button>`}
@@ -1841,10 +1902,12 @@ function openTraegerEditor(id){
     </div>
   </div>`;
   document.querySelectorAll("[data-close]").forEach(el => el.addEventListener("click", closeEditor));
-  document.querySelectorAll("[data-tr-typ]").forEach(b => b.addEventListener("click", () => {
-    tr.geraetetyp = b.dataset.trTyp;
-    document.querySelectorAll("[data-tr-typ]").forEach(x => x.classList.toggle("active", x.dataset.trTyp===tr.geraetetyp));
-  }));
+  // Lungenautomat-Nr. mit Gerätenummer vorbelegen, solange sie nicht eigenständig bearbeitet wurde
+  const gnr = $("#tr-gnr"), lnr = $("#tr-lnr");
+  let laManuell = !!(tr.lungenNr && tr.lungenNr !== tr.geraeteNr);
+  const syncLA = () => { if(!laManuell) lnr.value = gnr.value.trim(); };
+  gnr.addEventListener("input", syncLA);
+  lnr.addEventListener("input", () => { laManuell = lnr.value.trim() !== "" && lnr.value.trim() !== gnr.value.trim(); });
   const del = $("#tr-del");
   if(del) del.addEventListener("click", () => {
     const trupp = asTruppOf(tr.id);
@@ -1855,10 +1918,15 @@ function openTraegerEditor(id){
   $("#tr-save").addEventListener("click", () => {
     tr.name = $("#tr-name").value.trim();
     tr.feuerwehr = $("#tr-fw").value.trim();
+    tr.geraetetyp = AS_GERAETETYP;
     tr.geraeteNr = $("#tr-gnr").value.trim();
     tr.maskeNr = $("#tr-mnr").value.trim();
-    tr.zusatz = $("#tr-zusatz").value.trim();
+    tr.lungenNr = $("#tr-lnr").value.trim() || tr.geraeteNr;
+    tr.csa = $("#tr-csa").checked;
+    delete tr.zusatz;
     if(!tr.name){ $("#tr-name").focus(); return; }
+    const fehlt = !tr.geraeteNr ? "#tr-gnr" : !tr.maskeNr ? "#tr-mnr" : !tr.lungenNr ? "#tr-lnr" : null;
+    if(fehlt){ modalInfo("Geräte-, Masken- und Lungenautomatennummer sind Pflichtfelder."); $(fehlt).focus(); return; }
     const i = state.asTraeger.findIndex(x => x.id === tr.id);
     if(i>=0) state.asTraeger[i] = tr; else state.asTraeger.push(tr);
     markChange(); closeEditor(); render();
@@ -1870,12 +1938,18 @@ function openTruppEditor(id, vorbelegt){
   const src = id ? state.asTrupps.find(x => x.id === id) : null;
   const t = id ? {...src, memberIds:[...(src.memberIds||[])], druck: JSON.parse(JSON.stringify(src.druck||{}))}
     : { id:uid(), nr:asNextTruppNr(), memberIds:[...(vorbelegt||[])], abschnitt:"", funkruf:"", zusatz:"",
-        status:"registriert", ausgerueckt:"", rueckkehr:"", druck:{} };
+        status:"registriert", ausgerueckt:"", angeschlossen:"", rueckkehr:"", druck:{},
+        reserve:AS_RESERVE_DEFAULT, erwartetMin:AS_ERWARTET_DEFAULT };
+  if(t.reserve == null) t.reserve = AS_RESERVE_DEFAULT;
+  if(t.erwartetMin == null) t.erwartetMin = AS_ERWARTET_DEFAULT;
   // Auswählbare Träger: freie + die bereits in diesem Trupp
   const waehlbar = state.asTraeger.filter(tr => {
     const trupp = asTruppOf(tr.id);
     return !trupp || trupp.id === t.id || t.memberIds.includes(tr.id);
   });
+  // Einsatzabschnitt aus den bestehenden Abschnitten; Abschnittsleiter-Funkruf übernehmbar
+  const abList = state.abschnitte.map(a => ({ name:a.name, ap:a.ansprechpartner||"" }));
+  const abLegacy = t.abschnitt && !abList.some(a => a.name === t.abschnitt);
   $("#sheetHost").innerHTML = `
   <div class="sheet-backdrop" data-close="1"></div>
   <div class="sheet" role="dialog" aria-modal="true" aria-label="${neu?"Trupp bilden":"Trupp bearbeiten"}">
@@ -1886,22 +1960,39 @@ function openTruppEditor(id, vorbelegt){
         <div class="as-pick">
           ${waehlbar.length ? waehlbar.map(tr => `
             <button type="button" data-pick="${tr.id}" class="${t.memberIds.includes(tr.id)?"active":""}">
-              <span>${esc(tr.name)}</span><small>${esc(tr.feuerwehr||"")}${tr.geraetetyp?` · ${esc(tr.geraetetyp)}`:""}</small>
+              <span>${esc(tr.name)}${tr.csa?" · CSA":""}</span><small>${esc(tr.feuerwehr||"")}${tr.geraeteNr?` · Gerät ${esc(tr.geraeteNr)}`:""}</small>
             </button>`).join("") : `<p class="hint" style="margin:0">Keine freien Träger – erst welche registrieren.</p>`}
         </div>
         <p class="hint" id="tr-count">${t.memberIds.length} ausgewählt</p></div>
       <div class="field" id="tp-druck-feld"><label>Startdruck je Träger (bar)</label>
-        <div id="tp-druck"></div></div>
+        <div id="tp-druck"></div>
+        <p class="hint">Vorbelegt ${AS_START_DEFAULT} bar, änderbar – zulässig über ${AS_START_MIN} bis ${AS_START_MAX} bar.</p></div>
       <div class="field"><label for="tp-ab">Einsatzabschnitt</label>
-        <input id="tp-ab" value="${esc(t.abschnitt)}" list="tp-ab-list" placeholder="Abschnitt, der den Trupp angefordert hat" autocomplete="off">
-        <datalist id="tp-ab-list">${state.abschnitte.map(a=>`<option value="${esc(a.name)}">`).join("")}</datalist></div>
-      <div class="field"><label for="tp-funk">Funkruf Abschnitt</label>
-        <input id="tp-funk" class="mono" value="${esc(t.funkruf)}" placeholder="Funkrufname des Abschnittsleiters" autocomplete="off"></div>
+        <select id="tp-ab">
+          <option value="">– Abschnitt wählen –</option>
+          ${abLegacy ? `<option value="${esc(t.abschnitt)}" selected>${esc(t.abschnitt)}</option>` : ""}
+          ${abList.map(a=>`<option value="${esc(a.name)}" data-ap="${esc(a.ap)}" ${t.abschnitt===a.name?"selected":""}>${esc(a.name)}</option>`).join("")}
+        </select>
+        ${abList.length ? "" : `<p class="hint">Noch keine Einsatzabschnitte angelegt (Tab „Einsatz").</p>`}</div>
+      <div class="field"><label for="tp-funk">Funkruf Abschnittsleiter</label>
+        <div style="display:flex;gap:8px">
+          <input id="tp-funk" class="mono" style="flex:1" value="${esc(t.funkruf)}" data-auto="" placeholder="Funkrufname des Abschnittsleiters" autocomplete="off">
+          <button type="button" class="btn btn-ghost" id="tp-funk-copy" style="flex:none">Übernehmen</button>
+        </div>
+        <p class="hint">Wird bei Abschnittswahl automatisch aus dem Abschnittsleiter übernommen – überschreibbar.</p></div>
+      <div class="field" style="display:flex;gap:10px;flex-wrap:wrap">
+        <div style="flex:1;min-width:130px"><label for="tp-reserve">Sicherheitsreserve (bar)</label>
+          <input id="tp-reserve" class="mono" inputmode="numeric" value="${esc(String(asReserve(t)))}" placeholder="${AS_RESERVE_DEFAULT}"></div>
+        <div style="flex:1;min-width:130px"><label for="tp-erwartet">Erwartete Zeit (min)</label>
+          <input id="tp-erwartet" class="mono" inputmode="numeric" value="${esc(String(asErwartet(t)))}" placeholder="${AS_ERWARTET_DEFAULT}"></div>
+      </div>
+      <p class="hint" style="margin:-4px 0 0">FwDV 7: Rückzugsdruck = (2·Start + Reserve)/3 · Hinweise bei 1/3 &amp; 2/3 der erwarteten Zeit (Richtwert).</p>
       <div class="field"><label for="tp-zusatz">Auftrag / Bemerkung <span style="text-transform:none;font-weight:500">(optional)</span></label>
         <input id="tp-zusatz" value="${esc(t.zusatz)}" placeholder="Einsatzauftrag" autocomplete="off"></div>
       ${!neu ? `<div class="field" style="display:flex;gap:10px;flex-wrap:wrap">
-        <div style="width:150px"><label for="tp-aus">Ausgerückt</label><input id="tp-aus" type="time" class="mono" value="${fmtZeit(t.ausgerueckt)==="–"?"":fmtZeit(t.ausgerueckt)}"></div>
-        <div style="width:150px"><label for="tp-ret">Zurück</label><input id="tp-ret" type="time" class="mono" value="${fmtZeit(t.rueckkehr)==="–"?"":fmtZeit(t.rueckkehr)}"></div>
+        <div style="width:140px"><label for="tp-aus">Ausgerückt</label><input id="tp-aus" type="time" class="mono" value="${fmtZeit(t.ausgerueckt)==="–"?"":fmtZeit(t.ausgerueckt)}"></div>
+        <div style="width:140px"><label for="tp-ang">Angeschlossen</label><input id="tp-ang" type="time" class="mono" value="${fmtZeit(t.angeschlossen)==="–"?"":fmtZeit(t.angeschlossen)}"></div>
+        <div style="width:140px"><label for="tp-ret">Zurück</label><input id="tp-ret" type="time" class="mono" value="${fmtZeit(t.rueckkehr)==="–"?"":fmtZeit(t.rueckkehr)}"></div>
       </div>` : ""}
     </div>
     <div class="sheet-foot">
@@ -1917,13 +2008,27 @@ function openTruppEditor(id, vorbelegt){
     $("#tp-druck-feld").style.display = t.memberIds.length ? "" : "none";
     $("#tp-druck").innerHTML = t.memberIds.map(mid => {
       const tr = state.asTraeger.find(x => x.id === mid) || {};
-      const d = (t.druck[mid]||{}).start || "";
+      const d = (t.druck[mid]||{}).start || String(AS_START_DEFAULT);
       return `<div class="as-druckrow">
         <span>${esc(tr.name||"?")}${tr.geraeteNr?` <small class="mono">(${esc(tr.geraeteNr)})</small>`:""}</span>
-        <input data-druck="${esc(mid)}" class="mono" inputmode="numeric" value="${esc(d)}" placeholder="bar"></div>`;
+        <input data-druck="${esc(mid)}" class="mono" inputmode="numeric" value="${esc(d)}" placeholder="${AS_START_DEFAULT}"></div>`;
     }).join("");
   };
   baueDruck();
+  // Funkruf des Abschnittsleiters bei Abschnittswahl übernehmen
+  const abSel = $("#tp-ab"), funkInp = $("#tp-funk");
+  const abAp = () => { const o = abSel.selectedOptions[0]; return o ? (o.dataset.ap||"") : ""; };
+  abSel.addEventListener("change", () => {
+    const ap = abAp();
+    if(ap && (!funkInp.value.trim() || funkInp.value.trim() === funkInp.dataset.auto)){
+      funkInp.value = ap; funkInp.dataset.auto = ap;
+    }
+  });
+  $("#tp-funk-copy").addEventListener("click", () => {
+    const ap = abAp();
+    if(ap){ funkInp.value = ap; funkInp.dataset.auto = ap; }
+    else modalInfo("Für den gewählten Abschnitt ist kein Abschnittsleiter/Funkruf hinterlegt.");
+  });
   document.querySelectorAll("[data-pick]").forEach(b => b.addEventListener("click", () => {
     leseDruck();  // aktuelle Eingaben sichern, bevor neu aufgebaut wird
     const pid = b.dataset.pick;
@@ -1944,10 +2049,21 @@ function openTruppEditor(id, vorbelegt){
     leseDruck();
     // Druck-Einträge auf aktuelle Mitglieder begrenzen
     Object.keys(t.druck).forEach(k => { if(!t.memberIds.includes(k)) delete t.druck[k]; });
+    // Startdruck prüfen: über 50, höchstens 350 bar
+    for(const mid of t.memberIds){
+      const s = Number((t.druck[mid]||{}).start);
+      if(!(s > AS_START_MIN && s <= AS_START_MAX)){
+        modalInfo(`Startdruck muss über ${AS_START_MIN} und höchstens ${AS_START_MAX} bar sein (${asTraegerName(mid)}).`);
+        return;
+      }
+    }
     t.abschnitt = $("#tp-ab").value.trim();
     t.funkruf = $("#tp-funk").value.trim();
     t.zusatz = $("#tp-zusatz").value.trim();
+    const rv = Number($("#tp-reserve").value); t.reserve = rv>0 ? rv : AS_RESERVE_DEFAULT;
+    const ev = Number($("#tp-erwartet").value); t.erwartetMin = ev>0 ? ev : AS_ERWARTET_DEFAULT;
     if($("#tp-aus")) setTime("ausgerueckt", $("#tp-aus").value);
+    if($("#tp-ang")) setTime("angeschlossen", $("#tp-ang").value);
     if($("#tp-ret")) setTime("rueckkehr", $("#tp-ret").value);
     const i = state.asTrupps.findIndex(x => x.id === t.id);
     if(i>=0) state.asTrupps[i] = t; else state.asTrupps.push(t);
@@ -3414,7 +3530,7 @@ function doPrint(data){
     ${unitRows ? `<table><thead><tr><th>Ankunft</th><th>Organisation</th><th>Funkrufname</th>${showAb?"<th>Abschnitt</th>":""}<th>Stärke</th><th>AGT</th><th>CSA</th><th>Status</th></tr></thead><tbody>${unitRows}</tbody></table>` : "<p>Keine erfasst.</p>"}
     ${(data.asTrupps||[]).length ? `
     <h2>Atemschutz – Trupps (${data.asTrupps.length})</h2>
-    <table><thead><tr><th>Nr.</th><th>Träger</th><th>Feuerwehr</th><th>Gerät</th><th>Maske</th><th>Typ</th><th>Start</th><th>Ende</th><th>Abschnitt / Funk</th><th>ab</th><th>zurück</th></tr></thead><tbody>
+    <table><thead><tr><th>Nr.</th><th>Träger</th><th>Feuerwehr</th><th>Gerät</th><th>Maske</th><th>LA</th><th>CSA</th><th>Start</th><th>Ende</th><th>Abschnitt / Funk</th><th>ausgerückt</th><th>angeschl.</th><th>zurück</th></tr></thead><tbody>
       ${[...data.asTrupps].sort((a,b)=>a.nr-b.nr).map(t => {
         const ids = t.memberIds||[];
         return ids.map((id,idx) => {
@@ -3424,10 +3540,12 @@ function doPrint(data){
             <td class="p-mono">${idx===0?t.nr:""}</td>
             <td>${esc(tr.name||"?")}</td><td>${esc(tr.feuerwehr||"")}</td>
             <td class="p-mono">${esc(tr.geraeteNr||"")}</td><td class="p-mono">${esc(tr.maskeNr||"")}</td>
-            <td>${esc(tr.geraetetyp||"")}</td>
+            <td class="p-mono">${esc(tr.lungenNr||"")}</td>
+            <td style="text-align:center">${tr.csa?"CSA":""}</td>
             <td class="p-mono">${d.start?esc(d.start):""}</td><td class="p-mono">${d.end?esc(d.end):""}</td>
             <td>${idx===0?esc(t.abschnitt||"–")+(t.funkruf?" / "+esc(t.funkruf):""):""}</td>
             <td class="p-mono">${idx===0&&t.ausgerueckt?fmtZeit(t.ausgerueckt):""}</td>
+            <td class="p-mono">${idx===0&&t.angeschlossen?fmtZeit(t.angeschlossen):""}</td>
             <td class="p-mono">${idx===0&&t.rueckkehr?fmtZeit(t.rueckkehr):""}</td>
           </tr>`;
         }).join("");
