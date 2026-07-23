@@ -1787,7 +1787,7 @@ function renderASUeberwachung(){
         <span class="mono" data-as-clock>–</span>
         <small class="as-sub2">${connected ? "an PA" : "seit Ausrücken"}</small>
         ${!connected ? `<button class="btn btn-primary" data-asang="${t.id}" style="min-height:44px">Angeschlossen</button>` : ""}
-        <button class="btn btn-ghost" data-asziel="${t.id}" style="min-height:44px">Einsatzziel</button>
+        <button class="btn btn-ghost" data-asziel="${t.id}" style="min-height:44px">Einsatzziel erreicht</button>
         <button class="btn ${connected?"btn-primary":"btn-ghost"}" data-aszurueck="${t.id}" style="min-height:44px">Zurück</button>
       </div>
     </div>`;
