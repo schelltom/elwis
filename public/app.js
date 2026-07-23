@@ -1683,9 +1683,9 @@ function truppCard(t){
   const zeile = [
     t.abschnitt ? `Abschnitt: <strong>${esc(t.abschnitt)}</strong>` : "",
     t.funkruf ? `Funk: <strong>${esc(t.funkruf)}</strong>` : "",
-    t.ausgerueckt ? `ausgerückt ${fmtZeit(t.ausgerueckt)}` : "",
-    t.angeschlossen ? `angeschl. ${fmtZeit(t.angeschlossen)}` : "",
-    t.rueckkehr ? `zurück ${fmtZeit(t.rueckkehr)}` : "",
+    t.ausgerueckt ? `ausgerückt ${fmtZeit(t.ausgerueckt)} Uhr` : "",
+    t.angeschlossen ? `angeschl. ${fmtZeit(t.angeschlossen)} Uhr` : "",
+    t.rueckkehr ? `zurück ${fmtZeit(t.rueckkehr)} Uhr` : "",
     (t.status!=="zurueck" && rz) ? `Rückzugsdruck <strong>${rz.bar} bar</strong>${rz.dyn?"":" (vorläufig)"}` : "",
   ].filter(Boolean).join(" · ");
   const aktionen = t.status === "registriert"
@@ -1773,7 +1773,7 @@ function renderASUeberwachung(){
       ${asNrBadge(t, true)}
       <div style="flex:1;min-width:0">
         <div class="as-mit">${mit}</div>
-        <div class="as-loc"><strong>${esc(t.abschnitt||"–")}</strong>${t.funkruf?` <span class="as-loc-funk mono">${esc(t.funkruf)}</span>`:""}${t.zielZeit?` <span class="as-sub2">· Ziel ${fmtZeit(t.zielZeit)}</span>`:""}</div>
+        <div class="as-loc"><strong>${esc(t.abschnitt||"–")}</strong>${t.funkruf?` <span class="as-loc-funk mono">${esc(t.funkruf)}</span>`:""}${t.zielZeit?` <span class="as-sub2">· Ziel ${fmtZeit(t.zielZeit)} Uhr</span>`:""}</div>
         <div class="as-meta">
           <span class="as-chip hot"><b>Rückzugsdruck ${help(tipRz)}</b><i>${rzGov?rzGov.bar+" bar":"–"}${rzGov&&!rzGov.dyn?` <span class="as-vorlauf">vorl.</span>`:""}</i></span>
           <span class="as-chip"><b>Reserve ${help(tipReserve)}</b><i>${reserve} bar</i></span>
