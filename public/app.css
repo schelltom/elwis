@@ -861,6 +861,19 @@
 .as-chip.hot{border-color:color-mix(in oklab,var(--warn) 55%,var(--line));
   background:color-mix(in oklab,var(--warn) 12%,var(--surface))}
 .as-chip.hot i{color:var(--warn)}
+.as-vorlauf{font-size:.62rem;font-weight:700;color:var(--ink3);text-transform:uppercase}
+/* Info-Fragezeichen mit Tooltip (Hover + Fokus/Tap) */
+.as-help{display:inline-flex;align-items:center;justify-content:center;width:15px;height:15px;
+  border-radius:50%;border:1px solid var(--line);background:var(--surface);color:var(--ink3);
+  font-size:.62rem;font-weight:800;line-height:1;cursor:help;position:relative;vertical-align:middle}
+.as-help:hover,.as-help:focus{color:var(--ink);border-color:var(--ink3);outline:none}
+.as-help::after{content:attr(data-tip);position:absolute;bottom:150%;left:50%;transform:translateX(-50%);
+  width:max-content;max-width:230px;background:var(--ink);color:var(--surface);
+  padding:8px 10px;border-radius:9px;font-size:.72rem;font-weight:600;line-height:1.4;text-transform:none;
+  letter-spacing:normal;text-align:left;box-shadow:var(--shadow);opacity:0;pointer-events:none;transition:opacity .12s;z-index:60}
+.as-help::before{content:"";position:absolute;bottom:150%;left:50%;transform:translate(-50%,90%);
+  border:6px solid transparent;border-top-color:var(--ink);opacity:0;transition:opacity .12s;z-index:60}
+.as-help:hover::after,.as-help:focus::after,.as-help:hover::before,.as-help:focus::before{opacity:1}
 .as-phase{font-size:.82rem;font-weight:700;margin-top:10px;color:var(--ink2)}
 .as-phase.ok{color:var(--thw)}
 .as-phase.warn{color:var(--warn)}

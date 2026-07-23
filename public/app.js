@@ -1621,6 +1621,26 @@ function asRueckzugsdruck(start, reserve){
   const s = Number(start); if(!s) return null;
   return Math.round((2*s + (Number(reserve)||AS_RESERVE_DEFAULT)) / 3);
 }
+// Rückzugsdruck je Träger: sobald der Druck bei „Einsatzziel erreicht" (ziel) vorliegt,
+// dynamisch nach FwDV 7 (Rückweg = doppelter Hinwegverbrauch): Reserve + 2·(Start − Ziel).
+// Ohne Zieldruck → konservativer Vorabwert (2·Start + Reserve)/3.
+function asRzMember(start, ziel, reserve){
+  const s = Number(start); if(!s) return null;
+  const r = Number(reserve)||AS_RESERVE_DEFAULT;
+  const z = Number(ziel);
+  if(z>0 && z<s) return { bar: Math.round(r + 2*(s-z)), dyn:true };
+  return { bar: Math.round((2*s + r)/3), dyn:false };
+}
+// Maßgeblicher Rückzugsdruck des Trupps = frühester Umkehrpunkt (höchster Wert).
+function asRzTrupp(t){
+  const r = asReserve(t);
+  const vals = (t.memberIds||[]).map(id => {
+    const d = (t.druck||{})[id] || {}; return asRzMember(d.start, d.ziel, r);
+  }).filter(Boolean);
+  if(!vals.length) return null;
+  const top = vals.reduce((a,b) => b.bar>a.bar ? b : a);
+  return { bar: top.bar, dyn: vals.every(v => v.dyn) };  // dyn nur, wenn für alle Träger ein Zieldruck vorliegt
+}
 // Referenzuhr der Überwachung: ab „angeschlossen" (Luftversorgung), sonst ab „ausgerückt".
 function asMonitorStart(t){ return t.angeschlossen || t.ausgerueckt || ""; }
 // Kleinster Startdruck im Trupp = maßgeblicher Träger (größter Luftverbrauch bestimmt die Einsatzdauer).
@@ -1659,14 +1679,14 @@ function truppCard(t){
     const dr = (d.start || d.end) ? ` <span class="as-druck">${d.start?esc(d.start):"–"}${d.end?"→"+esc(d.end):""} bar</span>` : "";
     return `${esc(tr.name)}${tr.csa?` <span class="as-typ">CSA</span>`:""}${dr}`;
   }).join("<br>");
-  const rz = asRueckzugsdruck(asMinStart(t), asReserve(t));
+  const rz = asRzTrupp(t);
   const zeile = [
     t.abschnitt ? `Abschnitt: <strong>${esc(t.abschnitt)}</strong>` : "",
     t.funkruf ? `Funk: <strong>${esc(t.funkruf)}</strong>` : "",
     t.ausgerueckt ? `ausgerückt ${fmtZeit(t.ausgerueckt)}` : "",
     t.angeschlossen ? `angeschl. ${fmtZeit(t.angeschlossen)}` : "",
     t.rueckkehr ? `zurück ${fmtZeit(t.rueckkehr)}` : "",
-    (t.status!=="zurueck" && rz) ? `Rückzugsdruck <strong>${rz} bar</strong>` : "",
+    (t.status!=="zurueck" && rz) ? `Rückzugsdruck <strong>${rz.bar} bar</strong>${rz.dyn?"":" (vorläufig)"}` : "",
   ].filter(Boolean).join(" · ");
   const aktionen = t.status === "registriert"
     ? `<button class="btn btn-primary" data-asein="${t.id}">Ausrücken</button>
@@ -1730,30 +1750,36 @@ function renderASSammelstelle(){
 function renderASUeberwachung(){
   const aktiv = state.asTrupps.filter(t => t.status === "einsatz").sort((a,b) => a.nr-b.nr);
   if(!aktiv.length) return `<div class="empty"><p>Kein Trupp im Einsatz.<br>Trupps unter PA erscheinen hier mit laufender Einsatzzeit.</p></div>`;
+  const help = tip => `<span class="as-help" tabindex="0" role="button" aria-label="Erklärung" data-tip="${esc(tip)}">?</span>`;
+  const tipRz = "Umkehren, sobald ein Träger diesen Druck erreicht. Mit gemeldetem Zieldruck: Reserve + 2×(Start − Zieldruck). Ohne Zieldruck: konservativer Vorabwert (2×Start + Reserve)/3.";
+  const tipReserve = "Sicherheitsreserve / Warnschwelle (Restdruckwarner ~50–60 bar) – Druck, der beim Rückzug übrig bleiben soll.";
+  const tipErwartet = "Richtwert der erwarteten Einsatzzeit ab Anschluss. FwDV 7: Hinweis an den Trupp bei 1/3 und 2/3 dieser Zeit.";
+  const tipAus = "Uhrzeit, zu der der Trupp ausgerückt ist – Beginn der Gesamteinsatzzeit.";
+  const tipGesamt = "Laufende Gesamtzeit seit Ausrücken.";
   const cards = aktiv.map(t => {
     const reserve = asReserve(t), erwartet = asErwartet(t);
     const connected = !!t.angeschlossen;
     const anchor = asMonitorStart(t);
-    const rzGov = asRueckzugsdruck(asMinStart(t), reserve);
+    const rzGov = asRzTrupp(t);
     const mit = (t.memberIds||[]).map(id => {
       const tr = state.asTraeger.find(x => x.id === id) || {};
       const d = (t.druck||{})[id] || {};
-      const rz = asRueckzugsdruck(d.start, reserve);
+      const rz = asRzMember(d.start, d.ziel, reserve);
       return `<div class="as-uz">${esc(tr.name||"?")}${tr.csa?` <span class="as-typ">CSA</span>`:""}
-        <span class="as-druck">${d.start?esc(d.start)+" bar":"– bar"}${rz?` → Umkehr ${rz}`:""}</span></div>`;
+        <span class="as-druck">${d.start?esc(d.start)+" bar":"– bar"}${d.ziel?` → Ziel ${esc(d.ziel)}`:""}${rz?` → Umkehr ${rz.bar}`:""}</span></div>`;
     }).join("");
     return `
     <div class="as-ueber" data-as-card data-as-elapsed="${esc(anchor)}" data-as-connected="${connected?1:0}" data-as-erwartet="${erwartet}">
       ${asNrBadge(t, true)}
       <div style="flex:1;min-width:0">
         <div class="as-mit">${mit}</div>
-        <div class="as-loc"><strong>${esc(t.abschnitt||"–")}</strong>${t.funkruf?` <span class="as-loc-funk mono">${esc(t.funkruf)}</span>`:""}</div>
+        <div class="as-loc"><strong>${esc(t.abschnitt||"–")}</strong>${t.funkruf?` <span class="as-loc-funk mono">${esc(t.funkruf)}</span>`:""}${t.zielZeit?` <span class="as-sub2">· Ziel ${fmtZeit(t.zielZeit)}</span>`:""}</div>
         <div class="as-meta">
-          <span class="as-chip hot"><b>Rückzugsdruck</b><i>${rzGov?rzGov+" bar":"–"}</i></span>
-          <span class="as-chip"><b>Reserve</b><i>${reserve} bar</i></span>
-          <span class="as-chip"><b>erwartet</b><i>${erwartet} min</i></span>
-          <span class="as-chip"><b>ausgerückt</b><i>${fmtZeit(t.ausgerueckt)}</i></span>
-          ${connected?`<span class="as-chip"><b>gesamt</b><i data-as-aus="${esc(t.ausgerueckt||"")}">–</i></span>`:""}
+          <span class="as-chip hot"><b>Rückzugsdruck ${help(tipRz)}</b><i>${rzGov?rzGov.bar+" bar":"–"}${rzGov&&!rzGov.dyn?` <span class="as-vorlauf">vorl.</span>`:""}</i></span>
+          <span class="as-chip"><b>Reserve ${help(tipReserve)}</b><i>${reserve} bar</i></span>
+          <span class="as-chip"><b>erwartet ${help(tipErwartet)}</b><i>${erwartet} min</i></span>
+          <span class="as-chip"><b>ausgerückt ${help(tipAus)}</b><i>${fmtZeit(t.ausgerueckt)}</i></span>
+          ${connected?`<span class="as-chip"><b>gesamt ${help(tipGesamt)}</b><i data-as-aus="${esc(t.ausgerueckt||"")}">–</i></span>`:""}
         </div>
         <div class="as-phase" data-as-phase>–</div>
       </div>
@@ -1761,6 +1787,7 @@ function renderASUeberwachung(){
         <span class="mono" data-as-clock>–</span>
         <small class="as-sub2">${connected ? "an PA" : "seit Ausrücken"}</small>
         ${!connected ? `<button class="btn btn-primary" data-asang="${t.id}" style="min-height:44px">Angeschlossen</button>` : ""}
+        <button class="btn btn-ghost" data-asziel="${t.id}" style="min-height:44px">Einsatzziel</button>
         <button class="btn ${connected?"btn-primary":"btn-ghost"}" data-aszurueck="${t.id}" style="min-height:44px">Zurück</button>
       </div>
     </div>`;
@@ -1823,6 +1850,8 @@ function wireAtemschutz(){
   }));
   document.querySelectorAll("[data-aszurueck]").forEach(b =>
     b.addEventListener("click", () => openRueckmeldung(b.dataset.aszurueck)));
+  document.querySelectorAll("[data-asziel]").forEach(b =>
+    b.addEventListener("click", () => openZielmeldung(b.dataset.asziel)));
   document.querySelectorAll("[data-aswieder]").forEach(b => b.addEventListener("click", () => {
     const t = state.asTrupps.find(x => x.id === b.dataset.aswieder);
     if(!t) return;
@@ -1872,6 +1901,47 @@ function openRueckmeldung(id){
     const d = new Date();
     if(tv){ const [h,m] = tv.split(":").map(Number); d.setHours(h,m,0,0); }
     t.status = "zurueck"; t.rueckkehr = d.toISOString();
+    markChange(); closeEditor(); render();
+  });
+}
+// FwDV 7: „Erreichen des Einsatzziels" – Druck je Träger erfassen → dynamischer Rückzugsdruck
+function openZielmeldung(id){
+  const t = state.asTrupps.find(x => x.id === id);
+  if(!t) return;
+  const jetzt = fmtZeit(t.zielZeit || new Date().toISOString());
+  const reserve = asReserve(t);
+  const rows = (t.memberIds||[]).map(mid => {
+    const tr = state.asTraeger.find(x => x.id === mid) || {};
+    const d = t.druck[mid] || {};
+    return `<div class="as-druckrow">
+      <span>${esc(tr.name||"?")}<br><small class="mono" style="color:var(--ink3)">Start ${d.start?esc(d.start)+" bar":"–"}</small></span>
+      <input data-zield="${esc(mid)}" class="mono" inputmode="numeric" value="${esc(d.ziel||"")}" placeholder="Druck am Ziel"></div>`;
+  }).join("");
+  $("#sheetHost").innerHTML = `
+  <div class="sheet-backdrop" data-close="1"></div>
+  <div class="sheet" role="dialog" aria-modal="true" aria-label="Einsatzziel erreicht">
+    <div class="sheet-head"><h2>Trupp ${t.nr} – Einsatzziel erreicht</h2>
+      <button class="sheet-close" data-close="1" aria-label="Schließen">×</button></div>
+    <div class="sheet-body">
+      <div class="field" style="max-width:170px"><label for="zm-zeit">Uhrzeit</label>
+        <input id="zm-zeit" type="time" class="mono" value="${jetzt==="–"?"":jetzt}"></div>
+      <div class="field"><label>Druck bei Zielerreichung je Träger (bar)</label><div>${rows}</div>
+        <p class="hint">Daraus wird der Rückzugsdruck berechnet: Reserve ${reserve} bar + 2 × (Start − Zieldruck).</p></div>
+    </div>
+    <div class="sheet-foot">
+      <button class="btn btn-primary btn-block" id="zm-save" style="flex:1">Zieldruck speichern</button>
+    </div>
+  </div>`;
+  document.querySelectorAll("[data-close]").forEach(el => el.addEventListener("click", closeEditor));
+  $("#zm-save").addEventListener("click", () => {
+    document.querySelectorAll("[data-zield]").forEach(inp => {
+      t.druck[inp.dataset.zield] = t.druck[inp.dataset.zield] || {};
+      t.druck[inp.dataset.zield].ziel = inp.value.trim();
+    });
+    const tv = $("#zm-zeit").value;
+    const d = new Date();
+    if(tv){ const [h,m] = tv.split(":").map(Number); d.setHours(h,m,0,0); }
+    t.zielZeit = d.toISOString();
     markChange(); closeEditor(); render();
   });
 }
@@ -2084,7 +2154,7 @@ function doPrintAtemschutz(){
   const trupps = [...state.asTrupps].sort((a,b) => a.nr-b.nr);
   const rows = trupps.map(t => {
     const ids = t.memberIds||[];
-    const rz = asRueckzugsdruck(asMinStart(t), asReserve(t));
+    const rz = asRzTrupp(t);
     const dauer = dauerStr(asMonitorStart(t), t.rueckkehr);
     return ids.map((id,idx) => {
       const tr = (state.asTraeger||[]).find(x=>x.id===id) || {};
@@ -2095,11 +2165,13 @@ function doPrintAtemschutz(){
         <td class="p-mono">${esc(tr.geraeteNr||"–")} / ${esc(tr.maskeNr||"–")} / ${esc(tr.lungenNr||"–")}</td>
         <td style="text-align:center">${tr.csa?"CSA":""}</td>
         <td class="p-mono">${d.start?esc(d.start):""}</td>
+        <td class="p-mono">${d.ziel?esc(d.ziel):""}</td>
         <td class="p-mono">${d.end?esc(d.end):""}</td>
-        <td class="p-mono">${idx===0&&rz?rz:""}</td>
+        <td class="p-mono">${idx===0&&rz?rz.bar+(rz.dyn?"":" (vorl.)"):""}</td>
         <td>${idx===0?esc(t.abschnitt||"–")+(t.funkruf?" / "+esc(t.funkruf):""):""}</td>
         <td class="p-mono">${idx===0&&t.ausgerueckt?fmtZeit(t.ausgerueckt):""}</td>
         <td class="p-mono">${idx===0&&t.angeschlossen?fmtZeit(t.angeschlossen):""}</td>
+        <td class="p-mono">${idx===0&&t.zielZeit?fmtZeit(t.zielZeit):""}</td>
         <td class="p-mono">${idx===0&&t.rueckkehr?fmtZeit(t.rueckkehr):""}</td>
         <td class="p-mono">${idx===0?dauer:""}</td>
       </tr>`;
@@ -2120,7 +2192,7 @@ function doPrintAtemschutz(){
       <tr><td>Trupps gesamt</td><td>${trupps.length}</td></tr>
     </table>
     <h2>Atemschutztrupps (${trupps.length})</h2>
-    ${trupps.length ? `<table><thead><tr><th>Nr.</th><th>Träger (Feuerwehr)</th><th>Gerät / Maske / LA</th><th>CSA</th><th>Start bar</th><th>Ende bar</th><th>Rückzugsdr.</th><th>Abschnitt / Funk</th><th>ausgerückt</th><th>angeschl.</th><th>zurück</th><th>Einsatzzeit</th></tr></thead><tbody>${rows}</tbody></table>` : "<p>Keine Atemschutztrupps erfasst.</p>"}
+    ${trupps.length ? `<table><thead><tr><th>Nr.</th><th>Träger (Feuerwehr)</th><th>Gerät / Maske / LA</th><th>CSA</th><th>Start</th><th>Ziel</th><th>Ende</th><th>Rückzugsdr.</th><th>Abschnitt / Funk</th><th>ausgerückt</th><th>angeschl.</th><th>Ziel</th><th>zurück</th><th>Einsatzzeit</th></tr></thead><tbody>${rows}</tbody></table>` : "<p>Keine Atemschutztrupps erfasst.</p>"}
     <p style="font-size:8.5pt;color:#444;margin-top:10px">
       FwDV 7 – Registrierung: Uhrzeit beim Anschließen der Luftversorgung, Hinweise an den Trupp bei 1/3 und 2/3 der erwarteten Einsatzzeit,
       Erreichen des Einsatzziels und Beginn des Rückzugs. Rückzugsdruck = (2·Startdruck + Reserve)/3.
