@@ -1718,6 +1718,7 @@ function renderASSammelstelle(){
   <div class="card">
     <h2>Trupps</h2>
     <button class="btn btn-primary btn-block" id="btnTruppBilden" style="margin-bottom:14px" ${frei.length<2?"disabled":""}>＋&nbsp; Trupp bilden${frei.length<2?" (min. 2 freie Träger)":""}</button>
+    ${state.asTrupps.length ? `<button class="btn btn-ghost btn-block" id="btnPrintAs" style="margin-bottom:14px">🖨&nbsp; Atemschutz-Nachweis drucken (FwDV 7)</button>` : ""}
     ${truppList}
   </div>
   <div class="card">
@@ -1746,9 +1747,14 @@ function renderASUeberwachung(){
       ${asNrBadge(t, true)}
       <div style="flex:1;min-width:0">
         <div class="as-mit">${mit}</div>
-        <div class="as-sub2">Abschnitt ${esc(t.abschnitt||"–")}${t.funkruf?` · Funk ${esc(t.funkruf)}`:""}</div>
-        <div class="as-sub2">Reserve ${reserve} bar · Rückzugsdruck <strong>${rzGov?rzGov+" bar":"–"}</strong> · erwartet ${erwartet} min</div>
-        <div class="as-sub2">ausgerückt ${fmtZeit(t.ausgerueckt)}${connected?` · gesamt <span data-as-aus="${esc(t.ausgerueckt||"")}">–</span>`:""}</div>
+        <div class="as-loc"><strong>${esc(t.abschnitt||"–")}</strong>${t.funkruf?` <span class="as-loc-funk mono">${esc(t.funkruf)}</span>`:""}</div>
+        <div class="as-meta">
+          <span class="as-chip hot"><b>Rückzugsdruck</b><i>${rzGov?rzGov+" bar":"–"}</i></span>
+          <span class="as-chip"><b>Reserve</b><i>${reserve} bar</i></span>
+          <span class="as-chip"><b>erwartet</b><i>${erwartet} min</i></span>
+          <span class="as-chip"><b>ausgerückt</b><i>${fmtZeit(t.ausgerueckt)}</i></span>
+          ${connected?`<span class="as-chip"><b>gesamt</b><i data-as-aus="${esc(t.ausgerueckt||"")}">–</i></span>`:""}
+        </div>
         <div class="as-phase" data-as-phase>–</div>
       </div>
       <div class="as-timer">
@@ -1802,6 +1808,7 @@ function wireAtemschutz(){
     b.addEventListener("click", () => { state.asSub = b.dataset.assub; save(); render(); }));
   const reg = $("#btnTraegerReg"); if(reg) reg.addEventListener("click", () => openTraegerEditor(null));
   const bild = $("#btnTruppBilden"); if(bild) bild.addEventListener("click", () => openTruppEditor(null));
+  const pas = $("#btnPrintAs"); if(pas) pas.addEventListener("click", doPrintAtemschutz);
   document.querySelectorAll("[data-astraegeredit]").forEach(b =>
     b.addEventListener("click", () => openTraegerEditor(b.dataset.astraegeredit)));
   document.querySelectorAll("[data-astruppedit]").forEach(b =>
@@ -2069,6 +2076,62 @@ function openTruppEditor(id, vorbelegt){
     if(i>=0) state.asTrupps[i] = t; else state.asTrupps.push(t);
     markChange(); closeEditor(); render();
   });
+}
+
+/* Atemschutz-Nachweis nach FwDV 7 – nur die Trupp-Tabelle, ohne den gesamten Einsatzbericht */
+function doPrintAtemschutz(){
+  const e = state.einsatz;
+  const trupps = [...state.asTrupps].sort((a,b) => a.nr-b.nr);
+  const rows = trupps.map(t => {
+    const ids = t.memberIds||[];
+    const rz = asRueckzugsdruck(asMinStart(t), asReserve(t));
+    const dauer = dauerStr(asMonitorStart(t), t.rueckkehr);
+    return ids.map((id,idx) => {
+      const tr = (state.asTraeger||[]).find(x=>x.id===id) || {};
+      const d = (t.druck||{})[id] || {};
+      return `<tr>
+        <td class="p-mono">${idx===0?t.nr:""}</td>
+        <td>${esc(tr.name||"?")}${tr.feuerwehr?` <span style="color:#666">(${esc(tr.feuerwehr)})</span>`:""}</td>
+        <td class="p-mono">${esc(tr.geraeteNr||"–")} / ${esc(tr.maskeNr||"–")} / ${esc(tr.lungenNr||"–")}</td>
+        <td style="text-align:center">${tr.csa?"CSA":""}</td>
+        <td class="p-mono">${d.start?esc(d.start):""}</td>
+        <td class="p-mono">${d.end?esc(d.end):""}</td>
+        <td class="p-mono">${idx===0&&rz?rz:""}</td>
+        <td>${idx===0?esc(t.abschnitt||"–")+(t.funkruf?" / "+esc(t.funkruf):""):""}</td>
+        <td class="p-mono">${idx===0&&t.ausgerueckt?fmtZeit(t.ausgerueckt):""}</td>
+        <td class="p-mono">${idx===0&&t.angeschlossen?fmtZeit(t.angeschlossen):""}</td>
+        <td class="p-mono">${idx===0&&t.rueckkehr?fmtZeit(t.rueckkehr):""}</td>
+        <td class="p-mono">${idx===0?dauer:""}</td>
+      </tr>`;
+    }).join("");
+  }).join("");
+  $("#printArea").innerHTML = `
+    <div class="p-head">
+      <div>
+        <div class="p-sub">${esc(state.config.ugName)} · Atemschutz-Nachweis · FwDV 7</div>
+        <h1>${esc(e.stichwort) || "Ohne Stichwort"}</h1>
+        <div>${esc(e.ort)}${e.beginn ? " · Alarm " + fmtDatum(e.beginn) + " " + fmtZeit(e.beginn) + " Uhr" : ""}</div>
+      </div>
+      <div class="p-mark">ELWIS</div>
+    </div>
+    <table class="meta">
+      <tr><td>Gerätetyp</td><td>${esc(AS_GERAETETYP)} (Pressluftatmer)</td></tr>
+      <tr><td>Einsatzleiter</td><td>${esc(e.leiter) || "–"}</td></tr>
+      <tr><td>Trupps gesamt</td><td>${trupps.length}</td></tr>
+    </table>
+    <h2>Atemschutztrupps (${trupps.length})</h2>
+    ${trupps.length ? `<table><thead><tr><th>Nr.</th><th>Träger (Feuerwehr)</th><th>Gerät / Maske / LA</th><th>CSA</th><th>Start bar</th><th>Ende bar</th><th>Rückzugsdr.</th><th>Abschnitt / Funk</th><th>ausgerückt</th><th>angeschl.</th><th>zurück</th><th>Einsatzzeit</th></tr></thead><tbody>${rows}</tbody></table>` : "<p>Keine Atemschutztrupps erfasst.</p>"}
+    <p style="font-size:8.5pt;color:#444;margin-top:10px">
+      FwDV 7 – Registrierung: Uhrzeit beim Anschließen der Luftversorgung, Hinweise an den Trupp bei 1/3 und 2/3 der erwarteten Einsatzzeit,
+      Erreichen des Einsatzziels und Beginn des Rückzugs. Rückzugsdruck = (2·Startdruck + Reserve)/3.
+      Angaben sind ein Hilfsmittel und ersetzen nicht die Eigenkontrolle des Trupps.
+    </p>
+    <div class="p-foot">
+      <div class="p-sign">Ort, Datum</div>
+      <div class="p-sign">Atemschutzüberwachung</div>
+    </div>
+    <p style="font-size:8pt;color:#666;margin-top:16px">Gedruckt am ${new Date().toLocaleString("de-DE")} · ELWIS – Kräfteerfassung (Prototyp) · ${esc(state.config.ugName)}</p>`;
+  window.print();
 }
 
 /* ---------------- Ansicht: Lagebesprechungen ---------------- */

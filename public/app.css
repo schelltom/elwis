@@ -841,7 +841,6 @@
 .as-pick button.active{border-color:var(--accent);background:color-mix(in oklab,var(--accent) 9%,var(--surface))}
 
 .as-ueber-list{display:grid;grid-template-columns:1fr;gap:12px}
-@media (min-width:900px){.as-ueber-list{grid-template-columns:1fr 1fr}}
 .as-ueber{display:flex;align-items:flex-start;gap:14px;background:var(--surface);
   border:1px solid var(--line);border-left:5px solid var(--warn);border-radius:14px;
   box-shadow:var(--shadow);padding:14px 16px}
@@ -850,7 +849,19 @@
 .as-timer .mono.warn{color:var(--warn)}
 .as-timer .mono.krit{color:var(--accent)}
 .as-uz{padding:2px 0}
-.as-phase{font-size:.82rem;font-weight:700;margin-top:6px;color:var(--ink2)}
+.as-loc{margin-top:6px;font-size:.92rem;color:var(--ink);line-height:1.4}
+.as-loc strong{font-weight:750}
+.as-loc-funk{display:inline-block;font-size:.8rem;font-weight:700;color:var(--thw);
+  background:color-mix(in oklab,var(--thw) 12%,var(--surface));border-radius:5px;padding:1px 7px;margin-left:4px}
+.as-meta{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+.as-chip{display:flex;flex-direction:column;line-height:1.2;background:var(--surface2);
+  border:1px solid var(--line);border-radius:9px;padding:5px 11px}
+.as-chip b{font-size:.6rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--ink3);margin-bottom:2px}
+.as-chip i{font-style:normal;font-weight:750;font-size:.92rem;font-variant-numeric:tabular-nums}
+.as-chip.hot{border-color:color-mix(in oklab,var(--warn) 55%,var(--line));
+  background:color-mix(in oklab,var(--warn) 12%,var(--surface))}
+.as-chip.hot i{color:var(--warn)}
+.as-phase{font-size:.82rem;font-weight:700;margin-top:10px;color:var(--ink2)}
 .as-phase.ok{color:var(--thw)}
 .as-phase.warn{color:var(--warn)}
 .as-phase.krit{color:var(--accent)}
