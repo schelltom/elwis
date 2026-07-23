@@ -853,15 +853,18 @@
 .as-pick button small{font-weight:500;color:var(--ink3);font-size:.76rem}
 .as-pick button.active{border-color:var(--accent);background:color-mix(in oklab,var(--accent) 9%,var(--surface))}
 
-.as-ueber-list{display:grid;grid-template-columns:1fr;gap:12px}
-.as-ueber{display:flex;align-items:flex-start;gap:14px;background:var(--surface);
-  border:1px solid var(--line);border-left:5px solid var(--warn);border-radius:14px;
-  box-shadow:var(--shadow);padding:14px 16px}
-.as-timer{display:flex;flex-direction:column;align-items:flex-end;gap:8px;flex:none}
-.as-timer .mono{font-size:1.5rem;font-weight:800;white-space:nowrap}
+.as-ueber-list{display:grid;grid-template-columns:1fr;gap:9px}
+.as-ueber{display:flex;align-items:flex-start;gap:11px;background:var(--surface);
+  border:1px solid var(--line);border-left:5px solid var(--warn);border-radius:12px;
+  box-shadow:var(--shadow);padding:9px 13px}
+.as-ueber .as-nr.big{width:44px;height:44px;font-size:1.2rem}
+.as-ueber .as-mit{font-size:.9rem;line-height:1.3}
+.as-timer{display:flex;flex-direction:column;align-items:flex-end;gap:6px;flex:none}
+.as-timer .mono{font-size:1.3rem;font-weight:800;white-space:nowrap}
 .as-timer .mono.warn{color:var(--warn)}
 .as-timer .mono.krit{color:var(--accent)}
-.as-uz{padding:2px 0}
+.as-timer .btn{min-height:38px;padding:6px 12px}
+.as-uz{padding:1px 0}
 /* Blinkende Kachel, wenn eine Druckabfrage (1/3 bzw. 2/3) fällig ist */
 @keyframes as-blink{0%,100%{background:var(--surface)}50%{background:color-mix(in oklab,var(--warn) 24%,var(--surface))}}
 .as-ueber.blink{animation:as-blink .9s steps(1,end) infinite;border-color:var(--warn);box-shadow:0 0 0 2px var(--warn),var(--shadow)}
@@ -870,15 +873,15 @@
 @keyframes as-blink-krit{0%,100%{background:var(--surface)}50%{background:color-mix(in oklab,var(--accent) 24%,var(--surface))}}
 .as-ueber.danger.blink{animation-name:as-blink-krit;border-color:var(--accent);box-shadow:0 0 0 2px var(--accent),var(--shadow)}
 .as-druck .as-low{color:var(--accent);font-weight:800}
-.as-loc{margin-top:6px;font-size:.92rem;color:var(--ink);line-height:1.4}
+.as-loc{margin-top:4px;font-size:.88rem;color:var(--ink);line-height:1.35}
 .as-loc strong{font-weight:750}
-.as-loc-funk{display:inline-block;font-size:.8rem;font-weight:700;color:var(--thw);
+.as-loc-funk{display:inline-block;font-size:.78rem;font-weight:700;color:var(--thw);
   background:color-mix(in oklab,var(--thw) 12%,var(--surface));border-radius:5px;padding:1px 7px;margin-left:4px}
-.as-meta{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
-.as-chip{display:flex;flex-direction:column;line-height:1.2;background:var(--surface2);
-  border:1px solid var(--line);border-radius:9px;padding:5px 11px}
-.as-chip b{font-size:.6rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--ink3);margin-bottom:2px}
-.as-chip i{font-style:normal;font-weight:750;font-size:.92rem;font-variant-numeric:tabular-nums}
+.as-meta{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
+.as-chip{display:flex;flex-direction:column;line-height:1.15;background:var(--surface2);
+  border:1px solid var(--line);border-radius:8px;padding:3px 9px}
+.as-chip b{font-size:.57rem;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--ink3);margin-bottom:1px}
+.as-chip i{font-style:normal;font-weight:750;font-size:.86rem;font-variant-numeric:tabular-nums}
 .as-chip.hot{border-color:color-mix(in oklab,var(--warn) 55%,var(--line));
   background:color-mix(in oklab,var(--warn) 12%,var(--surface))}
 .as-chip.hot i{color:var(--warn)}
@@ -895,7 +898,7 @@
 .as-help::before{content:"";position:absolute;bottom:150%;left:50%;transform:translate(-50%,90%);
   border:6px solid transparent;border-top-color:var(--ink);opacity:0;transition:opacity .12s;z-index:60}
 .as-help:hover::after,.as-help:focus::after,.as-help:hover::before,.as-help:focus::before{opacity:1}
-.as-phase{font-size:.82rem;font-weight:700;margin-top:10px;color:var(--ink2)}
+.as-phase{font-size:.8rem;font-weight:700;margin-top:5px;color:var(--ink2)}
 .as-phase.ok{color:var(--thw)}
 .as-phase.warn{color:var(--warn)}
 .as-phase.krit{color:var(--accent)}

@@ -1642,6 +1642,7 @@ const AS_START_MIN         = 50;          // bar – Wert muss darüber liegen (
 const AS_RESERVE_DEFAULT   = 60;          // bar – Sicherheitsreserve / Warnschwelle (Restdruckwarner)
 const AS_ERWARTET_DEFAULT  = 30;          // min – Richtwert erwartete Einsatzzeit (300-bar-PA)
 let editingTraeger = null, editingTrupp = null;
+let asOrderSig = "";   // Signatur der Dringlichkeits-Reihenfolge (für Auto-Sortierung)
 
 /* --- FwDV 7 – Druckberechnung & Überwachung (Hilfsmittel, ersetzt nicht die Eigenkontrolle) --- */
 function asReserve(t){ const v = Number(t && t.reserve); return v>0 ? v : AS_RESERVE_DEFAULT; }
@@ -1780,7 +1781,9 @@ function renderASSammelstelle(){
   </div>`;
 }
 function renderASUeberwachung(){
-  const aktiv = state.asTrupps.filter(t => t.status === "einsatz").sort((a,b) => a.nr-b.nr);
+  // Auto-Sortierung: dringliche Trupps (Rückzug, fällige Druckabfrage) zuerst
+  const aktiv = state.asTrupps.filter(t => t.status === "einsatz").sort((a,b) => asPrio(b)-asPrio(a) || a.nr-b.nr);
+  asOrderSig = asOrderKey();
   if(!aktiv.length) return `<div class="empty"><p>Kein Trupp im Einsatz.<br>Trupps unter PA erscheinen hier mit laufender Einsatzzeit.</p></div>`;
   const help = tip => `<span class="as-help" tabindex="0" role="button" aria-label="Erklärung" data-tip="${esc(tip)}">?</span>`;
   const tipRz = "Umkehren, sobald ein Träger diesen Druck erreicht. Mit gemeldetem Zieldruck: Reserve + 2×(Start − Zieldruck). Ohne Zieldruck: konservativer Vorabwert (2×Start + Reserve)/3.";
@@ -1844,6 +1847,27 @@ function asElapsedStr(iso){
   const s = Math.max(0, Math.floor((Date.now()-d.getTime())/1000));
   return `${String(Math.floor(s/60)).padStart(2,"0")}:${String(s%60).padStart(2,"0")} min`;
 }
+// Dringlichkeit eines Trupps für die Auto-Sortierung (3=Rückzug, 2=Druckabfrage fällig, 1=über 2/3, 0=normal)
+function asPrio(t){
+  if(t.status !== "einsatz") return -1;
+  const reserve = asReserve(t), erwartet = asErwartet(t), connected = !!t.angeschlossen;
+  const anchor = asMonitorStart(t);
+  const min = anchor ? (Date.now()-new Date(anchor).getTime())/60000 : 0;
+  const below = (t.memberIds||[]).some(id => {
+    const d = (t.druck||{})[id] || {}; const rz = asRzMember(d.start, d.ziel, reserve); const ist = d.k23 || d.k13;
+    return rz && ist && Number(ist) <= rz.bar;
+  });
+  if(below) return 3;
+  const c = t.checks || {};
+  if(connected && ((min>=erwartet/3 && !c.drittel) || (min>=erwartet*2/3 && !c.zweidrittel))) return 2;
+  if(connected && min>=erwartet*2/3) return 1;
+  return 0;
+}
+function asOrderKey(){
+  return state.asTrupps.filter(t => t.status==="einsatz")
+    .slice().sort((a,b) => asPrio(b)-asPrio(a) || a.nr-b.nr)
+    .map(t => t.id+":"+asPrio(t)).join(",");
+}
 function asPhaseInfo(min, erwartet, connected, c13, c23){
   if(!connected) return { txt:"vor PA-Anschluss – Uhr läuft ab „Angeschlossen“", cls:"", due:false };
   const due13 = min >= erwartet/3   && !c13;   // 1/3-Druckabfrage offen
@@ -1881,6 +1905,8 @@ function asTick(){
     const aus = card.querySelector("[data-as-aus]");
     if(aus) aus.textContent = asElapsedStr(aus.dataset.asAus);
   });
+  // Auto-Sortierung: ändert sich die Dringlichkeits-Reihenfolge, Ansicht neu aufbauen (Warn-Trupps nach oben)
+  if(!document.querySelector(".sheet") && asOrderKey() !== asOrderSig){ asOrderSig = asOrderKey(); render(); }
 }
 setInterval(() => { if(state.view === "atemschutz" && state.asSub === "ueberwachung") asTick(); }, 1000);
 
