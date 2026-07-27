@@ -3,3 +3,5 @@ dist/
 .astro/
 .DS_Store
 server/elwis-daten.json
+server/elwis-daten.json.tmp
+server/backups/

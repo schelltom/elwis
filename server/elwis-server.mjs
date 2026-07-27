@@ -36,20 +36,64 @@ function leererStand(){
     singletons: {}, collections: {}, tombstones: {} };
 }
 let stand = leererStand();
+let standGeladen = false;
 try{
   stand = Object.assign(leererStand(), JSON.parse(fs.readFileSync(DATEI, "utf8")));
+  standGeladen = true;
   console.log(`Gespeicherten Einsatz geladen (seq ${stand.seq}).`);
 }catch(e){ /* noch keine Daten – frischer Start */ }
+
+/* ---------------- Speichern + automatisches Backup ----------------
+   - Atomar: erst in .tmp schreiben, dann umbenennen → nie eine halbe Datei bei Absturz
+   - Rotierende Zeitstempel-Backups in server/backups/ (gedrosselt, letzte N behalten)
+   - Zusätzlich Sicherung beim Beenden (SIGINT/SIGTERM) */
+const SICHER_DIR = path.join(HIER, "backups");
+const SICHER_MAX = 40;                 // so viele Backups behalten
+const SICHER_INTERVALL = 2 * 60 * 1000; // höchstens alle 2 Minuten ein Backup
+let letztesBackup = 0;
+
+function zeitStempel(){
+  const d = new Date(), p = n => String(n).padStart(2, "0");
+  return `${d.getFullYear()}${p(d.getMonth()+1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
+}
+function backupSchreiben(json){
+  try{
+    fs.mkdirSync(SICHER_DIR, { recursive: true });
+    fs.writeFileSync(path.join(SICHER_DIR, `elwis-daten-${zeitStempel()}.json`), json);
+    const alte = fs.readdirSync(SICHER_DIR)
+      .filter(f => f.startsWith("elwis-daten-") && f.endsWith(".json")).sort();
+    for(const f of alte.slice(0, Math.max(0, alte.length - SICHER_MAX)))
+      fs.unlinkSync(path.join(SICHER_DIR, f));   // älteste über dem Limit entfernen
+  }catch(e){ console.error("Backup fehlgeschlagen:", e.message); }
+}
 
 let speicherTimer = null;
 function speichern(){
   clearTimeout(speicherTimer);
   speicherTimer = setTimeout(() => {
-    fs.writeFile(DATEI, JSON.stringify(stand), err => {
-      if(err) console.error("Speichern fehlgeschlagen:", err.message);
+    const json = JSON.stringify(stand);
+    const tmp = DATEI + ".tmp";
+    fs.writeFile(tmp, json, err => {
+      if(err){ console.error("Speichern fehlgeschlagen:", err.message); return; }
+      try{ fs.renameSync(tmp, DATEI); }
+      catch(e){ console.error("Speichern (Umbenennen) fehlgeschlagen:", e.message); return; }
+      const jetzt = Date.now();
+      if(jetzt - letztesBackup >= SICHER_INTERVALL){ letztesBackup = jetzt; backupSchreiben(json); }
     });
   }, 500);
 }
+function beendenUndSichern(){
+  try{
+    const json = JSON.stringify(stand);
+    fs.writeFileSync(DATEI, json);
+    backupSchreiben(json);
+    console.log("\nStand beim Beenden gesichert.");
+  }catch(e){ console.error("Sichern beim Beenden fehlgeschlagen:", e.message); }
+  process.exit(0);
+}
+process.on("SIGINT", beendenUndSichern);
+process.on("SIGTERM", beendenUndSichern);
+if(standGeladen){ backupSchreiben(JSON.stringify(stand)); letztesBackup = Date.now(); }  // Snapshot beim Start
 
 /* Aktive Geräte (Client-IDs, zuletzt gesehen) */
 const geraete = new Map();
@@ -169,6 +213,50 @@ const server = http.createServer((req, res) => {
         }else{
           res.end(JSON.stringify(standAntwort()));
         }
+      }catch(err){
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ fehler: String(err.message || err) }));
+      }
+    });
+    return;
+  }
+  /* --- Backups auflisten --- */
+  if(u.pathname === "/api/backups"){
+    let liste = [];
+    try{
+      liste = fs.readdirSync(SICHER_DIR)
+        .filter(f => f.startsWith("elwis-daten-") && f.endsWith(".json"))
+        .sort().reverse()
+        .map(f => {
+          const st = fs.statSync(path.join(SICHER_DIR, f));
+          return { datei: f, groesse: st.size, zeit: st.mtime.toISOString() };
+        });
+    }catch(e){ /* noch keine Backups */ }
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ backups: liste }));
+    return;
+  }
+  /* --- Backup wiederherstellen --- */
+  if(u.pathname === "/api/restore" && req.method === "POST"){
+    let body = "";
+    req.on("data", c => { body += c; if(body.length > 5e6) req.destroy(); });
+    req.on("end", () => {
+      try{
+        const d = JSON.parse(body || "{}");
+        const name = path.basename(String(d.datei || ""));   // Pfad-Traversal verhindern
+        if(!/^elwis-daten-[\d-]+\.json$/.test(name)) throw new Error("Ungültiger Backup-Name");
+        const quelle = path.join(SICHER_DIR, name);
+        const geladen = JSON.parse(fs.readFileSync(quelle, "utf8"));
+        stand = Object.assign(leererStand(), geladen);
+        // Neue Einsatz-Identität mit „jetzt" → alle Clients übernehmen den wiederhergestellten Stand
+        // (mergeSync: älterer Einsatz der Clients ⇒ sie bekommen den Serverstand)
+        stand.einsatzId = "restore-" + Date.now().toString(36) + Math.random().toString(36).slice(2,7);
+        stand.einsatzStart = new Date().toISOString();
+        stand.seq = (stand.seq || 0) + 1;
+        speichern();
+        console.log(`Backup wiederhergestellt: ${name} (seq ${stand.seq}).`);
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ ok: true, seq: stand.seq }));
       }catch(err){
         res.writeHead(400, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ fehler: String(err.message || err) }));

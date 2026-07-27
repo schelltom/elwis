@@ -677,6 +677,11 @@ function renderSettingsSheet(){
       <div class="field"><label style="margin-bottom:6px">Tablet verbinden</label>
         <p class="hint" style="margin:0">Der QR-Code zum Verbinden erscheint hier, sobald ELWIS über den ELW-Server läuft (<span class="mono">npm run server</span>) – die Tablets landen dann im gleichen WLAN und synchronisieren automatisch.</p>
       </div>`}
+      ${SYNC.aktiv ? `
+      <div class="field"><label style="margin-bottom:6px">Datensicherung / Wiederherstellung</label>
+        <div id="cfg-backups" class="kat-list"><p class="hint" style="margin:6px 4px">Sicherungen werden geladen …</p></div>
+        <p class="hint">Der ELW-Server sichert den Einsatzstand automatisch. Beim Wiederherstellen übernehmen alle verbundenen Geräte den gewählten Stand.</p>
+      </div>` : ""}
       <div class="field"><label style="margin-bottom:10px">Darstellung</label>
         <div class="seg" style="max-width:none">
           <button type="button" data-theme-opt="auto" class="${(c.theme||'auto')==='auto'?'active':''}">Automatisch</button>
@@ -824,6 +829,32 @@ function renderSettingsSheet(){
     leseSettings();
     markChange(); closeEditor(); render();
   });
+  // Backups laden + Wiederherstellung (nur mit ELW-Server)
+  const bHost = $("#cfg-backups");
+  if(bHost){
+    const fmtGroesse = b => b > 1e6 ? (b/1e6).toFixed(1)+" MB" : Math.max(1, Math.round(b/1024))+" KB";
+    fetch("./api/backups", { cache:"no-store" }).then(r => r.json()).then(d => {
+      const liste = (d.backups || []);
+      if(!liste.length){ bHost.innerHTML = `<p class="hint" style="margin:6px 4px">Noch keine Sicherungen vorhanden.</p>`; return; }
+      bHost.innerHTML = liste.map(b => `
+        <div class="kat-row">
+          <span>${fmtDatum(b.zeit)} ${fmtZeit(b.zeit)} Uhr <span style="color:var(--ink3)">· ${fmtGroesse(b.groesse)}</span></span>
+          <button class="btn btn-ghost" data-restore="${esc(b.datei)}" style="min-height:34px;padding:4px 12px">Wiederherstellen</button>
+        </div>`).join("");
+      bHost.querySelectorAll("[data-restore]").forEach(btn => btn.addEventListener("click", async () => {
+        const datei = btn.dataset.restore;
+        if(!(await modalConfirm(`Diese Sicherung wiederherstellen?\n${datei}\n\nAlle verbundenen Geräte übernehmen diesen Stand.`, "Wiederherstellen", "Abbrechen"))) return;
+        try{
+          const res = await fetch("./api/restore", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ datei }) });
+          if(!res.ok) throw new Error("HTTP " + res.status);
+          closeEditor();
+          await syncTick();   // Serverstand sofort übernehmen
+          render();
+          modalInfo("Sicherung wiederhergestellt. Verbundene Tablets übernehmen den Stand automatisch.");
+        }catch(e){ modalInfo("Wiederherstellen fehlgeschlagen: " + (e.message||e)); }
+      }));
+    }).catch(() => { bHost.innerHTML = `<p class="hint" style="margin:6px 4px">Sicherungen nicht abrufbar.</p>`; });
+  }
 }
 
 /* ---------------- Ansicht: Einsatz ---------------- */
