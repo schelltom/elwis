@@ -1444,15 +1444,16 @@ async function pdfSeiten(file){
   return seiten;
 }
 function ocrKandidaten(text){
-  const KW = /\b(HLF|LF|TLF|DLK|DLA|DLAK|RW|GW|ELW|KdoW|MZF|MTW|TSF|SW|FL|Florian|Kater|Dekon)\b/i;
+  // Nur Fahrzeug-Zeilen der Form „… FL <Ort> <Funkkennung>" (z. B. „3.3.1 WEN-S FL Weiden 1/40/2").
+  // FL = Florian; danach der Ort, danach der Funkrufname/Kennung. Alle anderen Zeilen werden ignoriert.
+  const RE = /\bF[LI1]\b\s+([A-Za-zÄÖÜäöüß.\-]+(?:\s+[A-Za-zÄÖÜäöüß.\-]+){0,2})\s+(\d{1,2}\/\d{1,2}(?:\/\d{1,3})?)/i;
   const out = [];
   (text || "").split(/\r?\n/).forEach(line => {
     const l = line.replace(/\s+/g, " ").trim();
-    if(l.length < 3) return;
-    const km = l.match(/\b(\d{1,2}\/\d{1,2}(?:\/\d{1,3})?)\b/);   // Funkkennung, z. B. 1/40/2
-    const kennung = km ? km[1] : "";
-    if(!kennung && !KW.test(l)) return;
-    out.push({ raw: l, kennung });
+    const m = l.match(RE);
+    if(!m) return;
+    const ort = m[1].trim();
+    out.push({ raw: l, ort, kennung: m[2], name: ("Florian " + ort).trim() });
   });
   return out;
 }
@@ -1471,11 +1472,45 @@ function ocrMerge(kandidaten){
     ocrList.push(c);
   }
 }
+// Live-Kamera (getUserMedia) – öffnet direkt die Kamera; Fallback auf native Kamera/Datei
+async function ocrKamera(){
+  const mm = navigator.mediaDevices;
+  if(!mm || !mm.getUserMedia || !window.isSecureContext){ $("#ocr-cam").click(); return; }  // http-LAN → native Kamera
+  let stream;
+  try{ stream = await mm.getUserMedia({ video:{ facingMode:{ ideal:"environment" } }, audio:false }); }
+  catch(e){ $("#ocr-cam").click(); return; }  // kein Zugriff → Fallback
+  const host = document.createElement("div");
+  host.className = "cam-overlay";
+  host.innerHTML = `
+    <video autoplay playsinline muted></video>
+    <div class="cam-bar">
+      <button class="btn btn-ghost" data-cam="x">Abbrechen</button>
+      <button class="btn btn-primary" data-cam="shot">📷 Auslösen</button>
+    </div>`;
+  document.body.appendChild(host);
+  const video = host.querySelector("video");
+  video.srcObject = stream;
+  const stop = () => { try{ stream.getTracks().forEach(t => t.stop()); }catch(e){} host.remove(); };
+  host.querySelector('[data-cam="x"]').addEventListener("click", stop);
+  host.querySelector('[data-cam="shot"]').addEventListener("click", async () => {
+    const c = document.createElement("canvas");
+    c.width = video.videoWidth || 1280; c.height = video.videoHeight || 720;
+    c.getContext("2d").drawImage(video, 0, 0, c.width, c.height);
+    stop();
+    const setProg = t => { const el = $("#ocr-progress"); if(el) el.textContent = t; };
+    try{
+      setProg("Foto wird gelesen … ");
+      const w = await tessWorker();
+      const { data } = await w.recognize(c);
+      ocrMerge(ocrKandidaten(data.text)); renderOcrSheet(); setProg("");
+    }catch(err){ setProg(""); modalInfo("Einlesen nicht möglich: " + (err.message || err)); }
+  });
+}
 function openOcrAssistent(){ ocrList = []; renderOcrSheet(); }
 function renderOcrSheet(){
   const rows = ocrList.map((c, i) => {
     const kat = c.kat;
-    const label = kat ? katalogLabel(kat) : (c.kennung ? `${c.raw}` : c.raw);
+    const label = kat ? katalogLabel(kat) : `${c.name || "Florian"}${c.kennung ? " " + c.kennung : ""}`;
     const schonDa = kat && state.einheiten.some(u => (u.kennung||"").replace(/\s/g,"") === (kat.kennung||"").replace(/\s/g,"") && !u.abgerueckt);
     const tag = kat ? (schonDa ? `<span class="ocr-tag da">bereits erfasst</span>` : `<span class="ocr-tag ok">im Katalog</span>`)
                     : `<span class="ocr-tag neu">neu</span>`;
@@ -1512,7 +1547,7 @@ function renderOcrSheet(){
   document.querySelectorAll("[data-ocrdel]").forEach(b => b.addEventListener("click", () => {
     ocrList.splice(Number(b.dataset.ocrdel), 1); renderOcrSheet();
   }));
-  $("#ocr-cam-btn").addEventListener("click", () => $("#ocr-cam").click());
+  $("#ocr-cam-btn").addEventListener("click", ocrKamera);
   $("#ocr-file-btn").addEventListener("click", () => $("#ocr-file").click());
   const verarbeite = async e => {
     const files = [...e.target.files]; if(!files.length) return;
@@ -1550,8 +1585,8 @@ function renderOcrSheet(){
       const u = k
         ? { id:uid(), org:k.org||"FW", name:k.name, kennung:k.kennung, f:k.f|0,u:k.u|0,m:k.m|0,agt:k.agt|0,csa:k.csa|0,
             ankunft:new Date().toISOString(), abgerueckt:false, abschnitt:"" }
-        : { id:uid(), org:"FW", name:(c.raw||"").replace(c.kennung,"").replace(/^\s*[\d.]+\s*/,"").replace(/\s{2,}/g," ").trim() || c.raw,
-            kennung:c.kennung||"", f:0,u:1,m:0,agt:0,csa:0, ankunft:new Date().toISOString(), abgerueckt:false, abschnitt:"" };
+        : { id:uid(), org:"FW", name:c.name || "Florian", kennung:c.kennung||"",
+            f:0,u:1,m:0,agt:0,csa:0, ankunft:new Date().toISOString(), abgerueckt:false, abschnitt:"" };
       state.einheiten.push(u); n++;
     }
     markChange(); closeEditor(); render();

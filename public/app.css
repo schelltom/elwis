@@ -1011,6 +1011,10 @@
 .ocr-tag.ok{background:color-mix(in oklab,var(--good,#2e7d32) 16%,var(--surface));color:var(--good,#2e7d32)}
 .ocr-tag.neu{background:color-mix(in oklab,var(--warn) 16%,var(--surface));color:var(--warn)}
 .ocr-tag.da{background:var(--surface2);color:var(--ink3)}
+.cam-overlay{position:fixed;inset:0;z-index:100;background:#000;display:flex;flex-direction:column}
+.cam-overlay video{flex:1;width:100%;height:100%;object-fit:contain;background:#000;min-height:0}
+.cam-bar{display:flex;gap:12px;justify-content:center;padding:14px calc(14px + env(safe-area-inset-right)) calc(16px + env(safe-area-inset-bottom));background:#111}
+.cam-bar .btn{min-height:52px;padding:10px 24px;font-size:1rem}
 .kat-add{display:flex;gap:8px;margin-top:8px;flex-wrap:wrap}
 .kat-add select{flex:none;width:110px}
 .kat-add input{flex:1;min-width:140px}
