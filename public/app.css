@@ -309,6 +309,11 @@
     padding:2px 8px;font-size:.72rem;font-weight:750;letter-spacing:.04em}
   .badge-agt{display:inline-flex;align-items:center;gap:4px;border-radius:6px;padding:2px 8px;
     font-size:.72rem;font-weight:700;background:var(--surface2);color:var(--ink2)}
+  .badge-schaetz{display:inline-flex;align-items:center;border-radius:6px;padding:2px 8px;
+    font-size:.72rem;font-weight:700;background:var(--warn-bg);color:var(--warn)}
+  .kpi-bar{position:relative;flex:1;min-width:60px;height:6px;border-radius:3px;background:var(--surface2);align-self:center;overflow:hidden}
+  .kpi-bar i{position:absolute;inset:0 auto 0 0;background:var(--warn);border-radius:3px}
+  .kpic:not(.warn) .kpi-bar i{background:var(--good,#2e7d32)}
 
   .org-FW{border-left-color:var(--fw)} .org-BRK{border-left-color:var(--brk)}
   .org-POL{border-left-color:var(--pol)} .org-THW{border-left-color:var(--thw)}

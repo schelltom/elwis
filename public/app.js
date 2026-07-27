@@ -35,9 +35,14 @@ const FZG_KATALOG = [
   { grp:"Sonstige",         typ:"MZF",           name:"Florian Neunkirchen",  kennung:"1/11/1", f:1,u:1,m:1, agt:0 },
   { grp:"Sonstige",         typ:"MTW",           name:"Florian Rothenstadt",  kennung:"14/1",   f:0,u:1,m:5, agt:0 },
 ];
-/* Fahrzeugkatalog: Anzeige-Label, nach Fahrzeugart gruppiert + innerhalb alphabetisch */
+/* Fahrzeugkatalog: Anzeige-Label = Name + Kennung (z. B. „Florian Weiden 1/55/1") */
 function katalogLabel(k){
-  return [k.typ, [k.name, k.kennung].filter(Boolean).join(" ")].filter(Boolean).join(" – ");
+  return [k.name, k.kennung].filter(Boolean).join(" ");
+}
+// Flache, alphabetisch sortierte Liste (ohne Fahrzeugart/-typ)
+function katalogListe(){
+  return (state.config.katalog || []).map((k,i) => ({...k, _i:i}))
+    .sort((a,b) => katalogLabel(a).localeCompare(katalogLabel(b), "de"));
 }
 function katalogGruppen(){
   const kat = (state.config.katalog || []).map((k,i) => ({...k, _i:i}));
@@ -736,7 +741,7 @@ function renderSettingsSheet(){
             <div class="kat-grp">${esc(g.grp)}</div>
             ${g.items.map(s => `
               <div class="kat-row">
-                <span>${s.nr ? `<span class="kat-nr mono">${s.nr}</span> ` : ""}${esc(s.text)}</span>
+                <span>${esc(s.text)}</span>
                 <button class="kat-x" data-stwdel="${s._i}" aria-label="Stichwort entfernen">✕</button>
               </div>`).join("")}`).join("")}
         </div>
@@ -773,15 +778,13 @@ function renderSettingsSheet(){
       </div>
       <div class="field"><label style="margin-bottom:10px">Fahrzeugkatalog (${(c.katalog||[]).length})</label>
         <div class="kat-list">
-          ${katalogGruppen().map(g => `
-            <div class="kat-grp">${esc(g.grp)}</div>
-            ${g.items.map(k => `
-              <div class="kat-row">
-                <span>${esc(katalogLabel(k))}</span>
-                <button class="kat-x" data-katdel="${k._i}" aria-label="Aus Katalog entfernen">✕</button>
-              </div>`).join("")}`).join("")}
+          ${katalogListe().map(k => `
+            <div class="kat-row">
+              <span>${esc(katalogLabel(k))}</span>
+              <button class="kat-x" data-katdel="${k._i}" aria-label="Aus Katalog entfernen">✕</button>
+            </div>`).join("")}
         </div>
-        <p class="hint">Neue Fahrzeuge werden bei der Erfassung automatisch aufgenommen. Mit ✕ entfernen.</p>
+        <p class="hint">Name + Funkrufnummer. Neue Fahrzeuge werden bei der Erfassung automatisch aufgenommen. Mit ✕ entfernen.</p>
       </div>
     </div>
     <div class="sheet-foot">
@@ -1353,6 +1356,7 @@ function unitCard(u){
         ${u.csa>0 ? `<span class="badge-agt">CSA ${u.csa}</span>` : ""}
         <span class="mono">${fmtZeit(u.ankunft)}</span>
         ${u.abgerueckt ? "<span>abgerückt</span>" : ""}
+        ${u.tatsaechlich === false ? `<span class="badge-schaetz">~ Schätzung</span>` : ""}
       </div>
     </div>
     <div class="u-staerke mono">${staerkeStr(u)}<span class="lbl">Stärke</span></div>
@@ -1444,18 +1448,31 @@ async function pdfSeiten(file){
   return seiten;
 }
 function ocrKandidaten(text){
-  // Nur Fahrzeug-Zeilen der Form „… FL <Ort> <Funkkennung>" (z. B. „3.3.1 WEN-S FL Weiden 1/40/2").
-  // FL = Florian; danach der Ort, danach der Funkrufname/Kennung. Alle anderen Zeilen werden ignoriert.
-  const RE = /\bF[LI1]\b\s+([A-Za-zÄÖÜäöüß.\-]+(?:\s+[A-Za-zÄÖÜäöüß.\-]+){0,2})\s+(\d{1,2}\/\d{1,2}(?:\/\d{1,3})?)/i;
+  // Fahrzeugzeilen „… <Funkruf> <Ort> <Funkkennung>": FL = Florian (Löschfahrzeug), Kater = ELW.
+  // Danach Ort, danach Kennung. Alle anderen Zeilen werden ignoriert.
+  const RE = /\b(F[LI1]|Kater)\b\s+([A-Za-zÄÖÜäöüß.\-]+(?:\s+[A-Za-zÄÖÜäöüß.\-]+){0,2})\s+(\d{1,2}\/\d{1,2}(?:\/\d{1,3})?)/i;
   const out = [];
   (text || "").split(/\r?\n/).forEach(line => {
     const l = line.replace(/\s+/g, " ").trim();
     const m = l.match(RE);
     if(!m) return;
-    const ort = m[1].trim();
-    out.push({ raw: l, ort, kennung: m[2], name: ("Florian " + ort).trim() });
+    const funk = /^kater/i.test(m[1]) ? "Kater" : "Florian";
+    const ort = m[2].trim();
+    out.push({ raw: l, ort, kennung: m[3], name: `${funk} ${ort}`.trim() });
   });
   return out;
+}
+// Default-Besatzung (Schätzung) aus der Funkkennung. Typ-Zahl = zweitletzte Ziffernstelle
+// (z. B. 1/40/2 → 40, 46/1 → 46). < 10 ⇒ Führungskraft. Personenzahl je Typ-Bereich:
+// 40–43 → 9 (Gruppe), 44–49 → 6 (Staffel), sonst 3 (Trupp).
+function defaultBesatzung(kennung){
+  const teile = String(kennung || "").split("/").map(x => parseInt(x, 10)).filter(n => !isNaN(n));
+  if(teile.length < 2) return null;
+  const typ = teile[teile.length - 2];
+  if(!(typ >= 0)) return null;
+  if(typ < 10) return { fuehrung: true };
+  const total = (typ >= 40 && typ <= 43) ? 9 : (typ >= 44 && typ <= 49) ? 6 : 3;
+  return { fuehrung: false, f: 0, u: 1, m: total - 1, total };
 }
 function ocrKatalogTreffer(kennung){
   if(!kennung) return null;
@@ -1477,7 +1494,8 @@ async function ocrKamera(){
   const mm = navigator.mediaDevices;
   if(!mm || !mm.getUserMedia || !window.isSecureContext){ $("#ocr-cam").click(); return; }  // http-LAN → native Kamera
   let stream;
-  try{ stream = await mm.getUserMedia({ video:{ facingMode:{ ideal:"environment" } }, audio:false }); }
+  try{ stream = await mm.getUserMedia({ video:{ facingMode:{ ideal:"environment" },
+    width:{ ideal:1920 }, height:{ ideal:1080 } }, audio:false }); }
   catch(e){ $("#ocr-cam").click(); return; }  // kein Zugriff → Fallback
   const host = document.createElement("div");
   host.className = "cam-overlay";
@@ -1485,16 +1503,24 @@ async function ocrKamera(){
     <video autoplay playsinline muted></video>
     <div class="cam-bar">
       <button class="btn btn-ghost" data-cam="x">Abbrechen</button>
-      <button class="btn btn-primary" data-cam="shot">📷 Auslösen</button>
+      <button class="btn btn-primary" data-cam="shot" disabled>Kamera startet …</button>
     </div>`;
   document.body.appendChild(host);
   const video = host.querySelector("video");
+  const shotBtn = host.querySelector('[data-cam="shot"]');
   video.srcObject = stream;
+  try{ await video.play(); }catch(e){}
+  // Auslöser erst freigeben, wenn das Videobild wirklich läuft (sonst leeres/schwarzes Foto)
+  const bereit = () => { if(video.videoWidth > 0){ shotBtn.disabled = false; shotBtn.textContent = "📷 Auslösen"; } };
+  video.addEventListener("loadedmetadata", bereit);
+  video.addEventListener("playing", bereit);
+  setTimeout(bereit, 800);
   const stop = () => { try{ stream.getTracks().forEach(t => t.stop()); }catch(e){} host.remove(); };
   host.querySelector('[data-cam="x"]').addEventListener("click", stop);
-  host.querySelector('[data-cam="shot"]').addEventListener("click", async () => {
+  shotBtn.addEventListener("click", async () => {
+    if(!video.videoWidth){ return; }
     const c = document.createElement("canvas");
-    c.width = video.videoWidth || 1280; c.height = video.videoHeight || 720;
+    c.width = video.videoWidth; c.height = video.videoHeight;
     c.getContext("2d").drawImage(video, 0, 0, c.width, c.height);
     stop();
     const setProg = t => { const el = $("#ocr-progress"); if(el) el.textContent = t; };
@@ -1502,7 +1528,9 @@ async function ocrKamera(){
       setProg("Foto wird gelesen … ");
       const w = await tessWorker();
       const { data } = await w.recognize(c);
-      ocrMerge(ocrKandidaten(data.text)); renderOcrSheet(); setProg("");
+      const kand = ocrKandidaten(data.text);
+      ocrMerge(kand); renderOcrSheet(); setProg("");
+      if(!kand.length) modalInfo("Kein Fahrzeug erkannt. Foto näher/schärfer halten (Funkkennung muss lesbar sein) – oder „Datei / PDF wählen“.");
     }catch(err){ setProg(""); modalInfo("Einlesen nicht möglich: " + (err.message || err)); }
   });
 }
@@ -1579,18 +1607,27 @@ function renderOcrSheet(){
   $("#ocr-cam").addEventListener("change", verarbeite);
   $("#ocr-file").addEventListener("change", verarbeite);
   $("#ocr-add").addEventListener("click", () => {
-    let n = 0;
+    let nE = 0, nF = 0;
     for(const c of ocrList){
-      const k = c.kat;
-      const u = k
-        ? { id:uid(), org:k.org||"FW", name:k.name, kennung:k.kennung, f:k.f|0,u:k.u|0,m:k.m|0,agt:k.agt|0,csa:k.csa|0,
-            ankunft:new Date().toISOString(), abgerueckt:false, abschnitt:"" }
-        : { id:uid(), org:"FW", name:c.name || "Florian", kennung:c.kennung||"",
-            f:0,u:1,m:0,agt:0,csa:0, ankunft:new Date().toISOString(), abgerueckt:false, abschnitt:"" };
-      state.einheiten.push(u); n++;
+      const k = c.kat, bes = defaultBesatzung(c.kennung);
+      if(bes && bes.fuehrung){
+        // Erster Kennungswert < 10 → Führungskraft (Schätzung, tatsächlich noch nicht bestätigt)
+        state.fuehrung.push({ id:uid(), org:"FW", name:c.name || "", funktion:"",
+          funkrufname:[c.name, c.kennung].filter(Boolean).join(" "), einheit:"", tatsaechlich:false });
+        nF++;
+      }else{
+        const crew = bes ? { f:bes.f, u:bes.u, m:bes.m }
+          : (k ? { f:k.f|0, u:k.u|0, m:k.m|0 } : { f:0, u:1, m:2 });
+        state.einheiten.push({ id:uid(), org: k ? (k.org||"FW") : "FW",
+          name: k ? k.name : (c.name || "Florian"), kennung: k ? k.kennung : (c.kennung || ""),
+          f:crew.f, u:crew.u, m:crew.m, agt: k ? (k.agt|0) : 0, csa: k ? (k.csa|0) : 0,
+          ankunft:new Date().toISOString(), abgerueckt:false, abschnitt:"", tatsaechlich:false });
+        nE++;
+      }
     }
     markChange(); closeEditor(); render();
-    if(n) modalInfo(`${n} Fahrzeug${n===1?"":"e"} als Einheit übernommen. Stärke/AGT bei Bedarf noch anpassen.`);
+    modalInfo(`Übernommen als Schätzung: ${nE} Fahrzeug${nE===1?"":"e"}` + (nF ? `, ${nF} Führungskraft/-kräfte` : "") +
+      `.\nDie Personalstärke ist ein Schätzwert – bitte je Einheit prüfen und über „Stärke bestätigt" bestätigen.`);
   });
 }
 
@@ -1603,7 +1640,7 @@ function openEditor(id, prefill){
     if(editing.unit.csa == null) editing.unit.csa = 0;
   }else{
     editing = { unit: { id:uid(), org:"FW", name:pfx("FW"), kennung:"", f:0, u:1, m:8, agt:0, csa:0,
-      ankunft:new Date().toISOString(), abgerueckt:false, abschnitt:"", ...(prefill||{}) }, isNew:true };
+      ankunft:new Date().toISOString(), abgerueckt:false, abschnitt:"", tatsaechlich:true, ...(prefill||{}) }, isNew:true };
   }
   renderSheet();
 }
@@ -1649,10 +1686,7 @@ function renderSheet(){
       <div class="field"><label for="e-katalog">Fahrzeugkatalog (Fuhrpark)</label>
         <select id="e-katalog">
           <option value="">– Fahrzeug wählen, füllt alles vor –</option>
-          ${katalogGruppen().map(g => `
-            <optgroup label="${esc(g.grp)}">
-              ${g.items.map(k => `<option value="${k._i}">${esc(katalogLabel(k))}</option>`).join("")}
-            </optgroup>`).join("")}
+          ${katalogListe().map(k => `<option value="${k._i}">${esc(katalogLabel(k))}</option>`).join("")}
         </select>
         <p class="hint">Neue Fahrzeuge landen automatisch im Katalog; verwalten (löschen) in den Einstellungen.</p>
       </div>
@@ -1688,6 +1722,12 @@ function renderSheet(){
         </div></div>
       <div class="field"><label for="e-zeit">Ankunft an Einsatzstelle</label>
         <input id="e-zeit" type="time" class="mono" value="${fmtZeit(u.ankunft)==="–"?"":fmtZeit(u.ankunft)}"></div>
+      <div class="field">
+        <button class="leave-toggle" id="e-tat" aria-pressed="${u.tatsaechlich !== false}">
+          <span class="track"></span>
+          <span>Stärke bestätigt <small style="display:block;font-size:.75rem;font-weight:500;color:var(--ink3)">tatsächlich abgefragt – nicht (mehr) nur eine Schätzung aus dem Alarm</small></span>
+        </button>
+      </div>
       ${editing.isNew ? "" : `
       <div class="field">
         <button class="leave-toggle" id="e-left" aria-pressed="${u.abgerueckt}">
@@ -1765,6 +1805,11 @@ function wireSheet(){
   if(left) left.addEventListener("click", () => {
     u.abgerueckt = !u.abgerueckt;
     left.setAttribute("aria-pressed", u.abgerueckt);
+  });
+  const tat = $("#e-tat");
+  if(tat) tat.addEventListener("click", () => {
+    u.tatsaechlich = !(u.tatsaechlich !== false);   // toggelt bestätigt/Schätzung
+    tat.setAttribute("aria-pressed", u.tatsaechlich);
   });
   const del = $("#e-del");
   if(del) del.addEventListener("click", () => {
@@ -1957,7 +2002,7 @@ function openFkEditor(id){
     if(!f) return;
     editingFk = { fk: {...f}, isNew:false };
   }else{
-    editingFk = { fk: { id:uid(), org:"FW", name:"", funktion:"", funkrufname:"", einheit:"" }, isNew:true };
+    editingFk = { fk: { id:uid(), org:"FW", name:"", funktion:"", funkrufname:"", einheit:"", tatsaechlich:true }, isNew:true };
   }
   renderFkSheet();
 }
@@ -1989,6 +2034,12 @@ function renderFkSheet(){
         <input id="fk-funkruf" class="mono" value="${esc(f.funkrufname||"")}" placeholder="z. B. Florian Weiden 1" autocomplete="off"></div>
       <div class="field"><label for="fk-einheit">Einheit / Abschnitt <span style="text-transform:none;font-weight:500">(optional)</span></label>
         <input id="fk-einheit" value="${esc(f.einheit||"")}" placeholder="z. B. Abschnitt 1, ${esc(pfx("FW"))} Weiden 40/1" autocomplete="off"></div>
+      <div class="field">
+        <button class="leave-toggle" id="fk-tat" aria-pressed="${f.tatsaechlich !== false}">
+          <span class="track"></span>
+          <span>Bestätigt <small style="display:block;font-size:.75rem;font-weight:500;color:var(--ink3)">tatsächlich vor Ort – nicht (mehr) nur eine Schätzung aus dem Alarm</small></span>
+        </button>
+      </div>
     </div>
     <div class="sheet-foot">
       ${editingFk.isNew ? "" : `<button class="btn btn-danger-ghost" id="fk-del">Löschen</button>`}
@@ -2013,6 +2064,11 @@ function renderFkSheet(){
   $("#fk-funktion").addEventListener("input", e => { f.funktion = e.target.value; });
   $("#fk-funkruf").addEventListener("input", e => { f.funkrufname = e.target.value; });
   $("#fk-einheit").addEventListener("input", e => { f.einheit = e.target.value; });
+  const fkTat = $("#fk-tat");
+  if(fkTat) fkTat.addEventListener("click", () => {
+    f.tatsaechlich = !(f.tatsaechlich !== false);
+    fkTat.setAttribute("aria-pressed", f.tatsaechlich);
+  });
   const del = $("#fk-del");
   if(del) del.addEventListener("click", () => {
     modalConfirm("Diese Führungskraft wirklich löschen?").then(ok => { if(!ok) return;
@@ -3194,6 +3250,9 @@ function rotateAbschnitte(){
 function renderMonitor(){
   const e = state.einsatz;
   const act = aktive(), s = summen(act);
+  // Fortschritt: wie viele Kräfte sind tatsächlich abgefragt (nicht mehr Schätzung)?
+  const bestKraefte = act.filter(u => u.tatsaechlich !== false).length + state.fuehrung.filter(f => f.tatsaechlich !== false).length;
+  const gesKraefte = act.length + state.fuehrung.length;
   const byOrg = Object.keys(ORGS).map(key => {
     const units = act.filter(u => u.org === key);
     return { key, ...ORGS[key], units, sum: summen(units) };
@@ -3333,6 +3392,7 @@ function renderMonitor(){
         <div class="kpic"><span class="k">CSA</span><span class="v mono">${s.csa}</span></div>
         <div class="kpic"><span class="k">Einheiten</span><span class="v mono">${act.length}</span><span class="s">${state.einheiten.length - act.length} abgerückt</span></div>
         <div class="kpic"><span class="k">Führungskräfte</span><span class="v mono">${state.fuehrung.length}</span></div>
+        ${gesKraefte ? `<div class="kpic ${bestKraefte < gesKraefte ? "warn" : ""}"><span class="k">Ist-Stärke bestätigt</span><span class="v mono">${bestKraefte}/${gesKraefte}</span><span class="kpi-bar"><i style="width:${Math.round(bestKraefte/gesKraefte*100)}%"></i></span></div>` : ""}
         ${brUnits.length ? `<div class="kpic"><span class="k">Bereitstellung</span><span class="v mono">${brUnits.length}</span><span class="s">Einheiten</span></div>` : ""}
         ${state.anforderungen.some(a => a.status !== "eingetroffen") ? `<div class="kpic warn"><span class="k">Anrollend</span><span class="v mono">${state.anforderungen.filter(a => a.status !== "eingetroffen").length}</span><span class="s">nachgefordert</span></div>` : ""}
         ${e.lagebespr ? `<div class="kpic warn"><span class="k">Nächste Lagebespr.</span><span class="v mono">${esc(e.lagebespr)}</span><span class="s" id="monLbRel"></span></div>` : ""}
