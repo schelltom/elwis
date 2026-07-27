@@ -536,6 +536,12 @@
   .lg-status{display:flex;align-items:center;gap:10px;background:var(--warn-bg);color:var(--warn);
     border-radius:10px;padding:10px 14px;font-size:.85rem;font-weight:650;margin-bottom:12px}
   .lg-status button{margin-left:auto;font-weight:700;text-decoration:underline}
+  .lg-submenu{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:-4px 0 12px;padding:8px 10px;
+    background:var(--surface2);border:1px solid var(--line);border-radius:10px}
+  .lg-sub-lbl{font-size:.8rem;font-weight:700;color:var(--ink2)}
+  .lg-subopt{display:flex;align-items:center;gap:8px;padding:6px 10px;border:1.5px solid var(--line);
+    border-radius:8px;background:var(--surface);font-weight:650;font-size:.85rem}
+  .lg-subopt:active{background:var(--surface2)}
   .lg-unitchips{display:flex;flex-wrap:wrap;gap:8px}
   .lg-unitchips .chip{min-height:44px;padding:6px 12px;font-size:.8rem;cursor:pointer;
     border:1.5px solid transparent}
@@ -575,10 +581,37 @@
   .lg-item{position:absolute;transform:translate(-50%,-50%);z-index:2;cursor:grab;
     display:flex;flex-direction:column;align-items:center;gap:2px;touch-action:none;user-select:none;-webkit-user-select:none}
   .lg-item *{pointer-events:none}
+  /* „Wackeln" beim Klick auf das Fahrzeug in der Legende – zeigt die Position auf der Karte */
+  @keyframes lg-wackel{
+    0%,100%{transform:translate(-50%,-50%) rotate(0)}
+    15%{transform:translate(-50%,-50%) rotate(-11deg)}
+    30%{transform:translate(-50%,-50%) rotate(9deg)}
+    45%{transform:translate(-50%,-50%) rotate(-7deg)}
+    60%{transform:translate(-50%,-50%) rotate(5deg)}
+    80%{transform:translate(-50%,-50%) rotate(-2deg)}}
+  .lg-item.wackel,.lg-mk.wackel{animation:lg-wackel .8s ease-in-out;z-index:6}
+  [data-shape].flash{animation:lg-flash .9s ease-in-out}
+  @keyframes lg-flash{0%,100%{opacity:1}20%{opacity:.15}40%{opacity:1}60%{opacity:.15}80%{opacity:1}}
+  .lg-find{background:none;border:0;padding:0;cursor:pointer;line-height:0}
+  /* Legenden-Badge (klickbar → wackeln/blinken) für Marker, Formen, Linien */
+  .lg-leg-badge{flex:none;width:34px;display:grid;place-items:center;background:none;border:0;padding:0;cursor:pointer}
+  .lg-mini-form{width:24px;height:20px;border:2.5px solid var(--sc);background:var(--surface)}
+  .lg-mini-form.circle{border-radius:50%;width:22px;height:22px}
+  .lg-mini-form.square{border-radius:4px;width:22px;height:22px}
+  .lg-mini-form.rect{border-radius:4px}
+  .lg-mini-line{width:28px;height:0;border-top:3px solid var(--sc);border-radius:2px}
   .lg-sym{min-width:40px;height:36px;padding:3px 8px;border:2.5px solid var(--sc);color:var(--sc);
     background:var(--surface);border-radius:4px;display:inline-flex;align-items:center;justify-content:center;
     font-weight:800;font-size:.72rem;gap:1px;box-shadow:var(--shadow);white-space:nowrap}
   .lg-sym.circle{border-radius:50%;width:40px;min-width:40px;padding:0}
+  .lg-symsvg{display:inline-flex;width:40px;height:40px;line-height:0;filter:drop-shadow(var(--shadow))}
+  .lg-symsvg svg{width:100%;height:100%;display:block}
+  .lg-form{display:inline-flex;align-items:center;justify-content:center;border:2.5px solid var(--sc);
+    color:var(--sc);background:var(--surface);font-weight:800;font-size:.72rem;padding:0 6px;
+    box-shadow:var(--shadow);white-space:nowrap;line-height:1}
+  .lg-form.circle{border-radius:50%;width:40px;height:40px;padding:0}
+  .lg-form.square{border-radius:5px;width:40px;height:40px}
+  .lg-form.rect{border-radius:5px;min-width:64px;height:34px}
   .sym-row{display:flex;align-items:center;gap:14px;width:100%;text-align:left;
     padding:10px 4px;border-bottom:1px solid var(--line);min-height:56px}
   .sym-row:last-of-type{border-bottom:none}
@@ -613,14 +646,38 @@
   .lg-leg-car:last-of-type{border-bottom:none}
   .lg-leg-car .lg-car{flex:none}
   .lg-leg-car select{flex:1;min-height:44px;padding:8px 10px}
+  .lg-leg-car{align-items:flex-start}
+  .lg-leg-carname{flex:1;min-width:0;font-size:.8rem;font-weight:650;line-height:1.25;
+    overflow-wrap:anywhere;padding-top:2px;background:none;border:0;cursor:pointer;
+    text-align:left;font-family:inherit;color:var(--ink)}
 
   /* Lagekarte: Karte + Legende nebeneinander – innen nur Marker, Text außen */
   .lg-layout{display:grid;grid-template-columns:1fr;gap:12px;align-items:start}
-  @media (min-width:900px){.lg-layout{grid-template-columns:2.2fr 1fr}}
-  /* Großansicht: Karte in voller Breite und Höhe, Legende darunter */
-  .lg-layout.big{grid-template-columns:1fr}
-  .lg-layout.big .lg-wrap{aspect-ratio:auto;height:max(460px,calc(100vh - 340px))}
-  .lg-layout.big .lg-leg-cols{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:0 24px}
+  /* Lagekarte füllt das Fenster ohne Scrollen: Card = Flex-Spalte, das Layout füllt den Rest,
+     Karte + Legende (links/rechts) stehen nebeneinander und passen sich der Höhe an. */
+  @media (min-width:900px){
+    .lg-card{display:flex;flex-direction:column;height:calc(100vh - 112px);overflow:hidden}
+    .lg-card > .lg-layout{flex:1;min-height:0;align-items:stretch}
+    .lg-layout .lg-wrap{aspect-ratio:auto;height:100%}
+    .lg-legend{height:100%;overflow:auto}
+  }
+  /* Präsentationsmodus: Karte + Legende bildschirmfüllend, nur die Zoom-Lupe – alles andere aus */
+  .lg-card.lg-present{position:fixed;inset:0;z-index:200;height:100vh;width:100vw;margin:0;
+    border-radius:0;padding:12px;background:var(--surface);display:flex;flex-direction:column}
+  .lg-card.lg-present > h2,
+  .lg-card.lg-present > .lg-headrow,
+  .lg-card.lg-present > .lg-modes,
+  .lg-card.lg-present > .lg-toolbar,
+  .lg-card.lg-present > .lg-submenu,
+  .lg-card.lg-present > .lg-status,
+  .lg-card.lg-present > .hint,
+  .lg-card.lg-present > .lg-bgrow{display:none!important}
+  .lg-card.lg-present > .lg-layout{flex:1;min-height:0;align-items:stretch;margin:0}
+  .lg-present-ctrl{position:absolute;top:14px;right:14px;z-index:210;display:flex;gap:8px}
+  .lg-present-ctrl button{width:48px;height:48px;border-radius:12px;border:1px solid var(--line);
+    background:var(--surface);color:var(--ink);font-size:1.5rem;font-weight:800;box-shadow:var(--shadow);
+    display:grid;place-items:center}
+  .lg-present-ctrl button:active{background:var(--surface2)}
   .lg-headrow{display:flex;align-items:center;justify-content:flex-end;margin:-6px 0 10px}
   .lg-headrow .btn{min-height:44px;padding:8px 16px;font-size:.85rem}
   .lg-legend{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:14px 16px}
@@ -629,10 +686,14 @@
   .lg-leg-item{display:flex;align-items:flex-start;gap:10px;width:100%;text-align:left;
     padding:7px 0;border-bottom:1px solid var(--line)}
   .lg-leg-item:last-of-type{border-bottom:none}
-  .lg-leg-num{width:30px;height:30px;border-radius:50%;background:var(--accent);color:#fff;
-    display:grid;place-items:center;font-weight:800;font-size:.85rem;flex:none;
+  .lg-leg-num{width:30px;height:30px;border:0;border-radius:50%;background:var(--accent);color:#fff;
+    display:grid;place-items:center;font-weight:800;font-size:.85rem;flex:none;cursor:pointer;
     font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace}
-  .lg-leg-text{font-size:.92rem;font-weight:600;line-height:1.35;padding-top:4px}
+  .lg-leg-num.tri{border-radius:0;background:var(--brk);color:#1A1817;
+    clip-path:polygon(50% 0,100% 100%,0 100%);padding-top:8px;font-size:.78rem}
+  .lg-leg-text{flex:1;min-width:0;font-size:.92rem;font-weight:600;line-height:1.35;padding-top:4px;
+    background:none;border:0;cursor:pointer;text-align:left;font-family:inherit;color:var(--ink);
+    overflow-wrap:anywhere}
   .lg-leg-text .ph{color:var(--ink3);font-weight:500}
   @media (min-width:1500px){
     .lg-rect{font-size:.9rem;min-width:72px}
@@ -802,7 +863,7 @@
 .lg-drawbar button[data-dr="ok"]{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
 
 /* Lagekarte: Modus-Zeile + kompakte Kartengrundlagen-Auswahl */
-.lg-modes{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:16px}
+.lg-modes{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:10px}
 .lg-modes .seg{margin-bottom:0}
 .lg-layerpick{display:inline-flex;gap:2px;background:var(--surface2);border:1px solid var(--line);
   border-radius:9px;padding:3px}
@@ -931,6 +992,12 @@
 .kat-x{width:34px;height:34px;flex:none;border-radius:8px;border:1.5px solid var(--line);
   color:var(--accent);font-weight:700;background:var(--surface)}
 .kat-x:active{background:var(--surface2)}
+.kat-add{display:flex;gap:8px;margin-top:8px;flex-wrap:wrap}
+.kat-add select{flex:none;width:110px}
+.kat-add input{flex:1;min-width:140px}
+.kat-add .btn{flex:none}
+.kat-add-fk input{flex:1 1 120px;min-width:110px;width:auto}
+.kat-nr{display:inline-block;min-width:2.2em;color:var(--ink3);font-size:.78rem;text-align:right}
 
 /* Lagekarten-Legende: bei Bedarf zweispaltig, getrennt Marker / Fahrzeuge */
 .lg-leg-body.zweispaltig{display:grid;grid-template-columns:1fr 1fr;gap:0 18px;align-items:start}

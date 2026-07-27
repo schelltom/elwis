@@ -54,6 +54,213 @@ function katalogHinzufuegen(u){
   kat.push({ grp:"Weitere Fahrzeuge", typ:"", name:u.name, kennung:u.kennung,
     f:u.f|0, u:u.u|0, m:u.m|0, agt:u.agt|0, csa:u.csa|0, org:u.org });
 }
+/* Einsatzstichwort-Katalog – Vorbelegung nach ILS-Systematik (Brand / THL / ABC).
+   Beim ersten Start in die Einstellungen übernommen, danach frei erweiterbar und löschbar.
+   Weitere Stammdaten (z. B. eigene Stichwörter) lassen sich unter Einstellungen ergänzen. */
+const STICHWORT_KATALOG = [
+  // Brand – lfd. Nr. 25–75 (ab B3; kleinere Brände sind für die Führungsunterstützung nicht relevant)
+  { kat:"Brand", nr:25, text:"B3 – am Gebäude" },
+  { kat:"Brand", nr:26, text:"B3 – Brandgeruch" },
+  { kat:"Brand", nr:27, text:"B3 – Dachstuhl" },
+  { kat:"Brand", nr:28, text:"B3 – Dehnfuge" },
+  { kat:"Brand", nr:29, text:"B3 – Garage" },
+  { kat:"Brand", nr:30, text:"B3 – Keller" },
+  { kat:"Brand", nr:31, text:"B3 – Rauchentwicklung" },
+  { kat:"Brand", nr:32, text:"B3 – Zimmer" },
+  { kat:"Brand", nr:33, text:"B3 – Berghütte" },
+  { kat:"Brand", nr:34, text:"B3 – Fahrzeug / Maschine (Landwirtschaft)" },
+  { kat:"Brand", nr:35, text:"B3 – LKW / Bus außerorts" },
+  { kat:"Brand", nr:36, text:"B3 – LKW / Bus auf BAB" },
+  { kat:"Brand", nr:37, text:"B3 – Alarmstufenerhöhung auf B 3" },
+  { kat:"Brand", nr:38, text:"B3 – überhitzter Heustock" },
+  { kat:"Brand", nr:39, text:"B 3 PERSON – Dachstuhl (Person in Gefahr)" },
+  { kat:"Brand", nr:40, text:"B 3 PERSON – Garage (Person in Gefahr)" },
+  { kat:"Brand", nr:41, text:"B 3 PERSON – Keller (Person in Gefahr)" },
+  { kat:"Brand", nr:42, text:"B 3 PERSON – Rauchentwicklung (Person in Gefahr)" },
+  { kat:"Brand", nr:43, text:"B 3 PERSON – Zimmer (Person in Gefahr)" },
+  { kat:"Brand", nr:44, text:"B 3 PERSON – LKW (Person in Gefahr)" },
+  { kat:"Brand", nr:45, text:"B 3 PERSON – LKW auf BAB (Person in Gefahr)" },
+  { kat:"Brand", nr:46, text:"B 3 PERSON – Alarmstufenerhöhung auf B 3 Person" },
+  { kat:"Brand", nr:47, text:"B4 – ausgedehnt / hoch bis 6. OG" },
+  { kat:"Brand", nr:48, text:"B4 – Tiefgarage" },
+  { kat:"Brand", nr:49, text:"B4 – Wohnheim" },
+  { kat:"Brand", nr:50, text:"B4 – Behinderteneinrichtung" },
+  { kat:"Brand", nr:51, text:"B4 – Hochhaus ab 7. OG" },
+  { kat:"Brand", nr:52, text:"B4 – Supermarkt" },
+  { kat:"Brand", nr:53, text:"B4 – Kindergarten" },
+  { kat:"Brand", nr:54, text:"B4 – Kino" },
+  { kat:"Brand", nr:55, text:"B4 – Kirche" },
+  { kat:"Brand", nr:56, text:"B4 – Schule" },
+  { kat:"Brand", nr:57, text:"B4 – Theater" },
+  { kat:"Brand", nr:58, text:"B4 – Zirkus" },
+  { kat:"Brand", nr:59, text:"B4 – Hotel" },
+  { kat:"Brand", nr:60, text:"B4 – Sägewerk / Schreinerei" },
+  { kat:"Brand", nr:61, text:"B4 – Lagerhalle" },
+  { kat:"Brand", nr:62, text:"B4 – Silo (kein Gefahrstoff)" },
+  { kat:"Brand", nr:63, text:"B4 – große Höhe – Turm" },
+  { kat:"Brand", nr:64, text:"B4 – große Höhe – Windrad" },
+  { kat:"Brand", nr:65, text:"B4 – Industriegebäude" },
+  { kat:"Brand", nr:66, text:"B4 – Bauernhof" },
+  { kat:"Brand", nr:67, text:"B4 – Stall / Scheune" },
+  { kat:"Brand", nr:68, text:"B4 – Aussiedlerhof" },
+  { kat:"Brand", nr:69, text:"B4 – Alarmstufenerhöhung auf B 4" },
+  { kat:"Brand", nr:70, text:"B5 – Pflege-/Altenheim" },
+  { kat:"Brand", nr:71, text:"B5 – Kaufhaus" },
+  { kat:"Brand", nr:72, text:"B5 – Krankenhaus" },
+  { kat:"Brand", nr:73, text:"B5 – Alarmstufenerhöhung auf B 5" },
+  { kat:"Brand", nr:74, text:"B6 – Alarmstufenerhöhung auf B 6" },
+  { kat:"Brand", nr:75, text:"B7 – Alarmstufenerhöhung auf B 7" },
+  // THL – lfd. Nr. 1–29 (Sondereinsätze) …
+  { kat:"THL", nr:1,  text:"THL AMOK FW – Amoklage" },
+  { kat:"THL", nr:2,  text:"THL BELEUCHTUNG – Einsatzstelle ausleuchten" },
+  { kat:"THL", nr:3,  text:"THL BOMBENDROHUNG – Bombendrohung" },
+  { kat:"THL", nr:4,  text:"THL BOMBENFUND – Bombenfund" },
+  { kat:"THL", nr:5,  text:"THL ERKUNDUNG – Erkundung" },
+  { kat:"THL", nr:6,  text:"THL FIRST RESPONDER – First Responder" },
+  { kat:"THL", nr:7,  text:"THL GEBÄUDEEINSTURZ – Gebäude eingestürzt" },
+  { kat:"THL", nr:8,  text:"THL GROSSTIERRETTUNG – Rettung Großtier (z. B. Kuh, Pferd)" },
+  { kat:"THL", nr:9,  text:"THL HUBSCHRAUBERLANDUNG – Hubschrauberlandung sichern" },
+  { kat:"THL", nr:10, text:"THL P AUFZUG – Aufzug öffnen akut" },
+  { kat:"THL", nr:11, text:"THL P RETTUNG H / T – Person droht zu springen" },
+  { kat:"THL", nr:12, text:"THL P RETTUNG H / T – Person absturzgefährdet" },
+  { kat:"THL", nr:13, text:"THL P RETTUNG H / T – Person in Höhe" },
+  { kat:"THL", nr:14, text:"THL P RETTUNG H / T – Person aus Tiefe / Schacht" },
+  { kat:"THL", nr:15, text:"THL P RETTUNG H / T – schwergewichtiger Patient" },
+  { kat:"THL", nr:16, text:"THL P RETTUNG H / T – Person auf Windrad / Kran" },
+  { kat:"THL", nr:17, text:"THL P RETTUNG H / T – Paraglider / Fallschirmspringer / Drachenflieger abgestürzt" },
+  { kat:"THL", nr:18, text:"THL P STRAßENBAHN – Person unter Straßenbahn" },
+  { kat:"THL", nr:19, text:"THL P STRAßENBAHN – Straßenbahn" },
+  { kat:"THL", nr:20, text:"THL P STROM – Person Stromunfall" },
+  { kat:"THL", nr:21, text:"THL P U-BAHN – Person unter U-Bahn" },
+  { kat:"THL", nr:22, text:"THL P VERSCHÜTTET – Person verschüttet / Tiefbauunfall" },
+  { kat:"THL", nr:23, text:"THL P VERSCHÜTTET – Person in Silo" },
+  { kat:"THL", nr:24, text:"THL P EINGESCHLOSSEN – Wohnung öffnen akut" },
+  { kat:"THL", nr:25, text:"THL P EINGESCHLOSSEN – Fahrzeug öffnen akut" },
+  { kat:"THL", nr:26, text:"THL P ZUG – Person unter Zug" },
+  { kat:"THL", nr:27, text:"THL P ZUG – Person unter S-Bahn" },
+  { kat:"THL", nr:28, text:"THL P ZUG – Person vom Zug erfasst" },
+  { kat:"THL", nr:29, text:"THL RETTUNGSKORB – Drehleiter" },
+  // … und lfd. Nr. 55–90 (THL 3/4/5, Schiene, Wasser, Tragehilfe, Unwetter)
+  { kat:"THL", nr:55, text:"THL 3 – Person eingeklemmt (nicht VU)" },
+  { kat:"THL", nr:56, text:"THL 3 – 1 oder 2 PKW, Person eingeklemmt" },
+  { kat:"THL", nr:57, text:"THL 3 – Bus (besetzt)" },
+  { kat:"THL", nr:58, text:"THL 3 – Gerüst umgestürzt" },
+  { kat:"THL", nr:59, text:"THL 3 – Stromleitungsmast umgestürzt" },
+  { kat:"THL", nr:60, text:"THL 3 – Kran umgestürzt" },
+  { kat:"THL", nr:61, text:"THL 3 – Waldunfall mit eingeklemmter Person" },
+  { kat:"THL", nr:62, text:"THL 4 – mehrere PKW, Personen eingeklemmt" },
+  { kat:"THL", nr:63, text:"THL 4 – LKW / Bus (leer), Person eingeklemmt" },
+  { kat:"THL", nr:64, text:"THL 5 – Massenkarambolage, Personen eingeklemmt" },
+  { kat:"THL", nr:65, text:"THL 5 – Bus besetzt mit eingeklemmten Personen" },
+  { kat:"THL", nr:66, text:"THL 5 – mehrere LKW mit eingeklemmten Personen" },
+  { kat:"THL", nr:67, text:"THL SCHIENE – Hilfeleistung Straßenbahn" },
+  { kat:"THL", nr:68, text:"THL SCHIENE – Hilfeleistung S-Bahn" },
+  { kat:"THL", nr:69, text:"THL SCHIENE – Hilfeleistung U-Bahn" },
+  { kat:"THL", nr:70, text:"THL WASSER – Bergung Sache / Leiche" },
+  { kat:"THL", nr:71, text:"THL WASSER – Rettung Tier" },
+  { kat:"THL", nr:72, text:"THL WASSER – Rettung Person" },
+  { kat:"THL", nr:73, text:"THL WASSER – Tauchereinsatz ohne Rettung" },
+  { kat:"THL", nr:74, text:"THL TRAGEHILFE – Tragehilfe" },
+  { kat:"THL", nr:75, text:"THL UNWETTER – Baum / Ast droht zu fallen" },
+  { kat:"THL", nr:76, text:"THL UNWETTER – Baum / Ast auf Fahrbahn" },
+  { kat:"THL", nr:77, text:"THL UNWETTER – Baum / Ast auf Schiene" },
+  { kat:"THL", nr:78, text:"THL UNWETTER – Baum / Ast auf Gebäude" },
+  { kat:"THL", nr:79, text:"THL UNWETTER – Baum / Ast auf Stromleitung" },
+  { kat:"THL", nr:80, text:"THL UNWETTER – Baum / Ast auf PKW / LKW" },
+  { kat:"THL", nr:81, text:"THL UNWETTER – Baum umgestürzt" },
+  { kat:"THL", nr:82, text:"THL UNWETTER – Bauteil / Gegenstand droht zu fallen" },
+  { kat:"THL", nr:83, text:"THL UNWETTER – Gebäude sichern" },
+  { kat:"THL", nr:84, text:"THL UNWETTER – Bauzaun sichern" },
+  { kat:"THL", nr:85, text:"THL UNWETTER – Fahrbahn / Gehweg überschwemmt" },
+  { kat:"THL", nr:86, text:"THL UNWETTER – Gebäude unter Wasser" },
+  { kat:"THL", nr:87, text:"THL UNWETTER – Keller unter Wasser" },
+  { kat:"THL", nr:88, text:"THL UNWETTER – Fahrzeug / sonstigen Gegenstand sichern" },
+  { kat:"THL", nr:89, text:"THL UNWETTER – Erkundung nicht zeitkritisch" },
+  { kat:"THL", nr:90, text:"THL UNWETTER – sonstiger Schaden" },
+  // ABC – lfd. Nr. 6–55 (ab ABC 2; Geruch/Kraftstoff sind hier nicht relevant)
+  { kat:"ABC", nr:6,  text:"ABC 2 – verdächtiger Stoff" },
+  { kat:"ABC", nr:7,  text:"ABC 2 – undefinierbare Flüssigkeit" },
+  { kat:"ABC", nr:8,  text:"ABC 2 – undefinierbarer Gegenstand" },
+  { kat:"ABC", nr:9,  text:"ABC 2 – kleine Menge" },
+  { kat:"ABC", nr:10, text:"ABC 2 – undefinierbares Pulver" },
+  { kat:"ABC", nr:11, text:"ABC 2 – Gasaustritt im Freien" },
+  { kat:"ABC", nr:12, text:"ABC 3 – große Menge" },
+  { kat:"ABC", nr:13, text:"ABC 3 – Gasaustritt brennbar" },
+  { kat:"ABC", nr:14, text:"ABC 3 – Gasaustritt im Gebäude" },
+  { kat:"ABC", nr:15, text:"ABC B ATOM – Brand Atom im Gebäude" },
+  { kat:"ABC", nr:16, text:"ABC B ATOM – Brand Atom im Freien" },
+  { kat:"ABC", nr:17, text:"ABC B ATOM – Brand Atom PKW / LKW" },
+  { kat:"ABC", nr:18, text:"ABC B ATOM – Brand Atomkraftwerk (AKW)" },
+  { kat:"ABC", nr:19, text:"ABC B – Brand Tankstelle" },
+  { kat:"ABC", nr:20, text:"ABC B – Brand Biogasanlage" },
+  { kat:"ABC", nr:21, text:"ABC B – Brand Raffinerie" },
+  { kat:"ABC", nr:22, text:"ABC B – Brand Tanklager" },
+  { kat:"ABC", nr:23, text:"ABC B – Brand Tankwagen" },
+  { kat:"ABC", nr:24, text:"ABC B BIO / CHEMIE – Brand Bio im Gebäude" },
+  { kat:"ABC", nr:25, text:"ABC B BIO / CHEMIE – Brand Bio im Freien" },
+  { kat:"ABC", nr:26, text:"ABC B BIO / CHEMIE – Brand Bio PKW / LKW" },
+  { kat:"ABC", nr:27, text:"ABC B BIO / CHEMIE – Brand Chemie im Gebäude" },
+  { kat:"ABC", nr:28, text:"ABC B BIO / CHEMIE – Brand Chemie im Freien" },
+  { kat:"ABC", nr:29, text:"ABC B BIO / CHEMIE – Brand Chemie Zug" },
+  { kat:"ABC", nr:30, text:"ABC B BIO / CHEMIE – Brand Chemie LKW" },
+  { kat:"ABC", nr:31, text:"ABC THL ATOM – THL Atom Austritt im Gebäude" },
+  { kat:"ABC", nr:32, text:"ABC THL ATOM – THL Atom Austritt im Freien" },
+  { kat:"ABC", nr:33, text:"ABC THL ATOM – THL Atom PKW / LKW" },
+  { kat:"ABC", nr:34, text:"ABC THL ATOM – THL VU Atom PKW / LKW" },
+  { kat:"ABC", nr:35, text:"ABC THL BIO / CHEMIE – THL Bio Austritt im Freien" },
+  { kat:"ABC", nr:36, text:"ABC THL BIO / CHEMIE – THL Bio Austritt im Gebäude" },
+  { kat:"ABC", nr:37, text:"ABC THL BIO / CHEMIE – THL Bio PKW / LKW" },
+  { kat:"ABC", nr:38, text:"ABC THL BIO / CHEMIE – THL Chemie Austritt im Gebäude" },
+  { kat:"ABC", nr:39, text:"ABC THL BIO / CHEMIE – THL Chemie Austritt im Freien" },
+  { kat:"ABC", nr:40, text:"ABC THL BIO / CHEMIE – THL Chemie PKW / LKW" },
+  { kat:"ABC", nr:41, text:"ABC THL BIO / CHEMIE – THL VU Bio PKW / LKW" },
+  { kat:"ABC", nr:42, text:"ABC THL BIO / CHEMIE – THL VU Chemie PKW / LKW" },
+  { kat:"ABC", nr:43, text:"ABC THL BIO / CHEMIE – THL VU Chemie Zug" },
+  { kat:"ABC", nr:44, text:"ABC EXPLOSION – Explosion / Verpuffung" },
+  { kat:"ABC", nr:45, text:"ABC ÖL WASSER – Öl auf fließendem Gewässer" },
+  { kat:"ABC", nr:46, text:"ABC ÖL WASSER – Öl auf stehendem Gewässer" },
+  { kat:"ABC", nr:47, text:"ABC ÖL LAND – undichter Heizöltank" },
+  { kat:"ABC", nr:48, text:"ABC ÖL LAND – ausgedehnter Ölschaden" },
+  { kat:"ABC", nr:49, text:"ABC GEFAHRSTOFFMELDEANLAGE – Meldeanlage Ammoniak" },
+  { kat:"ABC", nr:50, text:"ABC GEFAHRSTOFFMELDEANLAGE – Meldeanlage Chlor" },
+  { kat:"ABC", nr:51, text:"ABC GEFAHRSTOFFMELDEANLAGE – Meldeanlage Stickstoff" },
+  { kat:"ABC", nr:52, text:"ABC GEFAHRSTOFFMELDEANLAGE – Meldeanlage CO2" },
+  { kat:"ABC", nr:53, text:"ABC GEFAHRSTOFFMELDEANLAGE – Meldeanlage Butan" },
+  { kat:"ABC", nr:54, text:"ABC GEFAHRSTOFFMELDEANLAGE – Meldeanlage Propan" },
+  { kat:"ABC", nr:55, text:"ABC GEFAHRSTOFFMELDEANLAGE – Meldeanlage undefiniert" },
+];
+/* Version der Vorbelegung – hochzählen, wenn sich STICHWORT_KATALOG ändert,
+   damit die neue Liste bei bestehenden Installationen einmalig übernommen wird. */
+const STICHWORT_VER = 2;
+/* Stichwortkatalog: nach Einsatzart gruppiert (Brand → THL → ABC → Weitere) */
+const STW_KAT_ORDER = ["Brand","THL","ABC"];
+function stichwortGruppen(){
+  const list = (state.config.stichworte || []).map((s,i) => ({...s, _i:i}));
+  const rang = k => { const i = STW_KAT_ORDER.indexOf(k); return i < 0 ? 99 : i; };
+  const grps = [...new Set(list.map(s => s.kat || "Weitere"))]
+    .sort((a,b) => rang(a) - rang(b) || a.localeCompare(b, "de"));
+  return grps.map(g => ({ grp:g, items:list.filter(s => (s.kat||"Weitere") === g) }));
+}
+/* Führungskräfte-Stammdaten – je Einheit pflegbar, beim Erfassen per Dropdown wählbar.
+   Weitere Stammdaten folgen; alle unter Einstellungen erweiter-/löschbar. */
+function fkStammGruppen(){
+  const list = (state.config.fkStamm || []).map((p,i) => ({...p, _i:i}));
+  const grps = [...new Set(list.map(p => (p.einheit||"").trim() || "Ohne Einheit"))]
+    .sort((a,b) => a.localeCompare(b, "de"));
+  return grps.map(g => ({ grp:g,
+    items: list.filter(p => ((p.einheit||"").trim() || "Ohne Einheit") === g)
+      .sort((a,b) => (a.name||"").localeCompare(b.name||"", "de")) }));
+}
+function fkStammLabel(p){ return [p.name, p.funktion, p.funkrufname].map(s=>(s||"").trim()).filter(Boolean).join(" · "); }
+function fkStammHinzufuegen(p){
+  const list = state.config.fkStamm || (state.config.fkStamm = []);
+  const norm = s => (s||"").trim().toLowerCase();
+  if(!(p.name||"").trim() && !(p.funkrufname||"").trim()) return;
+  const da = list.some(x => norm(x.name) === norm(p.name) && norm(x.funkrufname) === norm(p.funkrufname));
+  if(da) return;
+  list.push({ name:(p.name||"").trim(), funktion:(p.funktion||"").trim(),
+    funkrufname:(p.funkrufname||"").trim(), einheit:(p.einheit||"").trim(), org:p.org||"FW" });
+}
 const FUNKTIONEN = ["Einsatzleiter","Örtlicher Einsatzleiter","Abschnittsleiter","Zugführer",
   "Gruppenführer","Organisatorischer Leiter","Einsatzleiter Rettungsdienst","Fachberater THW","Zugtruppführer","Polizeiführer"];
 const STORE_KEY = "kraefteerfassung-proto-v1";
@@ -113,44 +320,56 @@ function defaultState(){
     wlan:false, pending:0, view:"einsatz", ksub:"einheiten",
   };
 }
-const stored = load() || {};
-let state = Object.assign(defaultState(), stored);
-state.config = Object.assign(defaultConfig(), stored.config || {});
-state.config.prefixes = Object.assign(defaultConfig().prefixes, (stored.config||{}).prefixes || {});
-// Fahrzeugkatalog: beim ersten Start aus der Vorlage befüllen, danach frei pflegbar
-if(!Array.isArray(state.config.katalog)) state.config.katalog = FZG_KATALOG.map(k => ({...k, org:"FW"}));
-applyTheme();
-if(!state.lage || !Array.isArray(state.lage.items)) state.lage = { items: [], bg: "" };
-if(!Array.isArray(state.lage.snapshots)) state.lage.snapshots = [];
-if(!state.lage.mode) state.lage.mode = state.lage.bg ? "bild" : "raster";
-if(!state.lage.mapLayer) state.lage.mapLayer = "luftbild";
-if(!Array.isArray(state.funk)) state.funk = [];
-if(!Array.isArray(state.besprechungen)) state.besprechungen = [];
-if(!Array.isArray(state.anforderungen)) state.anforderungen = [];
-if(!Array.isArray(state.checks)) state.checks = [];
-if(!Array.isArray(state.fotos)) state.fotos = [];
-if(!Array.isArray(state.asTraeger)) state.asTraeger = [];
-if(!Array.isArray(state.asTrupps)) state.asTrupps = [];
-// Abschnitte: alte TMO/DMO-Felder auf Führungs-/Arbeitsrufgruppe (je Modus + Gruppe) migrieren
-state.abschnitte.forEach(a => {
-  if(!a.fuehrung) a.fuehrung = { mode:"TMO", gruppe: a.tmo || "" };
-  if(!a.arbeit)   a.arbeit   = { mode:"DMO", gruppe: a.dmo || "" };
-  if(a.arbeit.via == null) a.arbeit.via = "";   // "", "gateway" oder "repeater"
-});
-// Leitstellen-Rufgruppe (Einsatz + Config) von Freitext „TMO 2772“ auf {mode,gruppe} migrieren
-state.einsatz.ilsGruppe = parseGruppe(state.einsatz.ilsGruppe);
-state.config.ilsGruppe  = parseGruppe(state.config.ilsGruppe);
-if(!state.asSub) state.asSub = "sammelstelle";
-if(!state.monHide || typeof state.monHide !== "object") state.monHide = { panels: {}, ab: {} };
-state.monHide.panels = state.monHide.panels || {};
-state.monHide.ab = state.monHide.ab || {};
-if(!state.einsatzId){
-  state.einsatzId = uid();
-  const b = state.einsatz && state.einsatz.beginn ? new Date(state.einsatz.beginn) : null;
-  state.einsatzStart = (b && !isNaN(b)) ? b.toISOString() : new Date().toISOString();
-}
-// Bestehende Fahrzeug-Symbole ohne Nummer nachnummerieren
-{
+// Synchron mit Defaults vorbelegen, damit Top-Level-Code (Splash etc.) nie auf undefined trifft;
+// die echten Daten kommen async aus IndexedDB in boot() und ersetzen diesen Stand.
+let state = defaultState();
+/* Geladene Rohdaten in den Laufzeit-Zustand überführen (inkl. Migrationen).
+   Früher lief das synchron beim Skriptstart; seit IndexedDB (async) in boot(). */
+function zustandAufbauen(stored){
+  stored = stored || {};
+  state = Object.assign(defaultState(), stored);
+  state.config = Object.assign(defaultConfig(), stored.config || {});
+  state.config.prefixes = Object.assign(defaultConfig().prefixes, (stored.config||{}).prefixes || {});
+  // Fahrzeugkatalog: beim ersten Start aus der Vorlage befüllen, danach frei pflegbar
+  if(!Array.isArray(state.config.katalog)) state.config.katalog = FZG_KATALOG.map(k => ({...k, org:"FW"}));
+  // Einsatzstichwort-Katalog: beim ersten Start aus der Vorlage befüllen, danach frei pflegbar
+  if(!Array.isArray(state.config.stichworte) || state.config.stichworteV !== STICHWORT_VER){
+    state.config.stichworte = STICHWORT_KATALOG.map(s => ({...s}));
+    state.config.stichworteV = STICHWORT_VER;
+  }
+  // Führungskräfte-Stammdaten: leer starten, wird beim Erfassen automatisch befüllt
+  if(!Array.isArray(state.config.fkStamm)) state.config.fkStamm = [];
+  applyTheme();
+  if(!state.lage || !Array.isArray(state.lage.items)) state.lage = { items: [], bg: "" };
+  if(!Array.isArray(state.lage.snapshots)) state.lage.snapshots = [];
+  if(!state.lage.mode) state.lage.mode = state.lage.bg ? "bild" : "raster";
+  if(!state.lage.mapLayer) state.lage.mapLayer = "luftbild";
+  if(!Array.isArray(state.funk)) state.funk = [];
+  if(!Array.isArray(state.besprechungen)) state.besprechungen = [];
+  if(!Array.isArray(state.anforderungen)) state.anforderungen = [];
+  if(!Array.isArray(state.checks)) state.checks = [];
+  if(!Array.isArray(state.fotos)) state.fotos = [];
+  if(!Array.isArray(state.asTraeger)) state.asTraeger = [];
+  if(!Array.isArray(state.asTrupps)) state.asTrupps = [];
+  // Abschnitte: alte TMO/DMO-Felder auf Führungs-/Arbeitsrufgruppe (je Modus + Gruppe) migrieren
+  state.abschnitte.forEach(a => {
+    if(!a.fuehrung) a.fuehrung = { mode:"TMO", gruppe: a.tmo || "" };
+    if(!a.arbeit)   a.arbeit   = { mode:"DMO", gruppe: a.dmo || "" };
+    if(a.arbeit.via == null) a.arbeit.via = "";   // "", "gateway" oder "repeater"
+  });
+  // Leitstellen-Rufgruppe (Einsatz + Config) von Freitext „TMO 2772“ auf {mode,gruppe} migrieren
+  state.einsatz.ilsGruppe = parseGruppe(state.einsatz.ilsGruppe);
+  state.config.ilsGruppe  = parseGruppe(state.config.ilsGruppe);
+  if(!state.asSub) state.asSub = "sammelstelle";
+  if(!state.monHide || typeof state.monHide !== "object") state.monHide = { panels: {}, ab: {} };
+  state.monHide.panels = state.monHide.panels || {};
+  state.monHide.ab = state.monHide.ab || {};
+  if(!state.einsatzId){
+    state.einsatzId = uid();
+    const b = state.einsatz && state.einsatz.beginn ? new Date(state.einsatz.beginn) : null;
+    state.einsatzStart = (b && !isNaN(b)) ? b.toISOString() : new Date().toISOString();
+  }
+  // Bestehende Fahrzeug-Symbole ohne Nummer nachnummerieren
   let maxCar = state.lage.items.reduce((m,i) => i.type==="car" ? Math.max(m, i.num||0) : m, 0);
   state.lage.items.forEach(i => { if(i.type === "car" && !i.num) i.num = ++maxCar; });
 }
@@ -158,11 +377,54 @@ let syncing = false;
 let editing = null;   // { unit, isNew } – Einheit
 let editingFk = null; // { fk, isNew }  – Führungskraft
 
-function load(){
-  try{ return JSON.parse(localStorage.getItem(STORE_KEY)); }catch(e){ return null; }
+/* ---------------- Persistenz: IndexedDB ----------------
+   Löst das ~5–10-MB-Limit von localStorage ab (v. a. für Fotos und
+   Lagekarten-Snapshots). Der gesamte Zustand liegt als ein Datensatz
+   im Key-Value-Store "kv". Bleibt rein gerätelokal – der Abgleich über
+   mehrere Geräte läuft unverändert über den ELW-Server (api/sync). */
+const DB_NAME = "elwis", DB_STORE = "kv";
+let _dbP = null;
+function idbOpen(){
+  if(_dbP) return _dbP;
+  _dbP = new Promise((resolve, reject) => {
+    const req = indexedDB.open(DB_NAME, 1);
+    req.onupgradeneeded = () => req.result.createObjectStore(DB_STORE);
+    req.onsuccess = () => resolve(req.result);
+    req.onerror   = () => reject(req.error);
+  });
+  return _dbP;
 }
-function save(){ localStorage.setItem(STORE_KEY, JSON.stringify(state)); }
+function idbGet(key){
+  return idbOpen().then(db => new Promise((resolve, reject) => {
+    const req = db.transaction(DB_STORE, "readonly").objectStore(DB_STORE).get(key);
+    req.onsuccess = () => resolve(req.result ?? null);
+    req.onerror   = () => reject(req.error);
+  }));
+}
+function idbSet(key, val){
+  return idbOpen().then(db => new Promise((resolve, reject) => {
+    const tx = db.transaction(DB_STORE, "readwrite");
+    tx.objectStore(DB_STORE).put(val, key);
+    tx.oncomplete = () => resolve();
+    tx.onerror    = () => reject(tx.error);
+  }));
+}
+/* Zustand laden – aus IndexedDB, mit einmaliger Übernahme aus altem localStorage */
+async function ladeZustand(){
+  try{
+    const s = await idbGet("state");
+    if(s) return JSON.parse(s);
+    const alt = localStorage.getItem(STORE_KEY);   // Migration bestehender Installationen
+    if(alt){
+      try{ await idbSet("state", alt); localStorage.removeItem(STORE_KEY); }catch(e){}
+      return JSON.parse(alt);
+    }
+  }catch(e){ console.warn("[ELWIS] IndexedDB nicht verfügbar – Daten werden nicht dauerhaft gespeichert:", e); }
+  return {};
+}
 function uid(){ return Date.now().toString(36) + Math.random().toString(36).slice(2,7); }
+// Wie früher als JSON-String ablegen (identische Semantik, aber ohne localStorage-Limit)
+function save(){ if(state) idbSet("state", JSON.stringify(state)).catch(e => console.warn("[ELWIS] Speichern (IndexedDB) fehlgeschlagen:", e)); }
 function markChange(){ if(!state.wlan) state.pending++; save(); }
 function pfx(org){ return state.config.prefixes[org] ?? ""; }
 
@@ -343,7 +605,7 @@ $("#wlanSwitch").addEventListener("click", () => {
   }
   save(); render();
 });
-$("#btnSettings").addEventListener("click", renderSettingsSheet);
+$("#btnSettings").addEventListener("click", () => { if(state) renderSettingsSheet(); });
 
 /* ---------------- Navigation ---------------- */
 function buildNav(){
@@ -354,12 +616,13 @@ function buildNav(){
     </button>`;
   document.querySelector("nav.rail").insertAdjacentHTML("beforeend", TABS.map(btn).join(""));
   document.querySelectorAll("nav.rail [data-tab]").forEach(b =>
-    b.addEventListener("click", () => { state.view = b.dataset.tab; save(); render(); }));
+    b.addEventListener("click", () => { if(!state) return; state.view = b.dataset.tab; save(); render(); }));
 }
 buildNav();
 
 /* Burger-Menü (Handy) – nur die auf kleinen Geräten sinnvollen Ansichten */
 function openMenu(){
+  if(!state) return;   // vor dem async Laden (boot) noch kein Zustand
   const tabs = sichtbareTabs();
   $("#menuHost").innerHTML = `
   <div class="drawer-backdrop" data-menuclose="1"></div>
@@ -445,6 +708,47 @@ function renderSettingsSheet(){
         <div class="form-grid">${prefFields}</div>
         <p class="hint">Wird bei der Erfassung vorbelegt und kann dort jederzeit überschrieben werden.</p>
       </div>
+      <div class="field"><label style="margin-bottom:10px">Einsatzstichwörter (${(c.stichworte||[]).length})</label>
+        <div class="kat-list">
+          ${stichwortGruppen().map(g => `
+            <div class="kat-grp">${esc(g.grp)}</div>
+            ${g.items.map(s => `
+              <div class="kat-row">
+                <span>${s.nr ? `<span class="kat-nr mono">${s.nr}</span> ` : ""}${esc(s.text)}</span>
+                <button class="kat-x" data-stwdel="${s._i}" aria-label="Stichwort entfernen">✕</button>
+              </div>`).join("")}`).join("")}
+        </div>
+        <div class="kat-add">
+          <select id="cfg-stw-kat" aria-label="Kategorie">
+            ${STW_KAT_ORDER.map(k => `<option value="${esc(k)}">${esc(k)}</option>`).join("")}
+            <option value="Weitere">Weitere</option>
+          </select>
+          <input id="cfg-stw-neu" placeholder="z. B. B 5 – Menschenrettung" autocomplete="off">
+          <button type="button" class="btn btn-ghost" id="cfg-stw-add">Hinzufügen</button>
+        </div>
+        <p class="hint">Eigene Stichwörter ergänzen oder mit ✕ entfernen. Die Liste erscheint beim Einsatzstichwort zur Auswahl.</p>
+      </div>
+      <div class="field"><label style="margin-bottom:10px">Führungskräfte-Stammdaten (${(c.fkStamm||[]).length})</label>
+        <div class="kat-list">
+          ${(c.fkStamm||[]).length ? fkStammGruppen().map(g => `
+            <div class="kat-grp">${esc(g.grp)}</div>
+            ${g.items.map(p => `
+              <div class="kat-row">
+                <span>${esc(fkStammLabel(p))}</span>
+                <button class="kat-x" data-fkdel="${p._i}" aria-label="Aus Stammdaten entfernen">✕</button>
+              </div>`).join("")}`).join("")
+            : `<p class="hint" style="margin:6px 4px">Noch keine Führungskräfte hinterlegt.</p>`}
+        </div>
+        <div class="kat-add kat-add-fk">
+          <input id="cfg-fk-name" placeholder="Name" autocomplete="off">
+          <input id="cfg-fk-funktion" list="cfg-fk-funktionen" placeholder="Funktion" autocomplete="off">
+          <input id="cfg-fk-funkruf" class="mono" placeholder="Funkrufname" autocomplete="off">
+          <input id="cfg-fk-einheit" placeholder="Einheit / Abschnitt" autocomplete="off">
+          <button type="button" class="btn btn-ghost" id="cfg-fk-add">Hinzufügen</button>
+          <datalist id="cfg-fk-funktionen">${FUNKTIONEN.map(x=>`<option value="${esc(x)}">`).join("")}</datalist>
+        </div>
+        <p class="hint">Je Einheit pflegbar. Beim Erfassen einer Führungskraft per Dropdown wählbar – neu erfasste Personen landen automatisch hier.</p>
+      </div>
       <div class="field"><label style="margin-bottom:10px">Fahrzeugkatalog (${(c.katalog||[]).length})</label>
         <div class="kat-list">
           ${katalogGruppen().map(g => `
@@ -481,6 +785,41 @@ function renderSettingsSheet(){
     state.config.katalog.splice(Number(b.dataset.katdel), 1);
     save(); renderSettingsSheet();
   }));
+  document.querySelectorAll("[data-stwdel]").forEach(b => b.addEventListener("click", () => {
+    leseSettings();
+    state.config.stichworte.splice(Number(b.dataset.stwdel), 1);
+    save(); renderSettingsSheet();
+  }));
+  const stwAdd = () => {
+    const text = $("#cfg-stw-neu").value.trim();
+    if(!text) return;
+    const kat = $("#cfg-stw-kat").value || "Weitere";
+    const norm = s => s.toLowerCase();
+    (state.config.stichworte || (state.config.stichworte = []));
+    if(!state.config.stichworte.some(s => norm(s.text) === norm(text)))
+      state.config.stichworte.push({ kat, text });
+    leseSettings();
+    save(); renderSettingsSheet();
+  };
+  $("#cfg-stw-add").addEventListener("click", stwAdd);
+  $("#cfg-stw-neu").addEventListener("keydown", e => { if(e.key === "Enter"){ e.preventDefault(); stwAdd(); } });
+  document.querySelectorAll("[data-fkdel]").forEach(b => b.addEventListener("click", () => {
+    leseSettings();
+    state.config.fkStamm.splice(Number(b.dataset.fkdel), 1);
+    save(); renderSettingsSheet();
+  }));
+  const fkAdd = () => {
+    const name = $("#cfg-fk-name").value.trim();
+    const funkruf = $("#cfg-fk-funkruf").value.trim();
+    if(!name && !funkruf){ $("#cfg-fk-name").focus(); return; }
+    fkStammHinzufuegen({ name, funktion:$("#cfg-fk-funktion").value.trim(),
+      funkrufname:funkruf, einheit:$("#cfg-fk-einheit").value.trim(), org:"FW" });
+    leseSettings();
+    save(); renderSettingsSheet();
+  };
+  $("#cfg-fk-add").addEventListener("click", fkAdd);
+  ["cfg-fk-name","cfg-fk-funktion","cfg-fk-funkruf","cfg-fk-einheit"].forEach(id =>
+    $("#"+id).addEventListener("keydown", e => { if(e.key === "Enter"){ e.preventDefault(); fkAdd(); } }));
   $("#cfg-save").addEventListener("click", () => {
     leseSettings();
     markChange(); closeEditor(); render();
@@ -519,19 +858,21 @@ function renderEinsatz(){
     <h2>Einsatzstammdaten</h2>
     <div class="form-grid">
       <div class="field span2"><label for="f-stw">Einsatzstichwort</label>
-        <input id="f-stw" data-ez="stichwort" value="${esc(e.stichwort)}" placeholder="z. B. B4 – Brand Gewerbeanlage"></div>
+        <input id="f-stw" data-ez="stichwort" list="stw-liste" autocomplete="off" value="${esc(e.stichwort)}" placeholder="z. B. B 4 – Brand Gewerbeanlage">
+        <datalist id="stw-liste">${stichwortGruppen().flatMap(g => g.items).map(s => `<option value="${esc(s.text)}">`).join("")}</datalist>
+        <p class="hint" style="margin:.4rem 0 0">Aus der Liste wählen oder frei eintippen. Stichwörter pflegen in den Einstellungen (Zahnrad).</p></div>
       <div class="field"><label for="f-ort">Einsatzort</label>
         <input id="f-ort" data-ez="ort" value="${esc(e.ort)}" placeholder="Straße, Ort"></div>
       <div class="field"><label for="f-obj">Objekt</label>
         <input id="f-obj" data-ez="objekt" value="${esc(e.objekt||"")}" placeholder="z. B. Klinikum Weiden"></div>
       <div class="field"><label for="f-beg">Alarmzeit</label>
         <input id="f-beg" data-ez="beginn" type="datetime-local" value="${esc(e.beginn)}"></div>
+      <div class="field"><label for="f-ende">Einsatzende <span style="text-transform:none;font-weight:500">(wird beim Beenden gesetzt)</span></label>
+        <input id="f-ende" data-ez="ende" type="datetime-local" value="${esc(e.ende||"")}"></div>
+      <div class="field"><label for="f-el">Einsatzleiter</label>
+        <input id="f-el" data-ez="leiter" value="${esc(e.leiter)}" placeholder="Name / Funktion"></div>
       <div class="field"><label for="f-lb">Nächste Lagebesprechung</label>
         <input id="f-lb" data-ez="lagebespr" type="time" class="mono" value="${esc(e.lagebespr||"")}"></div>
-      <div class="field span2"><label for="f-ende">Einsatzende <span style="text-transform:none;font-weight:500">(wird beim Beenden gesetzt)</span></label>
-        <input id="f-ende" data-ez="ende" type="datetime-local" value="${esc(e.ende||"")}"></div>
-      <div class="field span2"><label for="f-el">Einsatzleiter</label>
-        <input id="f-el" data-ez="leiter" value="${esc(e.leiter)}" placeholder="Name / Funktion"></div>
       <div class="field span2"><label for="f-br">Bereitstellungsraum</label>
         <input id="f-br" data-ez="bereitstellungsraum" value="${esc(e.bereitstellungsraum||"")}" placeholder="z. B. Parkplatz Süd, Volksfestplatz"></div>
       <div class="field span2" style="margin-bottom:0"><label for="f-bem">Bemerkungen</label>
@@ -1355,6 +1696,13 @@ function renderFkSheet(){
       <button class="sheet-close" data-close="1" aria-label="Schließen">×</button>
     </div>
     <div class="sheet-body">
+      ${(state.config.fkStamm||[]).length ? `
+      <div class="field"><label for="fk-stamm">Aus Stammdaten übernehmen</label>
+        <select id="fk-stamm">
+          <option value="">– neue Führungskraft –</option>
+          ${fkStammGruppen().map(g => `<optgroup label="${esc(g.grp)}">${g.items.map(p => `<option value="${p._i}">${esc(fkStammLabel(p))}</option>`).join("")}</optgroup>`).join("")}
+        </select>
+        <p class="hint">Vorhandene Person wählen – die Felder werden ausgefüllt. Neue Person unten erfassen; sie wird beim Speichern in die Stammdaten übernommen.</p></div>` : ""}
       <div class="field"><label>Organisation</label><div class="orgpick">${orgPickHtml(f.org)}</div></div>
       <div class="field"><label for="fk-name">Name</label>
         <input id="fk-name" value="${esc(f.name)}" placeholder="Name" autocomplete="off"></div>
@@ -1376,6 +1724,15 @@ function renderFkSheet(){
     f.org = b.dataset.org;
     document.querySelectorAll("[data-org]").forEach(x => x.setAttribute("aria-pressed", x.dataset.org===f.org));
   }));
+  const stammSel = $("#fk-stamm");
+  if(stammSel) stammSel.addEventListener("change", () => {
+    if(stammSel.value === "") return;
+    const p = state.config.fkStamm[Number(stammSel.value)];
+    if(!p) return;
+    f.name = p.name||""; f.funktion = p.funktion||""; f.funkrufname = p.funkrufname||"";
+    f.einheit = p.einheit||""; f.org = p.org||f.org;
+    renderFkSheet();   // Felder mit den übernommenen Werten neu zeichnen
+  });
   $("#fk-name").addEventListener("input", e => { f.name = e.target.value; });
   $("#fk-funktion").addEventListener("input", e => { f.funktion = e.target.value; });
   $("#fk-funkruf").addEventListener("input", e => { f.funkrufname = e.target.value; });
@@ -1388,6 +1745,7 @@ function renderFkSheet(){
     });
   });
   $("#fk-save").addEventListener("click", () => {
+    fkStammHinzufuegen(f);   // neue Person automatisch in die Stammdaten übernehmen
     const idx = state.fuehrung.findIndex(x => x.id === f.id);
     if(idx >= 0) state.fuehrung[idx] = f; else state.fuehrung.push(f);
     markChange(); closeEditor(); render();
@@ -1397,10 +1755,12 @@ function renderFkSheet(){
 /* ---------------- Ansicht: Funk (Einsatztagebuch) ---------------- */
 let editingFs = null; // { fs, isNew }
 function fsSuggestions(){
-  // Fahrzeuge zuerst, dann Führungskräfte (mit Funkrufname), dann Abschnitte/Leitstelle
+  // Fahrzeuge zuerst (ALLE erfassten – auch bereits abgerückte), dann Führungskräfte
+  // (mit Funkrufname), dann Abschnitte/Leitstelle. Aktive vor abgerückten Einheiten.
   const s = [];
   const add = v => { v = (v||"").trim(); if(v && !s.includes(v)) s.push(v); };
   aktive().forEach(u => add(fullName(u)));
+  state.einheiten.filter(u => u.abgerueckt).forEach(u => add(fullName(u)));
   state.fuehrung.forEach(f => { add(f.funkrufname); add(f.name); });
   state.abschnitte.forEach(a => { add(a.ansprechpartner); add(a.name); });
   ["Leitstelle", "ELW", state.config.ugName].forEach(add);
@@ -1690,6 +2050,33 @@ function asMinStart(t){
   const werte = (t.memberIds||[]).map(id => Number((t.druck||{})[id]?.start)).filter(v => v>0);
   return werte.length ? Math.min(...werte) : null;
 }
+// FwDV 7 – dynamische Restzeit: Rate = NOMINALWERT aus dem Richtwert, (Startdruck − Reserve) ÷
+// erwartete Einsatzzeit (bar/min). Stabil und realistisch – der kurze Hinweg (Gehen) verfälscht
+// nichts. Der Countdown wird bei jeder Druckmessung (Ziel/1.3/2.3) neu auf den echten Ist-Druck
+// gesetzt: er zählt also immer von der Realität aus, nur die Steigung ist nominal.
+function asMemberProjektion(d, t){
+  if(!d || !(Number(d.start) > 0)) return null;
+  let druck = null, zeit = null;                         // jüngste Basis-Messung (Druck + Zeit)
+  if(d.k23 && t.checks && t.checks.zweidrittel){ druck = Number(d.k23); zeit = t.checks.zweidrittel; }
+  else if(d.k13 && t.checks && t.checks.drittel){ druck = Number(d.k13); zeit = t.checks.drittel; }
+  else if(d.ziel && t.zielZeit){ druck = Number(d.ziel); zeit = t.zielZeit; }
+  if(!(druck > 0) || !zeit) return null;                 // erst ab „Einsatzziel erreicht"
+  const rate = (Number(d.start) - asReserve(t)) / asErwartet(t);
+  if(!(rate > 0)) return null;
+  const rz = asRzMember(Number(d.start), d.ziel, asReserve(t)); if(!rz) return null;
+  return { rate, druck, zeit, rueckzug: rz.bar, sofort: rz.sofort };
+}
+// Maßgebliche Prognose des Trupps = SCHWÄCHSTER Träger = frühester Umkehrzeitpunkt (kleinste Restzeit).
+function asRestzeit(t){
+  const projs = (t.memberIds||[]).map(id => asMemberProjektion((t.druck||{})[id], t)).filter(Boolean);
+  if(!projs.length) return null;
+  const now = Date.now();
+  const mit = projs.map(p => {
+    const cur = p.druck - p.rate * ((now - new Date(p.zeit).getTime()) / 60000);
+    return { ...p, mins: (cur - p.rueckzug) / p.rate };
+  });
+  return mit.reduce((a,b) => b.mins < a.mins ? b : a);   // kleinste Restzeit gewinnt (schwächster Mann)
+}
 
 function asNextTruppNr(){
   // AST beginnt bei 10; jeder (auch wiederholte) Einsatz bekommt eine neue Nummer
@@ -1719,7 +2106,7 @@ function truppCard(t){
     if(!tr) return "?";
     const d = (t.druck||{})[id] || {};
     const dr = (d.start || d.end) ? ` <span class="as-druck">${d.start?esc(d.start):"–"}${d.end?"→"+esc(d.end):""} bar</span>` : "";
-    return `${esc(tr.name)}${tr.csa?` <span class="as-typ">CSA</span>`:""}${dr}`;
+    return `${esc(tr.name)}${t.tf===id?` <span class="as-typ">TF</span>`:""}${tr.csa?` <span class="as-typ">CSA</span>`:""}${dr}`;
   }).join("<br>");
   const rz = asRzTrupp(t);
   const zeile = [
@@ -1805,6 +2192,7 @@ function renderASUeberwachung(){
     const connected = !!t.angeschlossen;
     const anchor = asMonitorStart(t);
     const rzGov = asRzTrupp(t);
+    const prog = asRestzeit(t);   // dynamische Restzeit-Prognose (frühester Umkehrzeitpunkt)
     const checks = t.checks || {};
     const below = asBelow(t);   // Rückzug fällig (Umkehrdruck erreicht oder Hinweg zu verbrauchsintensiv)
     const mit = (t.memberIds||[]).map(id => {
@@ -1814,11 +2202,11 @@ function renderASUeberwachung(){
       const ist = d.k23 || d.k13;   // gemeldeter Ist-Druck bei der Druckkontrolle
       const istLow = rz && (rz.sofort || (ist && Number(ist) <= rz.bar));
       const umkehr = rz ? (rz.sofort ? "sofort" : rz.bar) : null;
-      return `<div class="as-uz">${esc(tr.name||"?")}${tr.csa?` <span class="as-typ">CSA</span>`:""}
+      return `<div class="as-uz">${esc(tr.name||"?")}${t.tf===id?` <span class="as-typ">TF</span>`:""}${tr.csa?` <span class="as-typ">CSA</span>`:""}
         <span class="as-druck">${d.start?esc(d.start)+" bar":"– bar"}${d.ziel?` → Ziel ${esc(d.ziel)}`:""}${ist?` → jetzt <b class="${istLow?"as-low":""}">${esc(ist)}</b>`:""}${umkehr!=null?` → Umkehr <b class="${rz.sofort?"as-low":""}">${umkehr}</b>`:""}</span></div>`;
     }).join("");
     return `
-    <div class="as-ueber" data-as-card data-as-elapsed="${esc(anchor)}" data-as-connected="${connected?1:0}" data-as-erwartet="${erwartet}" data-as-c13="${checks.drittel?1:0}" data-as-c23="${checks.zweidrittel?1:0}" data-as-below="${below?1:0}">
+    <div class="as-ueber" data-as-card data-as-elapsed="${esc(anchor)}" data-as-connected="${connected?1:0}" data-as-erwartet="${erwartet}" data-as-c13="${checks.drittel?1:0}" data-as-c23="${checks.zweidrittel?1:0}" data-as-below="${below?1:0}" data-as-rate="${prog?prog.rate:0}" data-as-mzeit="${prog?esc(prog.zeit):""}" data-as-mdruck="${prog?prog.druck:0}" data-as-rz="${prog?prog.rueckzug:0}" data-as-umkehrok="${esc(t.umkehrOk||"")}">
       ${asNrBadge(t, true)}
       <div style="flex:1;min-width:0">
         <div class="as-mit">${mit}</div>
@@ -1834,16 +2222,17 @@ function renderASUeberwachung(){
       </div>
       <div class="as-timer">
         <span class="mono" data-as-clock>–</span>
-        <small class="as-sub2">${connected ? "an PA" : "seit Ausrücken"}</small>
+        <small class="as-sub2" data-as-sublabel>${connected ? "an PA" : "seit Ausrücken"}</small>
         ${!connected ? `<button class="btn btn-primary" data-asang="${t.id}" style="min-height:44px">Angeschlossen</button>` : ""}
         ${connected ? `<button class="btn as-ack" data-asack="${t.id}" style="min-height:44px;display:none">Druck geprüft</button>` : ""}
+        ${connected ? `<button class="btn btn-primary" data-asumkehr="${t.id}" style="min-height:44px;display:none">Umkehren bestätigen</button>` : ""}
         <button class="btn btn-ghost" data-asziel="${t.id}" style="min-height:44px">Einsatzziel erreicht</button>
         <button class="btn ${connected?"btn-primary":"btn-ghost"}" data-aszurueck="${t.id}" style="min-height:44px">Zurück</button>
       </div>
     </div>`;
   }).join("");
   return `
-  <p class="hint" style="margin:0 0 12px">FwDV 7: Überwachungsuhr läuft ab <strong>„Angeschlossen"</strong>; Hinweise an den Trupp bei 1/3 und 2/3 der erwarteten Zeit; Umkehren beim Rückzugsdruck.
+  <p class="hint" style="margin:0 0 12px">FwDV 7: Überwachungsuhr läuft ab <strong>„Angeschlossen"</strong>. Ab <strong>„Einsatzziel erreicht"</strong> (und jeder Druckkontrolle) rechnet der Timer aus dem gemeldeten Druck den Verbrauch hoch und zählt <strong>rückwärts bis zum Umkehren</strong>.
   <strong>Hilfsmittel – ersetzt nicht die Eigenkontrolle des Trupps.</strong></p>
   <div class="as-ueber-list">${cards}</div>`;
 }
@@ -1888,29 +2277,58 @@ function asTick(){
     const erwartet = Number(card.dataset.asErwartet) || AS_ERWARTET_DEFAULT;
     const c13 = card.dataset.asC13 === "1", c23 = card.dataset.asC23 === "1";
     const min = anchor ? (Date.now()-new Date(anchor).getTime())/60000 : 0;
+    // Haupttimer: ab „Einsatzziel erreicht" / Druckkontrolle als Countdown bis Umkehren
+    // (aus gemessenem Verbrauch hochgerechnet), davor die verstrichene Zeit ab „Angeschlossen".
+    const rate = Number(card.dataset.asRate), mzeit = card.dataset.asMzeit;
+    const mdruck = Number(card.dataset.asMdruck), rzBar = Number(card.dataset.asRz);
+    const hasProj = connected && rate > 0 && mzeit;
     const clock = card.querySelector("[data-as-clock]");
-    if(clock){
-      clock.textContent = asElapsedStr(anchor);
-      clock.classList.toggle("warn", connected && min >= erwartet*2/3 && min < erwartet);
-      clock.classList.toggle("krit", connected && min >= erwartet);
+    const sub = card.querySelector("[data-as-sublabel]");
+    let umkehrByTime = false;   // Countdown auf/unter 0 → Umkehren rechnerisch fällig
+    if(hasProj){
+      const cur = mdruck - rate * ((Date.now() - new Date(mzeit).getTime()) / 60000);
+      const remSec = Math.round(((cur - rzBar) / rate) * 60);
+      umkehrByTime = remSec <= 0;
+      const a = Math.abs(remSec);
+      if(clock){
+        // reines MM:SS (Countdown) – kein „min", damit Minuten/Sekunden nicht verwechselt werden
+        clock.textContent = remSec > 0 ? `${String(Math.floor(a/60)).padStart(2,"0")}:${String(a%60).padStart(2,"0")}` : "umkehren";
+        clock.classList.toggle("warn", remSec > 0 && remSec <= 120);
+        clock.classList.toggle("krit", remSec <= 0);
+      }
+      if(sub) sub.textContent = remSec > 0 ? "min:sek bis Umkehr" : "Rückzugsdruck erreicht";
+    }else{
+      if(clock){
+        clock.textContent = asElapsedStr(anchor);
+        clock.classList.toggle("warn", connected && min >= erwartet*2/3 && min < erwartet);
+        clock.classList.toggle("krit", connected && min >= erwartet);
+      }
+      if(sub) sub.textContent = connected ? "an PA" : "seit Ausrücken";
     }
     const info = asPhaseInfo(min, erwartet, connected, c13, c23);
     const checkDue = !!info.due;                         // 1/3- oder 2/3-Druckabfrage offen
     const below = card.dataset.asBelow === "1";          // ein Träger hat den Umkehrdruck erreicht
-    const ph = below ? { txt:"⚠ Rückzugsdruck erreicht – Rückzug einleiten!", cls:"krit" } : info;
+    const umkehr = below || umkehrByTime;                // Umkehren fällig (Druck erreicht ODER Zeit abgelaufen)
+    const umkehrOk = card.dataset.asUmkehrok || "";      // Zeitstempel „Trupp informiert" (leer = offen)
     const phase = card.querySelector("[data-as-phase]");
+    const ph = (umkehr && umkehrOk) ? { txt:`✓ Umkehren bestätigt ${fmtZeit(umkehrOk)} Uhr – Trupp informiert`, cls:"ok" }
+      : umkehr ? { txt:"⚠ Umkehren – Trupp informieren und bestätigen!", cls:"krit" }
+      : info;
     if(phase){ phase.textContent = ph.txt; phase.className = "as-phase " + ph.cls; }
-    card.classList.toggle("blink", checkDue || below);   // Kachel blinkt bei fälliger Druckabfrage oder Rückzug
-    card.classList.toggle("danger", below);              // rot, wenn Rückzugsdruck erreicht
+    // Blinken bei fälliger Druckabfrage oder Umkehren – hört auf, sobald die Umkehr bestätigt ist
+    card.classList.toggle("blink", checkDue || (umkehr && !umkehrOk));
+    card.classList.toggle("danger", umkehr);             // rot, solange Rückzug/Umkehren läuft
     const ack = card.querySelector("[data-asack]");
     if(ack) ack.style.display = checkDue ? "" : "none";  // „Druck geprüft" nur bei fälliger Kontrolle
+    const umk = card.querySelector("[data-asumkehr]");   // „Umkehren bestätigen" nur wenn fällig & offen
+    if(umk) umk.style.display = (umkehr && !umkehrOk) ? "" : "none";
     const aus = card.querySelector("[data-as-aus]");
     if(aus) aus.textContent = asElapsedStr(aus.dataset.asAus);
   });
   // Auto-Sortierung: ändert sich die Dringlichkeits-Reihenfolge, Ansicht neu aufbauen (Warn-Trupps nach oben)
   if(!document.querySelector(".sheet") && asOrderKey() !== asOrderSig){ asOrderSig = asOrderKey(); render(); }
 }
-setInterval(() => { if(state.view === "atemschutz" && state.asSub === "ueberwachung") asTick(); }, 1000);
+setInterval(() => { if(state && state.view === "atemschutz" && state.asSub === "ueberwachung") asTick(); }, 1000);
 
 function wireAtemschutz(){
   document.querySelectorAll("[data-assub]").forEach(b =>
@@ -1936,6 +2354,10 @@ function wireAtemschutz(){
     b.addEventListener("click", () => openZielmeldung(b.dataset.asziel)));
   document.querySelectorAll("[data-asack]").forEach(b =>
     b.addEventListener("click", () => openDruckkontrolle(b.dataset.asack)));
+  document.querySelectorAll("[data-asumkehr]").forEach(b => b.addEventListener("click", () => {
+    const t = state.asTrupps.find(x => x.id === b.dataset.asumkehr);
+    if(t){ t.umkehrOk = new Date().toISOString(); markChange(); render(); }  // Umkehren an Trupp bestätigt
+  }));
   document.querySelectorAll("[data-aswieder]").forEach(b => b.addEventListener("click", () => {
     const t = state.asTrupps.find(x => x.id === b.dataset.aswieder);
     if(!t) return;
@@ -2180,6 +2602,9 @@ function openTruppEditor(id, vorbelegt){
       <div class="field" id="tp-druck-feld"><label>Startdruck je Träger (bar)</label>
         <div id="tp-druck"></div>
         <p class="hint">Vorbelegt ${AS_START_DEFAULT} bar, änderbar – zulässig über ${AS_START_MIN} bis ${AS_START_MAX} bar.</p></div>
+      <div class="field" id="tp-tf-feld"><label>Truppführer</label>
+        <div class="as-pick" id="tp-tf"></div>
+        <p class="hint">Wird im Ausdruck oben mit den Zeiten geführt.</p></div>
       <div class="field"><label for="tp-ab">Einsatzabschnitt</label>
         <select id="tp-ab">
           <option value="">– Abschnitt wählen –</option>
@@ -2227,7 +2652,20 @@ function openTruppEditor(id, vorbelegt){
         <input data-druck="${esc(mid)}" class="mono" inputmode="numeric" value="${esc(d)}" placeholder="${AS_START_DEFAULT}"></div>`;
     }).join("");
   };
-  baueDruck();
+  const baueTf = () => {
+    $("#tp-tf-feld").style.display = t.memberIds.length ? "" : "none";
+    if(!t.memberIds.includes(t.tf)) t.tf = t.memberIds[0] || "";   // Standard: erster Träger
+    const host = $("#tp-tf");
+    host.innerHTML = t.memberIds.map(mid => {
+      const tr = state.asTraeger.find(x => x.id === mid) || {};
+      return `<button type="button" data-tf="${esc(mid)}" class="${t.tf===mid?"active":""}"><span>${esc(tr.name||"?")}</span></button>`;
+    }).join("");
+    host.querySelectorAll("[data-tf]").forEach(b => b.addEventListener("click", () => {
+      t.tf = b.dataset.tf;
+      host.querySelectorAll("[data-tf]").forEach(x => x.classList.toggle("active", x.dataset.tf === t.tf));
+    }));
+  };
+  baueDruck(); baueTf();
   // Funkruf des Abschnittsleiters bei Abschnittswahl übernehmen
   const abSel = $("#tp-ab"), funkInp = $("#tp-funk");
   const abAp = () => { const o = abSel.selectedOptions[0]; return o ? (o.dataset.ap||"") : ""; };
@@ -2249,7 +2687,7 @@ function openTruppEditor(id, vorbelegt){
     else if(t.memberIds.length < 3) t.memberIds.push(pid);
     document.querySelectorAll("[data-pick]").forEach(x => x.classList.toggle("active", t.memberIds.includes(x.dataset.pick)));
     $("#tr-count").textContent = `${t.memberIds.length} ausgewählt`;
-    baueDruck();
+    baueDruck(); baueTf();
   }));
   const setTime = (field, val) => {
     if(!val) return;
@@ -2289,15 +2727,18 @@ function doPrintAtemschutz(){
   const e = state.einsatz;
   const trupps = [...state.asTrupps].sort((a,b) => a.nr-b.nr);
   const rows = trupps.map(t => {
-    const ids = t.memberIds||[];
+    const mem = t.memberIds||[];
+    // Truppführer zuerst listen (steht oben mit den Zeiten)
+    const ids = (t.tf && mem.includes(t.tf)) ? [t.tf, ...mem.filter(x => x !== t.tf)] : mem;
     const rz = asRzTrupp(t);
     const dauer = dauerStr(asMonitorStart(t), t.rueckkehr);
     return ids.map((id,idx) => {
       const tr = (state.asTraeger||[]).find(x=>x.id===id) || {};
       const d = (t.druck||{})[id] || {};
+      const istTf = t.tf ? id === t.tf : idx === 0;
       return `<tr>
         <td class="p-mono">${idx===0?t.nr:""}</td>
-        <td>${esc(tr.name||"?")}${tr.feuerwehr?` <span style="color:#666">(${esc(tr.feuerwehr)})</span>`:""}</td>
+        <td>${esc(tr.name||"?")}${istTf?` <b>(TF)</b>`:""}${tr.feuerwehr?` <span style="color:#666">(${esc(tr.feuerwehr)})</span>`:""}</td>
         <td class="p-mono">${esc(tr.geraeteNr||"–")} / ${esc(tr.maskeNr||"–")} / ${esc(tr.lungenNr||"–")}</td>
         <td style="text-align:center">${tr.csa?"CSA":""}</td>
         <td class="p-mono">${d.start?esc(d.start):""}</td>
@@ -2620,9 +3061,11 @@ function renderMonitor(){
       </div>
       ${isLagePage ? (() => {
         const nums = state.lage.items.filter(i => i.type === "num").sort((a,b) => a.num - b.num);
+        const gefahren = state.lage.items.filter(i => i.type === "gefahr").sort((a,b) => (a.num||0)-(b.num||0));
         const cars = state.lage.items.filter(i => i.type === "car").sort((a,b) => (a.num||0)-(b.num||0));
         const legRows = [
           ...nums.map(i => `<div class="fkrow"><span class="lg-leg-num">${esc(i.num)}</span><span class="fk-n">${esc(i.text||"")}</span></div>`),
+          ...gefahren.map(i => `<div class="fkrow"><span class="lg-leg-num tri">${esc(i.num)}</span><span class="fk-n">${esc(i.text||"")}</span></div>`),
           ...cars.map(i => {
             const u = state.einheiten.find(x => x.id === i.unitId);
             const color = u ? `var(${(ORGS[u.org]||ORGS.SON).cssVar})` : "var(--ink3)";
@@ -2827,11 +3270,21 @@ function tickClock(){
   if(cd) cd.textContent = monAbPaused ? "Pause"
     : `${Math.max(0, Math.ceil((30000 - (Date.now() - monAbLast))/1000))} s`;
 }
-setInterval(() => { if(state.view === "monitor"){ tickClock(); rotateAbschnitte(); } }, 1000);
+setInterval(() => { if(state && state.view === "monitor"){ tickClock(); rotateAbschnitte(); } }, 1000);
 
 /* ---------------- Ansicht: Lagekarte ---------------- */
 let lgTool = null;        // aktives Symbol-Werkzeug
-let lgBig = false;        // Großansicht (Karte gemalt auf großem Gerät)
+let lgSubmenu = null;     // offenes Werkzeug-Untermenü (z. B. "brand", "wasser")
+// Werkzeuge mit Auswahl-Untermenü: Klick öffnet die Optionen, Auswahl setzt das passende Symbol.
+const LG_SUBMENUS = {
+  brand:  { label:"Brandstelle", opts:[
+    { sym:"brand1", n:"Kleinbrand" }, { sym:"brand2", n:"Mittelbrand" }, { sym:"brand3", n:"Großbrand" } ] },
+  wasser: { label:"Wasserentnahme", opts:[
+    { sym:"hydrant", n:"Hydrant" }, { sym:"hydrantO", n:"Überflurhydrant" },
+    { sym:"gewaesser", n:"Offenes Gewässer" }, { sym:"zisterne", n:"Zisterne / Behälter" } ] },
+};
+let lgBig = false;        // Legende ausgeblendet (Karte über volle Breite, Werkzeuge bleiben)
+let lgPresent = false;    // Präsentationsmodus: Karte + Legende bildschirmfüllend, nur Zoom
 let lgZoom = 1;           // Zoomstufe 1–4, Verschieben per Wischgeste (Scroll)
 let lgDraw = null;        // laufende Linien-/Flächen-Zeichnung {type, points}
 const LG_CAR_SVG = `<svg viewBox="0 0 24 24" aria-hidden="true">
@@ -2846,6 +3299,7 @@ const LG_TOOLS = [
   { t:"gefahr",  n:"Gefahr",          preview:'<span class="lg-tri">!</span>' },
   { t:"wasser",  n:"Wasserentnahme",  preview:'<span class="lg-circle">W</span>' },
   { t:"text",    n:"Text",            preview:'<span class="lg-text">Abc</span>' },
+  { t:"form",    n:"Form",            preview:'<svg viewBox="0 0 40 30" style="width:34px;height:26px"><rect x="4" y="7" width="15" height="15" rx="2" style="fill:none;stroke:var(--brk);stroke-width:3"/><circle cx="30" cy="14.5" r="7.5" style="fill:none;stroke:var(--fw);stroke-width:3"/></svg>' },
   { t:"line",    n:"Linie",           preview:'<svg viewBox="0 0 40 30" style="width:38px;height:28px"><polyline points="4,24 16,10 26,18 36,6" style="fill:none;stroke:var(--thw);stroke-width:3;stroke-linecap:round;stroke-linejoin:round"/></svg>' },
   { t:"area",    n:"Fläche",          preview:'<svg viewBox="0 0 40 30" style="width:38px;height:28px"><polygon points="5,25 12,6 33,8 36,22 20,27" style="fill:var(--brk);fill-opacity:.3;stroke:var(--brk);stroke-width:2.5;stroke-linejoin:round"/></svg>' },
   { t:"symsearch", n:"Taktische Zeichen", preview:'<svg viewBox="0 0 24 24" style="width:30px;height:30px;stroke:var(--ink2);fill:none;stroke-width:2;stroke-linecap:round"><circle cx="10.5" cy="10.5" r="6"/><path d="M15 15l5.5 5.5"/></svg>' },
@@ -2858,6 +3312,9 @@ function symFlames(n){
     <path d="M12 2c1.2 3.6-3.8 6-3.8 10.4a3.8 3.8 0 0 0 7.6 0c0-1.5-.8-2.6-.8-2.6s3.4 1.4 3.4 5A6.4 6.4 0 0 1 5.6 15C5.6 8.4 10.8 7.2 12 2z"/></svg>`;
   return fl.repeat(n);
 }
+// Taktisches Zeichen „Bereitstellungsraum" (Quelle: Wikimedia Commons, T. Schuff, CC BY-SA 3.0):
+// gelbe Scheibe mit schwarzem Rand + oben offener „Behälter".
+const SYM_BEREITSTELLUNG = `<svg viewBox="0 0 601 599" aria-hidden="true"><circle cx="300.5" cy="299.3" r="300" fill="#1a1a1a"/><circle cx="300.5" cy="299.3" r="270" fill="#ffd400"/><path d="M489.8 438.5 L110.2 438.5 L110.2 158.9 C110.2 158.9 201.3 216.8 296.2 216.8 C391.1 216.8 489.8 158.9 489.8 158.9 Z" fill="none" stroke="#1a1a1a" stroke-width="22"/></svg>`;
 const SYM_KATALOG = [
   { key:"brand1",   name:"Kleinbrand / Entstehungsbrand", color:"var(--fw)",  flames:1 },
   { key:"brand2",   name:"Mittelbrand / fortgeschrittener Brand", color:"var(--fw)", flames:2 },
@@ -2877,8 +3334,10 @@ const SYM_KATALOG = [
   { key:"vermisst", name:"Person vermisst / verschüttet", color:"var(--son)", kurz:"?" , circle:true },
   { key:"hlp",      name:"Hubschrauberlandeplatz",        color:"var(--thw)", kurz:"HLP" },
   { key:"dekon",    name:"Dekon-Platz",                   color:"var(--brk)", kurz:"DEK" },
+  { key:"bereitstellung", name:"Bereitstellungsraum",     color:"var(--warn)", svg:SYM_BEREITSTELLUNG },
 ];
 function symTile(s, small){
+  if(s.svg) return `<span class="lg-symsvg"${small ? ' style="transform:scale(.85)"' : ""}>${s.svg}</span>`;
   const inner = s.flames ? symFlames(s.flames) : esc(s.kurz);
   return `<span class="lg-sym ${s.circle ? "circle" : ""}" style="--sc:${s.color};${small ? "transform:scale(.85)" : ""}">${inner}</span>`;
 }
@@ -2940,17 +3399,26 @@ function lgMarkerInner(i){
   }else if(i.type === "el"){
     sym = `<span class="lg-rect" style="--oc:var(--warn)">EL</span>`;
   }else if(i.type === "brand"){ sym = lgFlameSvg(); }
-  else if(i.type === "gefahr"){ sym = `<span class="lg-tri">!</span>`; }
+  else if(i.type === "gefahr"){ sym = `<span class="lg-tri">${i.num ? esc(i.num) : "!"}</span>`; }
   else if(i.type === "wasser"){ sym = `<span class="lg-circle">W</span>`; }
   else if(i.type === "patient"){ sym = `<span class="lg-cross">+</span>`; }
   else if(i.type === "num"){ sym = `<span class="lg-num">${esc(i.num)}</span>`; }
+  else if(i.type === "form"){
+    const col = `var(--${LG_SHAPE_COLORS.includes(i.color) ? i.color : "fw"})`;
+    sym = `<span class="lg-form ${i.shape || "rect"}" style="--sc:${col}">${esc(i.text || "")}</span>`;
+  }
   else if(i.type === "sym"){
     const s = SYM_KATALOG.find(x => x.key === i.sym);
     sym = s ? symTile(s) : `<span class="lg-text">?</span>`;
   }
   else { sym = `<span class="lg-text">${esc(i.label || "Text")}</span>`; }
-  // Nummern-Marker bewusst ohne Beschriftung auf der Karte – Text steht in der Legende
-  if(i.type !== "text" && i.type !== "num" && i.label) lbl = `<span class="lg-lbl">${esc(i.label)}</span>`;
+  // Marker/Gefahr: erstes Wort der Beschreibung als Kurzlabel unter das Symbol (Rest steht in der Legende)
+  if((i.type === "num" || i.type === "gefahr") && i.text){
+    const wort = i.text.trim().split(/\s+/)[0];
+    if(wort) lbl = `<span class="lg-lbl">${esc(wort)}</span>`;
+  }else if(i.type !== "text" && i.type !== "num" && i.type !== "gefahr" && i.label){
+    lbl = `<span class="lg-lbl">${esc(i.label)}</span>`;
+  }
   return sym + lbl;
 }
 function lgMarkerHtml(i){
@@ -2968,7 +3436,7 @@ function lgCarOptions(currentUnitId){
 }
 function renderLagekarte(){
   const tools = LG_TOOLS.map(t => `
-    <button class="lg-tool" data-lgtool="${t.t}" aria-pressed="${lgTool===t.t}">
+    <button class="lg-tool" data-lgtool="${t.t}" aria-pressed="${lgTool===t.t || lgSubmenu===t.t}">
       ${t.preview}<span>${t.n}</span>
     </button>`).join("");
   let statusText = "", drawButtons = "";
@@ -2986,38 +3454,58 @@ function renderLagekarte(){
       : `Auf die Karte tippen, um „${t.n}“ zu platzieren`;
   }
   const nums = state.lage.items.filter(i => i.type === "num").sort((a,b) => a.num - b.num);
+  const gefahren = state.lage.items.filter(i => i.type === "gefahr").sort((a,b) => (a.num||0)-(b.num||0));
+  const forms = state.lage.items.filter(i => i.type === "form");
+  const lines = state.lage.items.filter(i => i.type === "line");
   const cars = state.lage.items.filter(i => i.type === "car").sort((a,b) => (a.num||0)-(b.num||0));
+  const shpCol = i => `var(--${LG_SHAPE_COLORS.includes(i.color) ? i.color : "fw"})`;
   const carRows = cars.map(i => {
     const u = state.einheiten.find(x => x.id === i.unitId);
     const color = u ? `var(${(ORGS[u.org]||ORGS.SON).cssVar})` : "var(--ink3)";
+    const carName = u ? esc(fullName(u)) : "nicht zugeordnet";
+    // Voller Name als umbrechender Text (Spalte bleibt schmal). Klick → Zuordnungs-Dialog.
+    // In der Präsentation nur lesen (kein Klick).
+    const rechts = lgPresent
+      ? `<span class="lg-leg-carname">${carName}</span>`
+      : `<button class="lg-leg-carname" data-lgedit="${esc(i.id)}">${carName}</button>`;
     return `
     <div class="lg-leg-car">
-      <span class="lg-car" style="color:${color}">${LG_CAR_SVG}<b class="car-num">${esc(i.num||"?")}</b></span>
-      <select data-lgcar="${esc(i.id)}" aria-label="Fahrzeug ${esc(i.num||"")} zuordnen">${lgCarOptions(i.unitId)}</select>
+      <button class="lg-car lg-find" style="color:${color}" data-lgfind="${esc(i.id)}" aria-label="Fahrzeug ${esc(i.num||"")} auf der Karte zeigen">${LG_CAR_SVG}<b class="car-num">${esc(i.num||"?")}</b></button>
+      ${rechts}
     </div>`;
   }).join("");
-  const zweispaltig = (nums.length + cars.length) > 10;   // bei langer Liste zweispaltig
-  const legend = `
-    <div class="lg-legend">
-      <div class="lg-leg-body ${zweispaltig ? "zweispaltig" : ""}">
-        <div class="lg-leg-sec">
-          <h3>Marker</h3>
-          ${nums.length ? nums.map(i => `
-            <button class="lg-leg-item" data-lgedit="${esc(i.id)}">
-              <span class="lg-leg-num">${esc(i.num)}</span>
-              <span class="lg-leg-text">${i.text ? esc(i.text) : `<span class="ph">Beschreibung antippen …</span>`}</span>
-            </button>`).join("")
-          : `<p class="hint" style="margin:0">Noch keine Marker. Werkzeug „Marker 1·2·3“ wählen und auf die Karte tippen – die Beschreibung steht dann hier.</p>`}
-        </div>
-        ${cars.length ? `
-        <div class="lg-leg-sec">
-          <h3>Fahrzeuge</h3>
-          ${carRows}
-        </div>` : ""}
-      </div>
+  // Legenden-Eintrag: Symbol/Badge antippen → wackelt/blinkt auf der Karte; Text antippen → bearbeiten.
+  const legRow = (badgeHtml, item, ph) => `
+    <div class="lg-leg-item">
+      <button class="lg-leg-badge" data-lgfind="${esc(item.id)}" aria-label="Auf der Karte zeigen">${badgeHtml}</button>
+      <button class="lg-leg-text" data-lgedit="${esc(item.id)}">${item.text ? esc(item.text) : `<span class="ph">${ph}</span>`}</button>
     </div>`;
+  const numBadge  = (cls, n) => `<span class="lg-leg-num ${cls}">${n}</span>`;
+  const numItems  = nums.map(i => legRow(numBadge("", esc(i.num)), i, "Beschreibung antippen …")).join("");
+  const formItems = forms.map(f => legRow(`<span class="lg-mini-form ${f.shape||"rect"}" style="--sc:${shpCol(f)}"></span>`, f, "Form beschriften …")).join("");
+  const lineItems = lines.map(l => legRow(`<span class="lg-mini-line" style="--sc:${shpCol(l)}"></span>`, l, "Linie beschriften …")).join("");
+  const secMarker = `
+        <div class="lg-leg-sec"><h3>Marker</h3>
+          ${(nums.length || forms.length || lines.length) ? numItems + formItems + lineItems
+          : `<p class="hint" style="margin:0">Noch keine Marker. Werkzeug wählen und auf die Karte tippen.</p>`}
+        </div>`;
+  const secGefahr = gefahren.length ? `
+        <div class="lg-leg-sec"><h3>Gefahren</h3>${gefahren.map(i => legRow(numBadge("tri", esc(i.num)), i, "Beschreibung antippen …")).join("")}</div>` : "";
+  const secCars = cars.length ? `<div class="lg-leg-sec"><h3>Fahrzeuge</h3>${carRows}</div>` : "";
+  // Legende links (Marker + Gefahren) und rechts (Fahrzeuge) neben der Karte
+  const legendLeft  = `<div class="lg-legend"><div class="lg-leg-body">${secMarker}${secGefahr}</div></div>`;
+  const legendRight = secCars ? `<div class="lg-legend"><div class="lg-leg-body">${secCars}</div></div>` : "";
+  const legShow = lgPresent || !lgBig;   // Präsentation zeigt die Legende immer
+  const legCols = !legShow ? "minmax(0,1fr)"
+    : (secCars ? "260px minmax(0,1fr) 260px" : "260px minmax(0,1fr)");
   return `
-  <div class="card">
+  <div class="card lg-card${lgPresent ? " lg-present" : ""}">
+    ${lgPresent ? `
+    <div class="lg-present-ctrl" style="right:${(secCars ? 284 : 0) + 14}px">
+      <button id="lgPzoomOut" aria-label="Herauszoomen">−</button>
+      <button id="lgPzoomIn" aria-label="Hineinzoomen">＋</button>
+      <button id="lgPexit" aria-label="Präsentation beenden">✕</button>
+    </div>` : ""}
     <h2>Lagekarte – taktische Skizze</h2>
     <div class="lg-headrow">
       <div class="lg-zoom" role="group" aria-label="Zoom">
@@ -3026,7 +3514,8 @@ function renderLagekarte(){
         <button id="lgZoomIn" aria-label="Hineinzoomen">＋</button>
       </div>
       <button class="btn btn-ghost" id="lgSnapBtn" style="margin-right:8px">Snapshot einfrieren</button>
-      <button class="btn btn-ghost" id="lgBigBtn" style="margin-right:8px">${lgBig ? "Großansicht beenden" : "Großansicht / Vollbild"}</button>
+      <button class="btn btn-ghost" id="lgBigBtn" style="margin-right:8px">${lgBig ? "Legende einblenden" : "Legende ausblenden"}</button>
+      <button class="btn btn-ghost" id="lgPresentBtn" style="margin-right:8px">Präsentation / Vollbild</button>
       <button class="btn btn-primary" id="lgToMonitor">Zum Monitor</button>
     </div>
     <div class="lg-modes">
@@ -3044,15 +3533,25 @@ function renderLagekarte(){
       ${lgEinsatzAdresse() ? `<button class="btn btn-ghost" id="lgToAddr" style="min-height:42px;padding:6px 14px;font-size:.85rem">⌖ Einsatzadresse</button>` : ""}` : ""}
     </div>
     <div class="lg-toolbar">${tools}</div>
+    ${lgSubmenu && LG_SUBMENUS[lgSubmenu] ? `
+    <div class="lg-submenu">
+      <span class="lg-sub-lbl">${esc(LG_SUBMENUS[lgSubmenu].label)}:</span>
+      ${LG_SUBMENUS[lgSubmenu].opts.map(o => {
+        const s = SYM_KATALOG.find(x => x.key === o.sym);
+        return `<button class="lg-subopt" data-lgsub="${esc(o.sym)}">${s ? symTile(s, true) : ""}<span>${esc(o.n)}</span></button>`;
+      }).join("")}
+    </div>` : ""}
     ${statusText ? `<div class="lg-status">${esc(statusText)}<span style="margin-left:auto">${drawButtons}</span><button id="lgCancel">Abbrechen</button></div>` : ""}
     ${state.lage.mode === "karte" ? `
-    <div class="lg-layout ${lgBig ? "big" : ""}">
+    <div class="lg-layout" style="grid-template-columns:${legCols}">
+      ${legShow ? legendLeft : ""}
       <div class="lg-wrap" id="lgWrap" style="overflow:hidden">
         <div id="lgMap"></div>
       </div>
-      ${legend}
+      ${legShow ? legendRight : ""}
     </div>` : `
-    <div class="lg-layout ${lgBig ? "big" : ""}">
+    <div class="lg-layout" style="grid-template-columns:${legCols}">
+      ${legShow ? legendLeft : ""}
       <div class="lg-wrap" id="lgWrap">
         <div class="lg-canvas ${(state.lage.mode==="bild" && state.lage.bg) ? "hasbg" : ""}" id="lgCanvas"
           style="width:${lgZoom*100}%;height:${lgZoom*100}%;${(state.lage.mode==="bild" && state.lage.bg) ? `background-image:url('${state.lage.bg}')` : ""}">
@@ -3060,10 +3559,11 @@ function renderLagekarte(){
           ${state.lage.items.filter(i => i.x != null).map(lgMarkerHtml).join("")}
         </div>
       </div>
-      ${legend}
+      ${legShow ? legendRight : ""}
     </div>`}
     <p class="hint">Symbol wählen und auf die Karte tippen · Symbole mit dem Finger verschieben · Antippen zum Beschriften oder Löschen · Nummern-Marker halten die Karte frei, der Text steht in der Legende.</p>
     <div class="lg-bgrow">
+      <button class="btn btn-ghost" id="lgPrint">Lagekarte drucken</button>
       <button class="btn btn-ghost" id="lgBgBtn">Foto / Lageplan als Hintergrund</button>
       <button class="btn btn-ghost" id="lgBgPaste" title="z. B. Screenshot aus dem BayernAtlas – auch mit Strg+V">Aus Zwischenablage einfügen</button>
       ${state.lage.bg ? `<button class="btn btn-ghost" id="lgBgDel">Hintergrund entfernen</button>` : ""}
@@ -3207,8 +3707,8 @@ function lgBaseLayer(key){
   return L.tileLayer.wms("https://geoservices.bayern.de/od/wms/dop/v1/dop40",
     { layers:"by_dop40c", format:"image/png", version:"1.3.0", maxZoom:20, attribution:"Luftbild: " + bayVV });
 }
-function lgDivIcon(inner){
-  return L.divIcon({ html:`<div class="lg-mk">${inner}</div>`, className:"lg-divicon", iconSize:[0,0] });
+function lgDivIcon(inner, id){
+  return L.divIcon({ html:`<div class="lg-mk"${id ? ` data-id="${esc(id)}"` : ""}>${inner}</div>`, className:"lg-divicon", iconSize:[0,0] });
 }
 /* Adresse → Koordinaten (OpenStreetMap/Nominatim, nur online) */
 function lgGeocode(q, cb){
@@ -3232,6 +3732,7 @@ function lgAddItems(layer, interactive, items){
         : L.polyline(ll, { color:col, weight:3.5, interactive });
       if(interactive) shp.on("click", ev => { L.DomEvent.stop(ev); openLgShapeEdit(i.id); });
       shp.addTo(layer);
+      const pe = shp.getElement && shp.getElement(); if(pe) pe.setAttribute("data-shape", i.id);   // fürs Blinken
       if(i.type === "area" && i.abschnittId){
         const a = state.abschnitte.find(x => x.id === i.abschnittId);
         if(a){
@@ -3247,7 +3748,7 @@ function lgAddItems(layer, interactive, items){
   }
   for(const i of items){
     if(!i.ll) continue;
-    const m = L.marker(i.ll, { draggable:interactive, interactive, icon: lgDivIcon(lgMarkerInner(i)) });
+    const m = L.marker(i.ll, { draggable:interactive, interactive, icon: lgDivIcon(lgMarkerInner(i), i.id) });
     if(interactive){
       m.on("click", () => openLgEdit(i.id));
       m.on("dragend", () => { const p = m.getLatLng(); i.ll = [p.lat, p.lng]; markChange(); });
@@ -3335,10 +3836,15 @@ function lgMapClick(latlng){
     const it = { id:uid(), type:"car", num, unitId:"", ll };
     state.lage.items.push(it); lgTool = null; markChange(); render(); openLgEdit(it.id); return;
   }
-  if(lgTool === "num"){
-    const num = state.lage.items.filter(i => i.type==="num").reduce((m,i)=>Math.max(m,i.num||0),0)+1;
-    const it = { id:uid(), type:"num", num, text:"", ll };
+  if(lgTool === "num" || lgTool === "gefahr"){
+    const typ = lgTool;
+    const num = state.lage.items.filter(i => i.type===typ).reduce((m,i)=>Math.max(m,i.num||0),0)+1;
+    const it = { id:uid(), type:typ, num, text:"", ll };
     state.lage.items.push(it); lgTool = null; markChange(); render(); openLgEdit(it.id); return;
+  }
+  if(lgTool === "form"){
+    const it = { id:uid(), type:"form", shape:"rect", color:"fw", text:"", ll };
+    state.lage.items.push(it); lgTool = null; markChange(); render(); openLgFormEdit(it.id); return;
   }
   if(lgTool.startsWith("sym:")){
     state.lage.items.push({ id:uid(), type:"sym", sym:lgTool.slice(4), label:"", ll });
@@ -3379,24 +3885,39 @@ function wireLagekarte(){
         markChange(); render();
       });
     }));
-  $("#lgBigBtn").addEventListener("click", () => {
-    lgBig = !lgBig;
-    if(lgBig){
-      const rf = document.documentElement.requestFullscreen;
-      if(rf) rf.call(document.documentElement).catch(() => {});
-    }else if(document.fullscreenElement){
-      document.exitFullscreen();
-    }
+  $("#lgBigBtn").addEventListener("click", () => { lgBig = !lgBig; render(); });
+  const presentZoom = dir => {
+    if(lgMapObj){ dir > 0 ? lgMapObj.zoomIn() : lgMapObj.zoomOut(); return; }  // Kartenmodus: Leaflet
+    lgZoom = Math.min(4, Math.max(1, lgZoom + dir * 0.5)); render();           // Raster/Bild: Canvas-Zoom
+  };
+  const pIn = $("#lgPzoomIn"), pOut = $("#lgPzoomOut"), pExit = $("#lgPexit");
+  if(pIn)  pIn.addEventListener("click", () => presentZoom(1));
+  if(pOut) pOut.addEventListener("click", () => presentZoom(-1));
+  if(pExit) pExit.addEventListener("click", () => { lgPresent = false; if(document.fullscreenElement) document.exitFullscreen(); render(); });
+  const presentBtn = $("#lgPresentBtn");
+  if(presentBtn) presentBtn.addEventListener("click", () => {
+    lgPresent = true;
+    const rf = document.documentElement.requestFullscreen;
+    if(rf) rf.call(document.documentElement).catch(() => {});
     render();
   });
   document.querySelectorAll("[data-lgtool]").forEach(b => b.addEventListener("click", () => {
-    if(b.dataset.lgtool === "symsearch"){ openSymSearch(); return; }
-    lgTool = (lgTool === b.dataset.lgtool) ? null : b.dataset.lgtool;
-    lgDraw = null;
+    const tool = b.dataset.lgtool;
+    if(tool === "symsearch"){ openSymSearch(); return; }
+    if(LG_SUBMENUS[tool]){                       // Werkzeug mit Untermenü (Brand, Wasser)
+      lgSubmenu = (lgSubmenu === tool) ? null : tool;
+      lgTool = null; lgDraw = null; render(); return;
+    }
+    lgTool = (lgTool === tool) ? null : tool;
+    lgSubmenu = null; lgDraw = null;
     render();
   }));
+  document.querySelectorAll("[data-lgsub]").forEach(b => b.addEventListener("click", () => {
+    lgTool = "sym:" + b.dataset.lgsub;           // Untermenü-Auswahl → passendes Symbol platzieren
+    lgSubmenu = null; lgDraw = null; render();
+  }));
   const cancel = $("#lgCancel");
-  if(cancel) cancel.addEventListener("click", () => { lgTool = null; lgDraw = null; render(); });
+  if(cancel) cancel.addEventListener("click", () => { lgTool = null; lgDraw = null; lgSubmenu = null; render(); });
   const drawDone = $("#lgDrawDone");
   if(drawDone) drawDone.addEventListener("click", () => {
     if(lgDraw && lgDraw.points.length >= (lgDraw.type === "area" ? 3 : 2)){
@@ -3409,6 +3930,18 @@ function wireLagekarte(){
   });
   document.querySelectorAll("[data-lgedit]").forEach(b =>
     b.addEventListener("click", () => openLgEdit(b.dataset.lgedit)));
+  document.querySelectorAll("[data-lgfind]").forEach(b => b.addEventListener("click", () => {
+    const id = b.dataset.lgfind;
+    const pt = document.querySelector(`.lg-item[data-id="${id}"], .lg-mk[data-id="${id}"]`);
+    const sh = pt ? null : document.querySelector(`[data-shape="${id}"]`);   // Linie/Fläche (SVG bzw. Karte)
+    const el = pt || sh;
+    if(!el) return;
+    const cls = pt ? "wackel" : "flash";   // Punkt-Marker wackeln, Linien blinken
+    el.classList.remove(cls); void el.getBoundingClientRect();   // Reflow → Animation startet neu
+    el.classList.add(cls);
+    setTimeout(() => el.classList.remove(cls), 900);
+  }));
+  const lgPr = $("#lgPrint"); if(lgPr) lgPr.addEventListener("click", doPrintLagekarte);
   document.querySelectorAll("select[data-lgcar]").forEach(sel =>
     sel.addEventListener("change", () => {
       const it = state.lage.items.find(i => i.id === sel.dataset.lgcar);
@@ -3524,6 +4057,12 @@ function wireLagekarte(){
       markChange(); render();
       return;
     }
+    if(lgTool === "form"){
+      const p = pos(e);
+      const it = { id:uid(), type:"form", shape:"rect", color:"fw", text:"", x:p.x, y:p.y };
+      state.lage.items.push(it); lgTool = null; markChange(); render(); openLgFormEdit(it.id);
+      return;
+    }
     if(lgTool){
       const p = pos(e);
       if(lgTool === "car"){
@@ -3534,10 +4073,11 @@ function wireLagekarte(){
         lgTool = null;
         markChange(); render();
         openLgEdit(item.id); // direkt Fahrzeug zuordnen
-      }else if(lgTool === "num"){
-        const nextNum = state.lage.items.filter(i => i.type === "num")
+      }else if(lgTool === "num" || lgTool === "gefahr"){
+        const typ = lgTool;
+        const nextNum = state.lage.items.filter(i => i.type === typ)
           .reduce((m,i) => Math.max(m, i.num||0), 0) + 1;
-        const item = { id:uid(), type:"num", num:nextNum, text:"", x:p.x, y:p.y };
+        const item = { id:uid(), type:typ, num:nextNum, text:"", x:p.x, y:p.y };
         state.lage.items.push(item);
         lgTool = null;
         markChange(); render();
@@ -3655,6 +4195,8 @@ function openLgShapeEdit(id){
         </div>
         <p class="hint">z. B. Blau = Schlauchleitung/Wasser, Rot = Absperrung, Gold = Fläche/Bereitstellung, Grün = Abschnitt.</p>
       </div>
+      <div class="field"><label for="sh-text">Beschriftung <span style="text-transform:none;font-weight:500">(erscheint in der Legende)</span></label>
+        <input id="sh-text" value="${esc(it.text||"")}" placeholder="z. B. Schlauchleitung B, Absperrung" autocomplete="off"></div>
       ${it.type === "area" ? `
       <div class="field"><label for="sh-abschnitt">Einsatzabschnitt</label>
         <select id="sh-abschnitt">
@@ -3685,17 +4227,71 @@ function openLgShapeEdit(id){
     state.lage.items = state.lage.items.filter(i => i.id !== it.id);
     markChange(); closeEditor(); render();
   });
-  $("#sh-save").addEventListener("click", () => { markChange(); closeEditor(); render(); });
+  $("#sh-save").addEventListener("click", () => {
+    const t = $("#sh-text"); if(t) it.text = t.value.trim();
+    markChange(); closeEditor(); render();
+  });
+}
+// Editor für frei einfügbare Formen (Kreis/Quadrat/Rechteck) mit Farbe und optionalem Text.
+function openLgFormEdit(id){
+  const it = state.lage.items.find(i => i.id === id);
+  if(!it) return;
+  const names = { fw:"Rot", thw:"Blau", brk:"Gold", pol:"Grün" };
+  const shapes = [ { s:"circle", n:"Kreis" }, { s:"square", n:"Quadrat" }, { s:"rect", n:"Rechteck" } ];
+  $("#sheetHost").innerHTML = `
+  <div class="sheet-backdrop" data-close="1"></div>
+  <div class="sheet" role="dialog" aria-modal="true" aria-label="Form bearbeiten" style="top:auto;max-height:70vh">
+    <div class="sheet-head"><h2>Form</h2>
+      <button class="sheet-close" data-close="1" aria-label="Schließen">×</button></div>
+    <div class="sheet-body">
+      <div class="field"><label>Form</label>
+        <div class="seg" style="max-width:none">
+          ${shapes.map(sh => `<button type="button" data-formshape="${sh.s}" class="${(it.shape||"rect")===sh.s?"active":""}">${sh.n}</button>`).join("")}
+        </div></div>
+      <div class="field"><label>Farbe</label>
+        <div class="swatches">
+          ${LG_SHAPE_COLORS.map(c => `<button data-shcolor="${c}" style="--sc:var(--${c})" aria-pressed="${(it.color||"fw")===c}" aria-label="${names[c]}"></button>`).join("")}
+        </div></div>
+      <div class="field"><label for="form-text">Text <span style="text-transform:none;font-weight:500">(optional)</span></label>
+        <input id="form-text" value="${esc(it.text||"")}" placeholder="z. B. BR, RTW, Absperrung …" autocomplete="off">
+        <p class="hint">Kurzer Text steht in der Form – bei „Rechteck" ist mehr Platz.</p></div>
+    </div>
+    <div class="sheet-foot">
+      <button class="btn btn-danger-ghost" id="form-del">Entfernen</button>
+      <button class="btn btn-primary" id="form-save" style="flex:1">Fertig</button>
+    </div>
+  </div>`;
+  document.querySelectorAll("[data-close]").forEach(el => el.addEventListener("click", closeEditor));
+  const txt = $("#form-text"); txt.focus();
+  document.querySelectorAll("[data-formshape]").forEach(b => b.addEventListener("click", () => {
+    it.shape = b.dataset.formshape;
+    document.querySelectorAll("[data-formshape]").forEach(x => x.classList.toggle("active", x.dataset.formshape === it.shape));
+    it.text = txt.value.trim(); markChange(); render();
+  }));
+  document.querySelectorAll("[data-shcolor]").forEach(b => b.addEventListener("click", () => {
+    it.color = b.dataset.shcolor;
+    document.querySelectorAll("[data-shcolor]").forEach(x => x.setAttribute("aria-pressed", x.dataset.shcolor === it.color));
+    it.text = txt.value.trim(); markChange(); render();
+  }));
+  txt.addEventListener("keydown", e => { if(e.key === "Enter") $("#form-save").click(); });
+  $("#form-del").addEventListener("click", () => {
+    state.lage.items = state.lage.items.filter(i => i.id !== it.id);
+    markChange(); closeEditor(); render();
+  });
+  $("#form-save").addEventListener("click", () => { it.text = txt.value.trim(); markChange(); closeEditor(); render(); });
 }
 function openLgEdit(id){
   const it = state.lage.items.find(i => i.id === id);
   if(!it) return;
-  const isNum = it.type === "num", isCar = it.type === "car";
-  const fields = isNum ? `
+  if(it.type === "form") return openLgFormEdit(id);   // Form hat eigenen Editor (Form/Farbe/Text)
+  if(it.type === "line" || it.type === "area") return openLgShapeEdit(id);   // Linie/Fläche: Farbe + Beschriftung
+  const isNum = it.type === "num", isCar = it.type === "car", isGef = it.type === "gefahr";
+  const numbered = isNum || isGef;
+  const fields = numbered ? `
       <div class="field" style="max-width:140px"><label for="lg-num">Nummer</label>
         <input id="lg-num" class="mono" type="number" min="1" max="99" value="${esc(it.num)}"></div>
       <div class="field"><label for="lg-label">Beschreibung (steht in der Legende)</label>
-        <input id="lg-label" value="${esc(it.text||"")}" placeholder="z. B. Faltbehälter 10.000 Liter" autocomplete="off"></div>`
+        <input id="lg-label" value="${esc(it.text||"")}" placeholder="${isGef ? "z. B. Gasaustritt, Stromleitung" : "z. B. Faltbehälter 10.000 Liter"}" autocomplete="off"></div>`
     : isCar ? `
       <div class="field"><label for="lg-unit">Fahrzeug (aus den erfassten Einheiten)</label>
         <select id="lg-unit">${lgCarOptions(it.unitId)}</select>
@@ -3707,7 +4303,7 @@ function openLgEdit(id){
   <div class="sheet-backdrop" data-close="1"></div>
   <div class="sheet" role="dialog" aria-modal="true" aria-label="Symbol bearbeiten" style="top:auto;max-height:70vh">
     <div class="sheet-head">
-      <h2>${isNum ? `Marker ${esc(it.num)}` : isCar ? `Fahrzeug ${esc(it.num||"")}` : "Symbol bearbeiten"}</h2>
+      <h2>${isGef ? `Gefahr ${esc(it.num||"")}` : isNum ? `Marker ${esc(it.num)}` : isCar ? `Fahrzeug ${esc(it.num||"")}` : "Symbol bearbeiten"}</h2>
       <button class="sheet-close" data-close="1" aria-label="Schließen">×</button>
     </div>
     <div class="sheet-body">${fields}</div>
@@ -3727,7 +4323,7 @@ function openLgEdit(id){
     markChange(); closeEditor(); render();
   });
   $("#lg-save").addEventListener("click", () => {
-    if(isNum){
+    if(numbered){
       it.num = Math.max(1, Math.min(99, parseInt($("#lg-num").value, 10) || it.num));
       it.text = inp.value.trim();
     }else if(isCar){
@@ -3754,15 +4350,38 @@ function printMapHtml(lage){
 }
 function printLegendHtml(items, units){
   const nums = items.filter(i => i.type === "num").sort((a,b) => a.num - b.num);
+  const gefahren = items.filter(i => i.type === "gefahr").sort((a,b) => (a.num||0)-(b.num||0));
+  const forms = items.filter(i => i.type === "form" && (i.text||"").trim());
+  const lines = items.filter(i => i.type === "line" && (i.text||"").trim());
   const cars = items.filter(i => i.type === "car").sort((a,b) => (a.num||0)-(b.num||0));
   const rows = [
     ...nums.map(i => `<div><strong class="p-mono">▲ ${esc(i.num)}</strong> ${esc(i.text||"")}</div>`),
+    ...gefahren.map(i => `<div><strong class="p-mono">⚠ ${esc(i.num)}</strong> ${esc(i.text||"")}</div>`),
+    ...forms.map(i => `<div><strong class="p-mono">◆</strong> ${esc(i.text)}</div>`),
+    ...lines.map(i => `<div><strong class="p-mono">—</strong> ${esc(i.text)}</div>`),
     ...cars.map(i => {
       const u = (units || []).find(x => x.id === i.unitId);
       return `<div><strong class="p-mono">Fzg ${esc(i.num||"?")}</strong> ${u ? esc(fullName(u)) : "nicht zugeordnet"}</div>`;
     }),
   ].join("");
   return rows ? `<div class="p-legend">${rows}</div>` : "";
+}
+/* Nur die Lagekarte drucken (Karte + Legende), ohne den gesamten Einsatzbericht */
+function doPrintLagekarte(){
+  const e = state.einsatz;
+  $("#printArea").innerHTML = `
+    <div class="p-head">
+      <div>
+        <div class="p-sub">${esc(state.config.ugName)} · Lagekarte</div>
+        <h1>${esc(e.stichwort) || "Ohne Stichwort"}</h1>
+        <div>${esc(e.ort)}${e.beginn ? " · Alarm " + fmtDatum(e.beginn) + " " + fmtZeit(e.beginn) + " Uhr" : ""}</div>
+      </div>
+      <div class="p-mark">ELWIS</div>
+    </div>
+    ${printMapHtml(state.lage)}
+    ${printLegendHtml(state.lage.items, state.einheiten)}
+    <p style="font-size:8pt;color:#666;margin-top:16px">Gedruckt am ${new Date().toLocaleString("de-DE")} · ELWIS – Lagekarte · ${esc(state.config.ugName)}</p>`;
+  window.print();
 }
 function doPrint(data){
   const e = data.einsatz;
@@ -3942,14 +4561,18 @@ function render(){
   else if(state.view === "lagekarte"){ main.innerHTML = renderLagekarte(); wireLagekarte(); }
   else { main.innerHTML = renderMonitor(); wireMonitor(); }
 }
-if(!state.einsatz.beginn) state.einsatz.beginn = nowLocalInput();
-if(!TABS.some(t => t.id === state.view)) state.view = "einsatz";
-render();
+// Der erste Render passiert async in boot() (unten), sobald der Zustand aus
+// IndexedDB geladen ist.
 
 // Bei Größenwechsel (Drehen/Fenster) neu bewerten, falls die aktive Ansicht wegfällt
 window.matchMedia("(min-width:900px)").addEventListener("change", () => {
-  if(!istGrossesGeraet() && (TABS.find(t => t.id === state.view) || {}).nurGross){ render(); }
+  if(state && !istGrossesGeraet() && (TABS.find(t => t.id === state.view) || {}).nurGross){ render(); }
 });
+
+// Sicherheitsnetz: IndexedDB-Schreibvorgänge sind async – beim Verlassen/Schließen der
+// Seite den letzten Stand noch anstoßen, damit die letzte Eingabe nicht verloren geht.
+document.addEventListener("visibilitychange", () => { if(document.visibilityState === "hidden") save(); });
+window.addEventListener("pagehide", () => save());
 
 /* ---------------- PWA: Service Worker registrieren ---------------- */
 if("serviceWorker" in navigator && (location.protocol === "https:" || location.hostname === "localhost")){
@@ -3981,12 +4604,10 @@ function syncColOf(name){
   if(name === "lageSnapshots") return state.lage.snapshots;
   return state[name];
 }
-function syncSnapLoad(){
-  try{ return JSON.parse(localStorage.getItem("elwis-sync-snap")) || null; }catch(e){ return null; }
-}
-function syncSnapSave(s){
-  try{ localStorage.setItem("elwis-sync-snap", JSON.stringify(s)); }catch(e){}
-}
+// Sync-Snapshot: im Speicher gehalten (syncDiff liest synchron), in IndexedDB gespiegelt
+let _syncSnap = null;
+function syncSnapLoad(){ return _syncSnap; }
+function syncSnapSave(s){ _syncSnap = s; idbSet("sync-snap", s).catch(()=>{}); }
 function syncSnapshotVomZustand(){
   const snap = { einsatzId: state.einsatzId,
     singletons: { einsatz: JSON.stringify(state.einsatz), lageBg: JSON.stringify(state.lage.bg) },
@@ -4109,7 +4730,7 @@ function syncPill(){
 const _origRenderHeader = renderHeader;
 renderHeader = function(){ _origRenderHeader(); syncPill(); };
 
-(async function syncInit(){
+async function syncInit(){
   try{
     const res = await fetch("./api/info", { cache: "no-store" });
     if(!res.ok) return;
@@ -4121,4 +4742,27 @@ renderHeader = function(){ _origRenderHeader(); syncPill(); };
     setInterval(syncTick, 3000);
     render();
   }catch(e){ /* kein ELW-Server erreichbar → App läuft eigenständig weiter */ }
-})();
+}
+
+/* ---------------- Start: Zustand laden, dann rendern ---------------- */
+async function boot(){
+  const stored = await ladeZustand();
+  zustandAufbauen(stored);
+  const spUg = $("#splashUg"); if(spUg) spUg.textContent = state.config.ugName || "";  // Splash mit echtem Namen
+  // Sync-Snapshot laden (mit einmaliger Übernahme aus altem localStorage)
+  try{
+    _syncSnap = await idbGet("sync-snap");
+    if(!_syncSnap){
+      const altSnap = localStorage.getItem("elwis-sync-snap");
+      if(altSnap){
+        _syncSnap = JSON.parse(altSnap);
+        try{ await idbSet("sync-snap", _syncSnap); localStorage.removeItem("elwis-sync-snap"); }catch(e){}
+      }
+    }
+  }catch(e){ /* ohne Snapshot wird beim ersten Abgleich einmalig alles gepusht */ }
+  if(!state.einsatz.beginn) state.einsatz.beginn = nowLocalInput();
+  if(!TABS.some(t => t.id === state.view)) state.view = "einsatz";
+  render();
+  syncInit();
+}
+boot();
