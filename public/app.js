@@ -1235,7 +1235,9 @@ function renderKraefte(){
     const list = [...state.anforderungen].sort((a,b) =>
       (a.status==="eingetroffen"?1:0)-(b.status==="eingetroffen"?1:0) ||
       (b.angefordert||"").localeCompare(a.angefordert||""));
-    const items = list.length ? `<div class="fs-list">${list.map(a => `
+    const items = list.length ? `<div class="fs-list">${list.map(a => {
+      const abN = (state.abschnitte.find(x => x.id === a.abschnitt) || {}).name;
+      return `
       <button class="fs-item ${a.status!=="eingetroffen"?"imp":""}" data-editaf="${esc(a.id)}" ${a.status==="eingetroffen"?'style="opacity:.55"':""}>
         <div class="fs-head">
           <span class="fs-zeit mono">${fmtZeit(a.angefordert)}</span>
@@ -1243,8 +1245,9 @@ function renderKraefte(){
           ${a.alarmiert ? `<span class="mono">alarmiert ${fmtZeit(a.alarmiert)}</span>` : ""}
           ${a.eingetroffen ? `<span class="mono">eingetroffen ${fmtZeit(a.eingetroffen)}</span>` : ""}
         </div>
-        <div class="fs-text">${esc(a.was)}</div>
-      </button>`).join("")}</div>`
+        <div class="fs-text">${esc(a.was)}${abN ? ` <span style="color:var(--ink2)">· Abschnitt: ${esc(abN)}</span>` : ""}</div>
+      </button>`;
+    }).join("")}</div>`
     : `<div class="empty"><p>Keine offenen Anforderungen.<br>Nachgeforderte Kräfte hier verfolgen: angefordert → alarmiert → eingetroffen.</p></div>`;
     return `${seg}
       <button class="btn btn-primary btn-block" id="btnAddAf" style="margin-bottom:16px">＋&nbsp; Kräfte nachfordern</button>
@@ -1337,7 +1340,7 @@ function wireKraefte(){
 }
 
 /* ---------------- Editor: Einheit ---------------- */
-function openEditor(id){
+function openEditor(id, prefill){
   if(id){
     const u = state.einheiten.find(x => x.id === id);
     if(!u) return;
@@ -1345,7 +1348,7 @@ function openEditor(id){
     if(editing.unit.csa == null) editing.unit.csa = 0;
   }else{
     editing = { unit: { id:uid(), org:"FW", name:pfx("FW"), kennung:"", f:0, u:1, m:8, agt:0, csa:0,
-      ankunft:new Date().toISOString(), abgerueckt:false, abschnitt:"" }, isNew:true };
+      ankunft:new Date().toISOString(), abgerueckt:false, abschnitt:"", ...(prefill||{}) }, isNew:true };
   }
   renderSheet();
 }
@@ -1553,6 +1556,13 @@ function openAfEditor(id){
     <div class="sheet-body">
       <div class="field"><label for="af-was">Was wird angefordert?</label>
         <input id="af-was" value="${esc(a.was)}" placeholder="z. B. Löschzug FF Nachbarort, DLK 23/12, 2 RTW" autocomplete="off"></div>
+      ${state.abschnitte.length ? `
+      <div class="field"><label for="af-ab">Vorgesehener Einsatzabschnitt</label>
+        <select id="af-ab">
+          <option value="">– kein / offen –</option>
+          ${state.abschnitte.map(ab => `<option value="${esc(ab.id)}" ${a.abschnitt===ab.id?"selected":""}>${esc(ab.name)}</option>`).join("")}
+        </select>
+        <p class="hint">Schon beim Anfordern wählbar – beim Eintreffen noch änderbar.</p></div>` : ""}
       <div class="field"><label>Status</label>
         <div style="margin-bottom:10px"><span class="chip chip-st-${esc(a.status)}">${esc(a.status)}</span></div>
         ${nextBtn}
@@ -1572,10 +1582,20 @@ function openAfEditor(id){
     if(a.status === "angefordert"){ a.status = "alarmiert"; a.alarmiert = new Date().toISOString(); }
     else if(a.status === "alarmiert"){ a.status = "eingetroffen"; a.eingetroffen = new Date().toISOString(); }
     a.was = $("#af-was").value.trim();
+    const abSel = $("#af-ab"); if(abSel) a.abschnitt = abSel.value;
     const idx = state.anforderungen.findIndex(x => x.id === a.id);
     if(idx >= 0) state.anforderungen[idx] = {...a}; else state.anforderungen.push({...a});
     markChange();
-    openAfEditor(a.id); // Sheet mit neuem Status neu aufbauen
+    if(a.status === "eingetroffen"){
+      // Nach dem Eintreffen anbieten, die Besatzung dieser Einheit zu erfassen (Name vorbefüllt)
+      closeEditor();
+      modalConfirm(`„${a.was}" ist eingetroffen. Kräfte dieser Einheit jetzt erfassen?`, "Erfassen", "Später").then(ok => {
+        if(ok) openEditor(null, { name: a.was, abschnitt: a.abschnitt || "" });
+        else render();
+      });
+    }else{
+      openAfEditor(a.id); // Sheet mit neuem Status neu aufbauen
+    }
   });
   const del = $("#af-del");
   if(del) del.addEventListener("click", () => {
@@ -1586,6 +1606,7 @@ function openAfEditor(id){
   });
   $("#af-save").addEventListener("click", () => {
     a.was = $("#af-was").value.trim();
+    const abSel = $("#af-ab"); if(abSel) a.abschnitt = abSel.value;
     if(!a.was){ $("#af-was").focus(); return; }
     const idx = state.anforderungen.findIndex(x => x.id === a.id);
     if(idx >= 0) state.anforderungen[idx] = a; else state.anforderungen.push(a);
@@ -2904,6 +2925,7 @@ function openBesprEditor(id){
 let monAbPage = 0;                 // aktuelle Abschnitts-Seite (3 Kacheln je Seite)
 let monAbLast = Date.now();        // Zeitpunkt des letzten Seitenwechsels
 let monAbPaused = false;           // Rotation per Play/Pause anhaltbar
+let monFull = false;               // Monitor-Vollbild: nur der graue Monitor, ohne App-Menü
 function rotateAbschnitte(){
   if(monAbPaused) return;
   const pages = monAbPagesCount();
@@ -3033,13 +3055,9 @@ function renderMonitor(){
 
   return `
   <div class="mon-root">
-    <div class="mon-toolbar">
-      <button class="btn btn-ghost" id="btnMonHide" style="margin-right:8px">Kacheln ein-/ausblenden</button>
-      <button class="btn btn-ghost" id="btnFull">Vollbild</button>
-    </div>
     <div class="monitor">
       <div class="mon-head">
-        <div>
+        <div class="mon-title">
           <div class="eyebrow"><span style="color:var(--accent)">ELW</span><span style="color:var(--ink)">IS</span> · ${esc(state.config.ugName)} · Kräfteübersicht</div>
           <h2>${esc(e.stichwort) || "Kein Einsatz angelegt"}</h2>
           <div class="ort">${esc(e.ort)}${e.leiter ? " · EL: " + esc(e.leiter) : ""}</div>
@@ -3048,7 +3066,12 @@ function renderMonitor(){
           <div class="mon-clock mono" id="monClock">--:--</div>
           <div class="mon-dauer" id="monDauer"></div>
         </div>
+        <div class="mon-headctrl">
+          <button class="btn btn-ghost" id="btnMonHide">Kacheln</button>
+          <button class="btn btn-ghost" id="btnFull">${monFull ? "✕ Beenden" : "Vollbild"}</button>
+        </div>
       </div>
+      ${abPager ? `<div class="mon-abctrl">${abPager}</div>` : ""}
       <div class="kpis-compact">
         <div class="kpic accent"><span class="k">Gesamtstärke</span><span class="v mono">${s.f+s.u+s.m}</span><span class="s mono">${s.f}/${s.u}/${s.m}</span></div>
         <div class="kpic"><span class="k">AGT</span><span class="v mono">${s.agt}</span></div>
@@ -3062,23 +3085,35 @@ function renderMonitor(){
       ${isLagePage ? (() => {
         const nums = state.lage.items.filter(i => i.type === "num").sort((a,b) => a.num - b.num);
         const gefahren = state.lage.items.filter(i => i.type === "gefahr").sort((a,b) => (a.num||0)-(b.num||0));
+        const forms = state.lage.items.filter(i => i.type === "form");
+        const lines = state.lage.items.filter(i => i.type === "line");
         const cars = state.lage.items.filter(i => i.type === "car").sort((a,b) => (a.num||0)-(b.num||0));
-        const legRows = [
-          ...nums.map(i => `<div class="fkrow"><span class="lg-leg-num">${esc(i.num)}</span><span class="fk-n">${esc(i.text||"")}</span></div>`),
-          ...gefahren.map(i => `<div class="fkrow"><span class="lg-leg-num tri">${esc(i.num)}</span><span class="fk-n">${esc(i.text||"")}</span></div>`),
-          ...cars.map(i => {
-            const u = state.einheiten.find(x => x.id === i.unitId);
-            const color = u ? `var(${(ORGS[u.org]||ORGS.SON).cssVar})` : "var(--ink3)";
-            return `<div class="fkrow"><span class="lg-car" style="color:${color};width:36px;height:28px">${LG_CAR_SVG}<b class="car-num">${esc(i.num||"?")}</b></span><span class="fk-n">${u ? esc(fullName(u)) : "nicht zugeordnet"}</span></div>`;
-          }),
+        const sc = i => `var(--${LG_SHAPE_COLORS.includes(i.color) ? i.color : "fw"})`;
+        // Legende wie im Präsentationsmodus (read-only): Marker/Gefahren links, Fahrzeuge rechts
+        const markerItems = [
+          ...nums.map(i => `<div class="lg-leg-item"><span class="lg-leg-num">${esc(i.num)}</span><span class="lg-leg-text">${esc(i.text||"")}</span></div>`),
+          ...forms.map(f => `<div class="lg-leg-item"><span class="lg-leg-badge"><span class="lg-mini-form ${f.shape||"rect"}" style="--sc:${sc(f)}"></span></span><span class="lg-leg-text">${esc(f.text||"")}</span></div>`),
+          ...lines.map(l => `<div class="lg-leg-item"><span class="lg-leg-badge"><span class="lg-mini-line" style="--sc:${sc(l)}"></span></span><span class="lg-leg-text">${esc(l.text||"")}</span></div>`),
         ].join("");
+        const gefItems = gefahren.map(i => `<div class="lg-leg-item"><span class="lg-leg-num tri">${esc(i.num)}</span><span class="lg-leg-text">${esc(i.text||"")}</span></div>`).join("");
+        const carItems = cars.map(i => {
+          const u = state.einheiten.find(x => x.id === i.unitId);
+          const color = u ? `var(${(ORGS[u.org]||ORGS.SON).cssVar})` : "var(--ink3)";
+          return `<div class="lg-leg-car"><span class="lg-car" style="color:${color}">${LG_CAR_SVG}<b class="car-num">${esc(i.num||"?")}</b></span><span class="lg-leg-carname">${u ? esc(fullName(u)) : "nicht zugeordnet"}</span></div>`;
+        }).join("");
+        const legendLeft = `<div class="lg-legend"><div class="lg-leg-body">
+          <div class="lg-leg-sec"><h3>Marker</h3>${markerItems || `<p class="hint" style="margin:0">Noch keine Marker.</p>`}</div>
+          ${gefItems ? `<div class="lg-leg-sec"><h3>Gefahren</h3>${gefItems}</div>` : ""}
+        </div></div>`;
+        const legendRight = carItems ? `<div class="lg-legend"><div class="lg-leg-body"><div class="lg-leg-sec"><h3>Fahrzeuge</h3>${carItems}</div></div></div>` : "";
+        const cols = carItems ? "260px minmax(0,1fr) 260px" : "260px minmax(0,1fr)";
         return `
       <div class="mon-grid">
-        <div class="panel" style="grid-column:1/-1;display:grid;grid-template-columns:2.6fr 1fr;gap:16px">
-          <div>
+        <div class="panel mon-lg-panel" style="grid-column:1/-1;display:grid;grid-template-columns:${cols};gap:16px;align-items:start">
+          ${legendLeft}
+          <div style="min-width:0">
             <div class="panel-head"><h3>Lagekarte</h3>
-              <button class="ab-jump" id="monLgEdit" style="margin-left:10px">Karte bearbeiten</button>
-              ${abPager}</div>
+              <button class="ab-jump" id="monLgEdit" style="margin-left:10px">Karte bearbeiten</button></div>
             ${state.lage.mode === "karte" ? `
             <div class="lg-wrap" style="overflow:hidden"><div id="lgMonMap" style="width:100%;height:100%"></div></div>` : `
             <div class="lg-wrap" style="pointer-events:none;overflow:hidden">
@@ -3088,17 +3123,14 @@ function renderMonitor(){
               </div>
             </div>`}
           </div>
-          <div><h3 style="font-size:.72rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--ink3);margin:0 0 10px">Legende</h3>
-            ${legRows || `<p class="hint">Noch keine Symbole auf der Karte.</p>`}
-          </div>
+          ${legendRight}
         </div>
       </div>`;
       })() : isSkizzePage ? `
       <div class="mon-grid" style="grid-template-columns:1fr">
         <div class="panel">
           <div class="panel-head"><h3>Funkskizze</h3>
-            <button class="ab-jump" id="monSkEdit" style="margin-left:10px">Öffnen</button>
-            ${abPager}</div>
+            <button class="ab-jump" id="monSkEdit" style="margin-left:10px">Öffnen</button></div>
           ${renderFunkskizze()}
         </div>
       </div>` : (() => {
@@ -3118,7 +3150,7 @@ function renderMonitor(){
       <div class="mon-grid" ${leftPanels ? "" : `style="grid-template-columns:1fr"`}>
         ${leftPanels ? `<div class="mon-col">${leftPanels}</div>` : ""}
         <div class="panel">
-          <div class="panel-head"><h3>Einsatzabschnitte</h3>${abPager}</div>
+          <div class="panel-head"><h3>Einsatzabschnitte</h3></div>
           <div class="ab-grid">${abCards}</div>
         </div>
       </div>`;
@@ -3241,13 +3273,17 @@ function wireMonitor(){
   if(document.getElementById("lgMonMap")) lgMonMapSetup();   // Online-Karte auf dem Monitor
   const skEdit = $("#monSkEdit");
   if(skEdit) skEdit.addEventListener("click", () => { state.view = "skizze"; save(); render(); });
-  // Vollbild aufs ganze Dokument – überlebt so die Neuzeichnung bei der 30-s-Rotation
+  // Vollbild: nur der graue Monitor (App-Menü/Topbar aus) + Browser-Vollbild.
+  // Body-Klasse übersteht die 30-s-Rotation (wird in render() nachgeführt).
   $("#btnFull").addEventListener("click", () => {
-    if(document.fullscreenElement) document.exitFullscreen();
-    else{
+    monFull = !monFull;
+    if(monFull){
       const rf = document.documentElement.requestFullscreen;
       if(rf) rf.call(document.documentElement).catch(() => {});
+    }else if(document.fullscreenElement){
+      document.exitFullscreen();
     }
+    render();
   });
   tickClock();
 }
@@ -4182,7 +4218,7 @@ function openLgShapeEdit(id){
   const names = { fw:"Rot", thw:"Blau", brk:"Gold", pol:"Grün" };
   $("#sheetHost").innerHTML = `
   <div class="sheet-backdrop" data-close="1"></div>
-  <div class="sheet" role="dialog" aria-modal="true" aria-label="${it.type==="area"?"Fläche":"Linie"} bearbeiten" style="top:auto;max-height:55vh">
+  <div class="sheet" role="dialog" aria-modal="true" aria-label="${it.type==="area"?"Fläche":"Linie"} bearbeiten" style="max-height:55vh">
     <div class="sheet-head">
       <h2>${it.type === "area" ? "Fläche" : "Linie"} bearbeiten</h2>
       <button class="sheet-close" data-close="1" aria-label="Schließen">×</button>
@@ -4240,7 +4276,7 @@ function openLgFormEdit(id){
   const shapes = [ { s:"circle", n:"Kreis" }, { s:"square", n:"Quadrat" }, { s:"rect", n:"Rechteck" } ];
   $("#sheetHost").innerHTML = `
   <div class="sheet-backdrop" data-close="1"></div>
-  <div class="sheet" role="dialog" aria-modal="true" aria-label="Form bearbeiten" style="top:auto;max-height:70vh">
+  <div class="sheet" role="dialog" aria-modal="true" aria-label="Form bearbeiten" style="max-height:70vh">
     <div class="sheet-head"><h2>Form</h2>
       <button class="sheet-close" data-close="1" aria-label="Schließen">×</button></div>
     <div class="sheet-body">
@@ -4301,7 +4337,7 @@ function openLgEdit(id){
         <input id="lg-label" value="${esc(it.label||"")}" autocomplete="off"></div>`;
   $("#sheetHost").innerHTML = `
   <div class="sheet-backdrop" data-close="1"></div>
-  <div class="sheet" role="dialog" aria-modal="true" aria-label="Symbol bearbeiten" style="top:auto;max-height:70vh">
+  <div class="sheet" role="dialog" aria-modal="true" aria-label="Symbol bearbeiten" style="max-height:70vh">
     <div class="sheet-head">
       <h2>${isGef ? `Gefahr ${esc(it.num||"")}` : isNum ? `Marker ${esc(it.num)}` : isCar ? `Fahrzeug ${esc(it.num||"")}` : "Symbol bearbeiten"}</h2>
       <button class="sheet-close" data-close="1" aria-label="Schließen">×</button>
@@ -4390,7 +4426,7 @@ function doPrint(data){
   const showAb = abs.length > 0;
   const s = summen(data.einheiten.filter(u => !u.abgerueckt));
   const sAll = summen(data.einheiten);
-  const units = [...data.einheiten].sort((a,b) => (a.ankunft||"").localeCompare(b.ankunft||""));
+  const units = [...data.einheiten].sort((a,b) => fullName(a).localeCompare(fullName(b), "de"));
   const unitRows = units.map(u => `
     <tr>
       <td class="p-mono">${fmtZeit(u.ankunft)}</td>
@@ -4544,6 +4580,8 @@ function render(){
     state.view = "kraefte";
   }
   renderHeader();
+  // Monitor-Vollbild: App-Menü/Topbar ausblenden, nur wenn der Monitor aktiv ist
+  document.body.classList.toggle("mon-fullscreen", state.view === "monitor" && monFull);
   document.querySelectorAll("nav [data-tab]").forEach(b =>
     b.classList.toggle("active", b.dataset.tab === state.view));
   const main = $("#view");

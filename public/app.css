@@ -338,10 +338,11 @@
   /* ---------- Editor (Sheet) ---------- */
   .sheet-backdrop{position:fixed;inset:0;z-index:40;background:rgba(20,16,14,.45)}
   .sheet{
-    position:fixed;left:50%;transform:translateX(-50%);bottom:0;top:max(24px,4vh);z-index:41;
+    position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:41;
     width:min(760px,100%);
-    background:var(--bg);border-radius:18px 18px 0 0;
-    display:flex;flex-direction:column;box-shadow:0 -6px 40px rgba(0,0,0,.35)}
+    max-height:calc(100vh - 32px);   /* mittig im Fenster, nur so hoch wie der Inhalt (gedeckelt) */
+    background:var(--bg);border-radius:18px;overflow:hidden;
+    display:flex;flex-direction:column;box-shadow:0 10px 50px rgba(0,0,0,.4)}
   .sheet-head{
     display:flex;align-items:center;gap:10px;padding:14px 16px;
     border-bottom:1px solid var(--line);background:var(--surface);border-radius:18px 18px 0 0}
@@ -409,13 +410,17 @@
 
   /* ---------- Einsatzmonitor ---------- */
   .monitor{background:var(--bg);color:var(--ink);border-radius:18px;padding:22px;box-shadow:var(--shadow)}
-  .mon-head{display:flex;align-items:flex-start;gap:16px;flex-wrap:wrap;margin-bottom:12px}
+  /* Kopf: Titel links, Uhr mittig, Steuer-Buttons rechts – in Normal- und Vollbildansicht gleich */
+  .mon-head{position:relative;min-height:60px;margin-bottom:10px}
+  .mon-title{max-width:46%}
   .mon-head .eyebrow{font-size:.7rem;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--accent)}
   .mon-head h2{margin:2px 0 0;font-size:clamp(1.3rem,2.4vw,1.8rem);font-weight:800;line-height:1.15;text-wrap:balance}
   .mon-head .ort{color:var(--ink2);font-size:.95rem}
-  .mon-clockbox{margin-left:auto;text-align:right}
-  .mon-clock{font-size:clamp(1.6rem,3vw,2.2rem);font-weight:800;line-height:1}
-  .mon-dauer{color:var(--ink2);font-size:.82rem;margin-top:3px}
+  .mon-clockbox{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);text-align:center}
+  .mon-clock{font-size:clamp(1.6rem,3vw,2.2rem);font-weight:800;line-height:1;font-variant-numeric:tabular-nums}
+  .mon-dauer{color:var(--ink);font-size:clamp(1.6rem,3vw,2.2rem);font-weight:700;line-height:1;margin-top:4px}
+  .mon-headctrl{position:absolute;right:0;top:0;display:flex;gap:8px}
+  .mon-headctrl .btn{min-height:40px;padding:6px 14px;font-size:.85rem}
   .mon-lb{color:var(--warn);font-size:.82rem;font-weight:650;margin-top:4px}
   .mon-lb strong{color:var(--warn)}
   .mon-dauer strong{color:var(--ink)}
@@ -511,6 +516,14 @@
 
   .mon-toolbar{display:flex;justify-content:flex-end;margin-bottom:10px}
   .mon-toolbar .btn{min-height:44px;padding:8px 16px;font-size:.85rem}
+  /* Monitor-Vollbild: nur der graue Monitor, App-Menü/Topbar aus (Kopf-Layout ist identisch zur Normalansicht) */
+  body.mon-fullscreen header.topbar,
+  body.mon-fullscreen nav.rail{display:none!important}
+  body.mon-fullscreen #app{padding-left:0}
+  body.mon-fullscreen main{max-width:none;margin:0;padding:10px}
+  body.mon-fullscreen .monitor{border-radius:0;min-height:calc(100vh - 20px);padding:16px}
+  /* Rotations-Steuerung oben, rechtsbündig auf gleicher Kante wie die Kopf-Buttons */
+  .mon-abctrl{display:flex;justify-content:flex-end;margin:-12px 0 8px}
 
   /* ---------- Lagekarte (Platzhalter) ---------- */
   .map-placeholder{
