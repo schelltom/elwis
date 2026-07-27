@@ -1007,6 +1007,10 @@
 .kat-x{width:34px;height:34px;flex:none;border-radius:8px;border:1.5px solid var(--line);
   color:var(--accent);font-weight:700;background:var(--surface)}
 .kat-x:active{background:var(--surface2)}
+.ocr-tag{font-size:.66rem;font-weight:700;padding:1px 7px;border-radius:999px;margin-left:6px;white-space:nowrap}
+.ocr-tag.ok{background:color-mix(in oklab,var(--good,#2e7d32) 16%,var(--surface));color:var(--good,#2e7d32)}
+.ocr-tag.neu{background:color-mix(in oklab,var(--warn) 16%,var(--surface));color:var(--warn)}
+.ocr-tag.da{background:var(--surface2);color:var(--ink3)}
 .kat-add{display:flex;gap:8px;margin-top:8px;flex-wrap:wrap}
 .kat-add select{flex:none;width:110px}
 .kat-add input{flex:1;min-width:140px}

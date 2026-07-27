@@ -1337,7 +1337,8 @@ function renderKraefte(){
     <div class="stat"><div class="k">Einheiten</div><div class="v mono">${act.length}</div><div class="s">an E-Stelle</div></div>
   </div>
   ${seg}
-  <button class="btn btn-primary btn-block" id="btnAdd" style="margin-bottom:16px">＋&nbsp; Kraft erfassen</button>
+  <button class="btn btn-primary btn-block" id="btnAdd" style="margin-bottom:${state.ksub==="einheiten"?"8px":"16px"}">＋&nbsp; Kraft erfassen</button>
+  ${state.ksub==="einheiten" ? `<button class="btn btn-ghost btn-block" id="btnOcr" style="margin-bottom:16px">📷&nbsp; Fahrzeuge aus Alarm-Foto einlesen</button>` : ""}
   ${list}`;
 }
 function unitCard(u){
@@ -1376,6 +1377,7 @@ function wireKraefte(){
   document.querySelectorAll("[data-ksub]").forEach(b =>
     b.addEventListener("click", () => { state.ksub = b.dataset.ksub; save(); render(); }));
   const add = $("#btnAdd");   if(add) add.addEventListener("click", () => openEditor(null));
+  const ocr = $("#btnOcr");   if(ocr) ocr.addEventListener("click", openOcrAssistent);
   const addFk = $("#btnAddFk"); if(addFk) addFk.addEventListener("click", () => openFkEditor(null));
   const addAf = $("#btnAddAf"); if(addAf) addAf.addEventListener("click", () => openAfEditor(null));
   document.querySelectorAll("[data-editaf]").forEach(el =>
@@ -1385,6 +1387,130 @@ function wireKraefte(){
     el.addEventListener("click", () => openEditor(el.dataset.edit)));
   document.querySelectorAll("[data-editfk]").forEach(el =>
     el.addEventListener("click", () => openFkEditor(el.dataset.editfk)));
+}
+
+/* ---------------- Offline-OCR: Fahrzeuge aus Alarm-Foto ----------------
+   Tesseract.js läuft lokal (public/vendor/tesseract), ganz ohne Cloud. Aus dem gelesenen
+   Text werden Fahrzeug-Kandidaten (v. a. Funkkennungen) gezogen, gegen den Fahrzeugkatalog
+   gematcht und in einem Fenster gezeigt – einzeln per ✕ entfernbar, dann als Einheiten übernehmen. */
+let tessWorkerP = null;
+function ladeTesseract(){
+  if(window.Tesseract) return Promise.resolve();
+  return new Promise((res, rej) => {
+    const s = document.createElement("script");
+    s.src = "./vendor/tesseract/tesseract.min.js";
+    s.onload = () => res(); s.onerror = () => rej(new Error("Tesseract nicht ladbar"));
+    document.head.appendChild(s);
+  });
+}
+async function tessWorker(){
+  await ladeTesseract();
+  if(!tessWorkerP){
+    tessWorkerP = window.Tesseract.createWorker("deu", 1, {
+      workerPath: "./vendor/tesseract/worker.min.js",
+      corePath:   "./vendor/tesseract/",
+      langPath:   "./vendor/tesseract/",
+      gzip: true,
+      logger: m => { const el = $("#ocr-progress"); if(el && m && m.status) el.textContent =
+        (m.status === "recognizing text" ? "Lese Text" : m.status) + (m.progress ? ` ${Math.round(m.progress*100)} %` : "…"); },
+    });
+  }
+  return tessWorkerP;
+}
+function ocrKandidaten(text){
+  const KW = /\b(HLF|LF|TLF|DLK|DLA|DLAK|RW|GW|ELW|KdoW|MZF|MTW|TSF|SW|FL|Florian|Kater|Dekon)\b/i;
+  const out = [];
+  (text || "").split(/\r?\n/).forEach(line => {
+    const l = line.replace(/\s+/g, " ").trim();
+    if(l.length < 3) return;
+    const km = l.match(/\b(\d{1,2}\/\d{1,2}(?:\/\d{1,3})?)\b/);   // Funkkennung, z. B. 1/40/2
+    const kennung = km ? km[1] : "";
+    if(!kennung && !KW.test(l)) return;
+    out.push({ raw: l, kennung });
+  });
+  return out;
+}
+function ocrKatalogTreffer(kennung){
+  if(!kennung) return null;
+  const norm = s => (s || "").replace(/\s/g, "").toLowerCase();
+  return (state.config.katalog || []).find(k => k.kennung && norm(k.kennung) === norm(kennung)) || null;
+}
+let ocrList = [];   // { raw, kennung, kat }
+function ocrMerge(kandidaten){
+  const norm = s => (s || "").replace(/\s/g, "").toLowerCase();
+  for(const c of kandidaten){
+    const key = c.kennung ? "k:" + norm(c.kennung) : "r:" + norm(c.raw);
+    if(ocrList.some(x => (x.kennung ? "k:" + norm(x.kennung) : "r:" + norm(x.raw)) === key)) continue;
+    c.kat = ocrKatalogTreffer(c.kennung);
+    ocrList.push(c);
+  }
+}
+function openOcrAssistent(){ ocrList = []; renderOcrSheet(); }
+function renderOcrSheet(){
+  const rows = ocrList.map((c, i) => {
+    const kat = c.kat;
+    const label = kat ? katalogLabel(kat) : (c.kennung ? `${c.raw}` : c.raw);
+    const schonDa = kat && state.einheiten.some(u => (u.kennung||"").replace(/\s/g,"") === (kat.kennung||"").replace(/\s/g,"") && !u.abgerueckt);
+    const tag = kat ? (schonDa ? `<span class="ocr-tag da">bereits erfasst</span>` : `<span class="ocr-tag ok">im Katalog</span>`)
+                    : `<span class="ocr-tag neu">neu</span>`;
+    return `<div class="kat-row">
+      <span>${esc(label)} ${tag}</span>
+      <button class="kat-x" data-ocrdel="${i}" aria-label="Entfernen">✕</button>
+    </div>`;
+  }).join("");
+  $("#sheetHost").innerHTML = `
+  <div class="sheet-backdrop" data-close="1"></div>
+  <div class="sheet" role="dialog" aria-modal="true" aria-label="Fahrzeuge aus Alarm-Foto">
+    <div class="sheet-head"><h2>Fahrzeuge aus Alarm-Foto</h2>
+      <button class="sheet-close" data-close="1" aria-label="Schließen">×</button></div>
+    <div class="sheet-body">
+      <div class="field">
+        <label for="ocr-file">Alarm-Foto(s) / Screenshot(s)</label>
+        <input id="ocr-file" type="file" accept="image/*" multiple>
+        <p class="hint">Läuft offline auf dem Gerät. Erkannte Fahrzeuge kannst du unten mit ✕ entfernen. Mehrere Bilder werden zusammengeführt (Doppelte fallen weg). <span id="ocr-progress"></span></p>
+      </div>
+      <div class="field"><label style="margin-bottom:8px">Erkannte Fahrzeuge (${ocrList.length})</label>
+        <div class="kat-list" id="ocr-list">${rows || `<p class="hint" style="margin:6px 4px">Noch nichts eingelesen – Bild wählen.</p>`}</div>
+      </div>
+    </div>
+    <div class="sheet-foot">
+      <button class="btn btn-primary" id="ocr-add" style="flex:1"${ocrList.length ? "" : " disabled"}>Als Einheiten übernehmen (${ocrList.length})</button>
+    </div>
+  </div>`;
+  document.querySelectorAll("[data-close]").forEach(el => el.addEventListener("click", closeEditor));
+  document.querySelectorAll("[data-ocrdel]").forEach(b => b.addEventListener("click", () => {
+    ocrList.splice(Number(b.dataset.ocrdel), 1); renderOcrSheet();
+  }));
+  $("#ocr-file").addEventListener("change", async e => {
+    const files = [...e.target.files]; if(!files.length) return;
+    const prog = $("#ocr-progress");
+    try{
+      const w = await tessWorker();
+      for(let i = 0; i < files.length; i++){
+        if(prog) prog.textContent = `Bild ${i+1}/${files.length} … `;
+        const { data } = await w.recognize(files[i]);
+        ocrMerge(ocrKandidaten(data.text));
+        renderOcrSheet();   // Zwischenstand zeigen (Sheet neu, Fortschritt geht weiter)
+      }
+    }catch(err){
+      if(prog) prog.textContent = "";
+      modalInfo("OCR nicht verfügbar: " + (err.message || err) + "\n(Beim ersten Mal ist einmalig Internet nötig, danach offline.)");
+    }
+  });
+  $("#ocr-add").addEventListener("click", () => {
+    let n = 0;
+    for(const c of ocrList){
+      const k = c.kat;
+      const u = k
+        ? { id:uid(), org:k.org||"FW", name:k.name, kennung:k.kennung, f:k.f|0,u:k.u|0,m:k.m|0,agt:k.agt|0,csa:k.csa|0,
+            ankunft:new Date().toISOString(), abgerueckt:false, abschnitt:"" }
+        : { id:uid(), org:"FW", name:(c.raw||"").replace(c.kennung,"").replace(/^\s*[\d.]+\s*/,"").replace(/\s{2,}/g," ").trim() || c.raw,
+            kennung:c.kennung||"", f:0,u:1,m:0,agt:0,csa:0, ankunft:new Date().toISOString(), abgerueckt:false, abschnitt:"" };
+      state.einheiten.push(u); n++;
+    }
+    markChange(); closeEditor(); render();
+    if(n) modalInfo(`${n} Fahrzeug${n===1?"":"e"} als Einheit übernommen. Stärke/AGT bei Bedarf noch anpassen.`);
+  });
 }
 
 /* ---------------- Editor: Einheit ---------------- */
@@ -3899,10 +4025,16 @@ function lgMonMapSetup(){
   if(!el || typeof L === "undefined") return;
   if(lgMonObj){ try{ lgMonObj.remove(); }catch(e){} lgMonObj = null; }
   const v = state.lage.mapView || { center:[49.6767, 12.1625], zoom:14 };
-  lgMonObj = L.map(el, { zoomControl:false, attributionControl:true, dragging:false,
-    scrollWheelZoom:false, doubleClickZoom:false, boxZoom:false, keyboard:false, touchZoom:false, tap:false }).setView(v.center, v.zoom);
+  // Interaktiv: mit der Maus schieben + zoomen (Scrollrad, Doppelklick, +/–-Buttons)
+  lgMonObj = L.map(el, { zoomControl:true, attributionControl:true }).setView(v.center, v.zoom);
   lgBaseLayer(state.lage.mapLayer).addTo(lgMonObj);
   lgAddItems(L.layerGroup().addTo(lgMonObj), false);
+  lgMonObj.on("moveend zoomend", () => {   // Ausschnitt merken (übersteht die Rotation)
+    if(!lgMonObj) return;
+    const c = lgMonObj.getCenter();
+    state.lage.mapView = { center:[c.lat, c.lng], zoom: lgMonObj.getZoom() };
+    save();
+  });
   setTimeout(() => { if(lgMonObj) lgMonObj.invalidateSize(); }, 60);
 }
 function lgMapRenderLayers(){
