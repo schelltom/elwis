@@ -490,6 +490,23 @@ function abKuerzel(id){
   const m = (state.abschnitte[idx].name || "").match(/\d+/);
   return "EA " + (m ? m[0] : (idx + 1));
 }
+// Flächeninhalt eines Geo-Polygons (nur Kartenmodus, echte lat/lng) in m² – kugelflächen-genau
+function geoFlaecheM2(llpoints){
+  if(!Array.isArray(llpoints) || llpoints.length < 3) return 0;
+  const R = 6378137, rad = d => d * Math.PI / 180;
+  let s = 0;
+  for(let i = 0; i < llpoints.length; i++){
+    const a = llpoints[i], b = llpoints[(i + 1) % llpoints.length];
+    s += (rad(b.lng) - rad(a.lng)) * (2 + Math.sin(rad(a.lat)) + Math.sin(rad(b.lat)));
+  }
+  return Math.abs(s * R * R / 2);
+}
+function flaecheStr(m2){
+  if(!(m2 > 0)) return "";
+  if(m2 >= 1e6) return (m2 / 1e6).toFixed(2).replace(".", ",") + " km²";
+  if(m2 >= 1e4) return (m2 / 1e4).toFixed(2).replace(".", ",") + " ha";
+  return Math.round(m2) + " m²";
+}
 function fmtZeit(iso){
   if(!iso) return "–";
   const d = new Date(iso);
@@ -3441,7 +3458,7 @@ function lgShapesSvg(items, draw){
     const cx = i.labelPos ? i.labelPos.x : i.points.reduce((s,p) => s + p.x, 0) / i.points.length;
     const cy = i.labelPos ? i.labelPos.y : i.points.reduce((s,p) => s + p.y, 0) / i.points.length;
     const col = LG_SHAPE_COLORS.includes(i.color) ? i.color : "fw";
-    return `<span class="lg-ealbl" data-ealbl="${esc(i.id)}" style="left:${cx}%;top:${cy}%;color:var(--${col})">${esc(abKuerzel(i.abschnittId))}<small>${esc(a.name)}</small></span>`;
+    return `<span class="lg-ealbl" data-ealbl="${esc(i.id)}" style="left:${cx}%;top:${cy}%;color:var(--${col})">${esc(abKuerzel(i.abschnittId))}</span>`;
   }).join("");
   return svg + labels;
 }
@@ -3549,18 +3566,40 @@ function renderLagekarte(){
     </div>`;
   }).join("");
   // Legenden-Eintrag: Symbol/Badge antippen → wackelt/blinkt auf der Karte; Text antippen → bearbeiten.
-  const legRow = (badgeHtml, item, ph) => `
+  const legRow = (badgeHtml, item, ph) => {
+    const haupt = item.text ? esc(item.text) : (item.sub ? "" : `<span class="ph">${ph}</span>`);
+    const sub = item.sub ? `${haupt ? " " : ""}<span class="lg-leg-qm">${esc(item.sub)}</span>` : "";
+    return `
     <div class="lg-leg-item">
       <button class="lg-leg-badge" data-lgfind="${esc(item.id)}" aria-label="Auf der Karte zeigen">${badgeHtml}</button>
-      <button class="lg-leg-text" data-lgedit="${esc(item.id)}">${item.text ? esc(item.text) : `<span class="ph">${ph}</span>`}</button>
+      <button class="lg-leg-text" data-lgedit="${esc(item.id)}">${haupt}${sub}</button>
     </div>`;
+  };
   const numBadge  = (cls, n) => `<span class="lg-leg-num ${cls}">${n}</span>`;
+  // Einsatzabschnitt-Flächen zuerst: Badge „EA n" (Klick → Fläche blinkt), Text = Abschnittsname (Klick → bearbeiten)
+  const eaItems = state.lage.items
+    .filter(i => i.type === "area" && i.abschnittId && state.abschnitte.some(a => a.id === i.abschnittId))
+    .map(i => {
+      const a = state.abschnitte.find(x => x.id === i.abschnittId);
+      const fl = flaecheStr(geoFlaecheM2(i.llpoints));   // nur Kartenmodus (echte Koordinaten)
+      // „Abschnitt 1 -" weglassen (steht schon im EA-Badge), nur den Zusatz + Größe zeigen
+      const rest = (a.name || "").replace(/^\s*(einsatz)?abschnitt\s*\d*\s*[-–:]?\s*/i, "").trim();
+      return legRow(`<span class="lg-leg-ea" style="--sc:${shpCol(i)}">${esc(abKuerzel(i.abschnittId))}</span>`,
+        { id:i.id, text: rest, sub: fl }, "Abschnitt");
+    }).join("");
+  // Freie Flächen (ohne Abschnitt) mit Flächennamen + Größe
+  const areaItems = state.lage.items
+    .filter(i => i.type === "area" && !i.abschnittId)
+    .map(i => {
+      const fl = flaecheStr(geoFlaecheM2(i.llpoints));
+      return legRow(`<span class="lg-mini-area" style="--sc:${shpCol(i)}"></span>`, { id:i.id, text:(i.text||"").trim(), sub:fl }, "Fläche beschriften …");
+    }).join("");
   const numItems  = nums.map(i => legRow(numBadge("", esc(i.num)), i, "Beschreibung antippen …")).join("");
   const formItems = forms.map(f => legRow(`<span class="lg-mini-form ${f.shape||"rect"}" style="--sc:${shpCol(f)}"></span>`, f, "Form beschriften …")).join("");
   const lineItems = lines.map(l => legRow(`<span class="lg-mini-line" style="--sc:${shpCol(l)}"></span>`, l, "Linie beschriften …")).join("");
   const secMarker = `
         <div class="lg-leg-sec"><h3>Marker</h3>
-          ${(nums.length || forms.length || lines.length) ? numItems + formItems + lineItems
+          ${(eaItems || areaItems || nums.length || forms.length || lines.length) ? eaItems + areaItems + numItems + formItems + lineItems
           : `<p class="hint" style="margin:0">Noch keine Marker. Werkzeug wählen und auf die Karte tippen.</p>`}
         </div>`;
   const secGefahr = gefahren.length ? `
@@ -3813,7 +3852,7 @@ function lgAddItems(layer, interactive, items){
           const pos = i.labelLL ? [i.labelLL.lat, i.labelLL.lng] : shp.getBounds().getCenter();
           const lcol = LG_SHAPE_COLORS.includes(i.color) ? i.color : "fw";
           const lm = L.marker(pos, { draggable:interactive, interactive,
-            icon: lgDivIcon(`<span class="lg-ealbl" style="position:static;transform:none;color:var(--${lcol})">${esc(abKuerzel(i.abschnittId))}<small>${esc(a.name)}</small></span>`) });
+            icon: lgDivIcon(`<span class="lg-ealbl" style="position:static;transform:none;color:var(--${lcol})">${esc(abKuerzel(i.abschnittId))}</span>`) });
           if(interactive) lm.on("dragend", () => { const p = lm.getLatLng(); i.labelLL = { lat:p.lat, lng:p.lng }; markChange(); });
           lm.addTo(layer);
         }
@@ -4271,6 +4310,9 @@ function openLgShapeEdit(id){
       </div>
       <div class="field"><label for="sh-text">Beschriftung <span style="text-transform:none;font-weight:500">(erscheint in der Legende)</span></label>
         <input id="sh-text" value="${esc(it.text||"")}" placeholder="z. B. Schlauchleitung B, Absperrung" autocomplete="off"></div>
+      ${it.type === "area" && geoFlaecheM2(it.llpoints) > 0 ? `
+      <div class="field"><label>Flächeninhalt</label>
+        <div class="mono" style="font-size:1.1rem;font-weight:800">${flaecheStr(geoFlaecheM2(it.llpoints))}</div></div>` : ""}
       ${it.type === "area" ? `
       <div class="field"><label for="sh-abschnitt">Einsatzabschnitt</label>
         <select id="sh-abschnitt">
