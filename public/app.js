@@ -3382,6 +3382,10 @@ function symFlames(n){
 // Taktisches Zeichen „Bereitstellungsraum" (Quelle: Wikimedia Commons, T. Schuff, CC BY-SA 3.0):
 // gelbe Scheibe mit schwarzem Rand + oben offener „Behälter".
 const SYM_BEREITSTELLUNG = `<svg viewBox="0 0 601 599" aria-hidden="true"><circle cx="300.5" cy="299.3" r="300" fill="#1a1a1a"/><circle cx="300.5" cy="299.3" r="270" fill="#ffd400"/><path d="M489.8 438.5 L110.2 438.5 L110.2 158.9 C110.2 158.9 201.3 216.8 296.2 216.8 C391.1 216.8 489.8 158.9 489.8 158.9 Z" fill="none" stroke="#1a1a1a" stroke-width="22"/></svg>`;
+// Weitere taktische Zeichen (DV 102) als SVG – originalgetreu nachgebaut
+const SYM_OEL = `<svg viewBox="0 0 120 84" aria-hidden="true"><rect x="5" y="7" width="110" height="70" rx="4" fill="#F4C21A" stroke="#1A1A1A" stroke-width="6"/><text x="60" y="57" font-family="Arial,Helvetica,sans-serif" font-weight="800" font-size="40" text-anchor="middle" fill="#1A1A1A">ÖEL</text></svg>`;
+const SYM_VERPFLEGUNG = `<svg viewBox="0 0 100 100" aria-hidden="true"><path d="M50 50 L12 28 A44 44 0 1 1 12 72 Z" fill="#F4C21A" stroke="#1A1A1A" stroke-width="5" stroke-linejoin="round"/></svg>`;
+const SYM_SAMMELSTELLE = `<svg viewBox="0 0 100 100" aria-hidden="true"><circle cx="50" cy="50" r="44" fill="#F7F3EA" stroke="#1A1A1A" stroke-width="5"/><g stroke="#1A1A1A" stroke-width="5" fill="none" stroke-linecap="round" stroke-linejoin="round"><line x1="20" y1="50" x2="60" y2="50"/><polyline points="52,43 62,50 52,57"/></g><circle cx="72" cy="50" r="7" fill="none" stroke="#1A1A1A" stroke-width="5"/></svg>`;
 const SYM_KATALOG = [
   { key:"brand1",   name:"Kleinbrand / Entstehungsbrand", color:"var(--fw)",  flames:1 },
   { key:"brand2",   name:"Mittelbrand / fortgeschrittener Brand", color:"var(--fw)", flames:2 },
@@ -3402,6 +3406,9 @@ const SYM_KATALOG = [
   { key:"hlp",      name:"Hubschrauberlandeplatz",        color:"var(--thw)", kurz:"HLP" },
   { key:"dekon",    name:"Dekon-Platz",                   color:"var(--brk)", kurz:"DEK" },
   { key:"bereitstellung", name:"Bereitstellungsraum",     color:"var(--warn)", svg:SYM_BEREITSTELLUNG },
+  { key:"oel",      name:"Örtliche Einsatzleitung (ÖEL)", color:"var(--warn)", svg:SYM_OEL },
+  { key:"verpflegung", name:"Versorgungsstelle / Verpflegung", color:"var(--warn)", svg:SYM_VERPFLEGUNG },
+  { key:"as-sammel", name:"Atemschutzsammelstelle",       color:"var(--fw)",  svg:SYM_SAMMELSTELLE },
 ];
 function symTile(s, small){
   if(s.svg) return `<span class="lg-symsvg"${small ? ' style="transform:scale(.85)"' : ""}>${s.svg}</span>`;
