@@ -3329,8 +3329,11 @@ function renderMonitor(){
   const gesKraefte = state.einheiten.length + state.fuehrung.length;
   const byOrg = Object.keys(ORGS).map(key => {
     const units = act.filter(u => u.org === key);
-    return { key, ...ORGS[key], units, sum: summen(units) };
-  }).filter(o => o.units.length);
+    const fks = state.fuehrung.filter(f => (f.org || "SON") === key);
+    const sum = summen(units);
+    sum.f += fks.length;   // Führungskräfte der Organisation in die erste Spalte (Führer)
+    return { key, ...ORGS[key], units, fks, sum };
+  }).filter(o => o.units.length || o.fks.length);
   const maxG = Math.max(1, ...byOrg.map(o => o.sum.f+o.sum.u+o.sum.m));
   const orgRows = byOrg.map(o => {
     const g = o.sum.f+o.sum.u+o.sum.m;
@@ -4856,8 +4859,10 @@ function openLgEdit(id){
 /* ---------------- Druck: Einsatzbericht ---------------- */
 function printMapHtml(lage){
   if(lage.mode === "karte"){
-    return `<p style="font-size:10pt">Lagekarte im Online-Kartenmodus – für den Ausdruck bitte am Gerät
-      einen Screenshot der Karte erstellen und als Bild-Hintergrund einfügen. Die Legende steht unten.</p>`;
+    return `<p style="font-size:10pt">Lagekarte im Online-Luftbild-Modus – Kartenkacheln lassen sich offline nicht
+      in den Ausdruck rastern. Für ein echtes Kartenbild in der Doku: am Gerät einen Screenshot der Karte machen
+      und in der Lagekarte per Einfügen (Strg&nbsp;+&nbsp;V) als Bild-Hintergrund setzen – dann erscheint die Karte
+      hier als Bild. Die taktische Legende steht unten.</p>`;
   }
   return `<div class="p-map">
     <div class="lg-canvas ${lage.bg ? "hasbg" : ""}" ${lage.bg ? `style="background-image:url('${lage.bg}')"` : ""}>
@@ -4908,6 +4913,11 @@ function doPrint(data){
   const showAb = abs.length > 0;
   const s = summen(data.einheiten.filter(u => !u.abgerueckt));
   const sAll = summen(data.einheiten);
+  const fkN = (data.fuehrung||[]).length;
+  // Gesamtzahl der Kräfte (Personen): Einheiten-Stärke + Führungskräfte (je 1 Person)
+  const persGesamt = sAll.f + sAll.u + sAll.m + fkN;
+  const persVorOrt = s.f + s.u + s.m + fkN;
+  const staerkeGesamt = `${s.f+fkN}/${s.u}/${s.m}/${s.f+s.u+s.m+fkN}`;
   const units = [...data.einheiten].sort((a,b) => fullName(a).localeCompare(fullName(b), "de"));
   const unitRows = units.map(u => `
     <tr>
@@ -4942,6 +4952,7 @@ function doPrint(data){
       <tr><td>Alarmzeit</td><td>${e.beginn ? fmtDatum(e.beginn)+" "+fmtZeit(e.beginn)+" Uhr" : "–"}</td></tr>
       <tr><td>Einsatzende</td><td>${pEnde ? fmtDatum(pEnde)+" "+fmtZeit(pEnde)+" Uhr" : "– (Einsatz läuft)"}</td></tr>
       <tr><td>Einsatzdauer</td><td>${dauerStr(e.beginn, pEnde) || "–"}</td></tr>
+      <tr><td>Kräfte gesamt</td><td><strong>${persGesamt} Einsatzkräfte</strong> · ${data.einheiten.length} Einheiten, ${fkN} Führungskräfte · Stärke <span class="p-mono">${sAll.f+fkN}/${sAll.u}/${sAll.m}/${persGesamt}</span> · AGT ${sAll.agt}, CSA ${sAll.csa}${pEnde ? "" : ` · aktuell vor Ort: <span class="p-mono">${persVorOrt}</span>`}</td></tr>
       <tr><td>Einsatzleiter</td><td>${esc(e.leiter) || "–"}</td></tr>
       ${(!pEnde && e.lagebespr) ? `<tr><td>Nächste Lagebesprechung</td><td>${esc(e.lagebespr)} Uhr</td></tr>` : ""}
       ${gruppeStr(e.ilsGruppe) ? `<tr><td>Leitstelle</td><td>${esc(state.config.ilsName||"Leitstelle")} · ${esc(gruppeStr(e.ilsGruppe))}</td></tr>` : ""}
