@@ -281,6 +281,8 @@ const TABS = [
     icon:'<rect x="8.5" y="3" width="7" height="5" rx="1"/><rect x="2.5" y="16" width="7" height="5" rx="1"/><rect x="14.5" y="16" width="7" height="5" rx="1"/><path d="M12 8v4M6 16v-4h12v4"/>' },
   { id:"bespr",    label:"Besprechung",
     icon:'<path d="M4 4.5h16a1 1 0 0 1 1 1V15a1 1 0 0 1-1 1h-9l-5 4v-4H4a1 1 0 0 1-1-1V5.5a1 1 0 0 1 1-1z"/><path d="M7.5 8.5h9M7.5 12h6"/>' },
+  { id:"fotodoku", label:"Foto-Doku",
+    icon:'<rect x="3" y="6.5" width="18" height="13" rx="2"/><path d="M8.5 6.5 10 4h4l1.5 2.5"/><circle cx="12" cy="13" r="3.2"/>' },
   { id:"listen",   label:"Checklisten",
     icon:'<path d="M4 6.5 5.5 8 8 5M4 12.5 5.5 14 8 11M4 18.5 5.5 20 8 17"/><path d="M11 6.5h9M11 12.5h9M11 18.5h9"/>' },
   { id:"atemschutz",label:"Atemschutz",
@@ -943,15 +945,6 @@ function renderEinsatz(){
     <button class="btn btn-ghost btn-block" id="abAdd" style="margin-top:${abRows?"12px":"0"}">＋&nbsp; Abschnitt anlegen</button>
   </div>
   <div class="card">
-    <h2>Fotodokumentation</h2>
-    ${state.fotos.length ? `<div class="foto-grid">
-      ${state.fotos.map(f => `<img src="${f.data}" alt="Einsatzfoto ${fmtZeit(f.zeit)}" data-foto="${esc(f.id)}">`).join("")}
-    </div>` : ""}
-    <button class="btn btn-ghost btn-block" id="fotoAdd">＋&nbsp; Foto aufnehmen / auswählen</button>
-    <input type="file" id="fotoFile" accept="image/*" capture="environment" style="display:none">
-    <p class="hint">Fotos werden mit Zeitstempel am Einsatz gespeichert (Schadenslage, Zwischenstände, Beweissicherung). Antippen für Notiz oder Löschen.</p>
-  </div>
-  <div class="card">
     <h2>Einsatzende</h2>
     <button class="btn btn-ghost btn-block" id="btnPrintNow" style="margin-bottom:10px">Bericht drucken (Zwischenstand)</button>
     <button class="btn btn-primary btn-block" id="btnEnde">Einsatz beenden &amp; archivieren</button>
@@ -997,18 +990,6 @@ function wireEinsatz(){
     if(file) importEinsatz(file);
     e.target.value = "";
   });
-  $("#fotoAdd").addEventListener("click", () => $("#fotoFile").click());
-  $("#fotoFile").addEventListener("change", e => {
-    const file = e.target.files[0];
-    if(!file) return;
-    resizeImage(file, 1280, data => {
-      state.fotos.push({ id:uid(), zeit:new Date().toISOString(), data, notiz:"" });
-      try{ markChange(); }catch(err){ modalInfo("Speicher voll – bitte alte Fotos löschen."); state.fotos.pop(); }
-      render();
-    });
-  });
-  document.querySelectorAll("[data-foto]").forEach(img =>
-    img.addEventListener("click", () => openFotoSheet(img.dataset.foto)));
   $("#btnDemo").addEventListener("click", loadDemo);
   $("#btnReset").addEventListener("click", () => {
     modalConfirm("Aktuellen Einsatz wirklich verwerfen? Alle erfassten Kräfte gehen verloren (Archiv bleibt).").then(ok => { if(!ok) return;
@@ -1103,8 +1084,12 @@ function openFotoSheet(id){
     </div>
     <div class="sheet-body">
       <img src="${f.data}" alt="Einsatzfoto" style="width:100%;border-radius:12px;margin-bottom:14px">
-      <div class="field"><label for="foto-notiz">Notiz</label>
-        <input id="foto-notiz" value="${esc(f.notiz||"")}" placeholder="z. B. Giebelwand Ostseite, Riss sichtbar" autocomplete="off"></div>
+      <div class="field"><label for="foto-notiz">Kommentar</label>
+        <div class="dictate-wrap">
+          <textarea id="foto-notiz" rows="3" placeholder="z. B. Giebelwand Ostseite, Riss sichtbar">${esc(f.notiz||"")}</textarea>
+          <button type="button" class="dictate-btn" id="foto-mic" aria-label="Diktieren" title="Kommentar sprechen">🎤</button>
+        </div>
+        <p class="hint" style="margin:.4rem 0 0">Tippen oder auf 🎤 tippen und sprechen.</p></div>
     </div>
     <div class="sheet-foot">
       <button class="btn btn-danger-ghost" id="foto-del">Löschen</button>
@@ -1112,6 +1097,7 @@ function openFotoSheet(id){
     </div>
   </div>`;
   document.querySelectorAll("[data-close]").forEach(el => el.addEventListener("click", closeEditor));
+  attachDictation($("#foto-mic"), $("#foto-notiz"));
   $("#foto-del").addEventListener("click", () => {
     modalConfirm("Dieses Foto wirklich löschen?").then(ok => { if(!ok) return;
       state.fotos = state.fotos.filter(x => x.id !== f.id);
@@ -1122,6 +1108,90 @@ function openFotoSheet(id){
     f.notiz = $("#foto-notiz").value.trim();
     markChange(); closeEditor(); render();
   });
+}
+/* ---------------- Ansicht: Foto-Dokumentation (eigener Menüpunkt, 10-Zoll-tauglich) ---------------- */
+function renderFotodoku(){
+  const fotos = [...state.fotos].sort((a, b) => (b.zeit||"").localeCompare(a.zeit||""));
+  const grid = fotos.length ? `<div class="foto-doku-grid">
+    ${fotos.map(f => `<figure class="foto-doku-item" data-foto="${esc(f.id)}">
+      <img src="${f.data}" alt="Einsatzfoto ${fmtZeit(f.zeit)}">
+      <figcaption>
+        <span class="foto-zeit mono">${fmtDatum(f.zeit)} · ${fmtZeit(f.zeit)} Uhr</span>
+        <span class="foto-note ${f.notiz ? "" : "leer"}">${f.notiz ? esc(f.notiz) : "Kommentar hinzufügen …"}</span>
+      </figcaption>
+    </figure>`).join("")}
+  </div>` : `<div class="empty"><p>Noch keine Fotos.<br>Schadenslage, Zwischenstände und Beweissicherung direkt am Einsatz festhalten – jeweils mit Zeitstempel und Kommentar.</p></div>`;
+  return `
+  <div class="card">
+    <h2>Foto-Dokumentation${fotos.length ? ` <span class="mono" style="color:var(--ink3);font-weight:600">(${fotos.length})</span>` : ""}</h2>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+      <button class="btn btn-primary" id="fotoCam">📷&nbsp; Kamera öffnen</button>
+      <button class="btn btn-ghost" id="fotoFileBtn">Aus Datei wählen</button>
+      <input type="file" id="fotoFile" accept="image/*" capture="environment" multiple style="display:none">
+    </div>
+    <p class="hint" style="margin-top:0">Kamera bleibt für mehrere Aufnahmen geöffnet. Foto antippen für Kommentar (Tastatur <em>oder Sprache 🎤</em>) oder zum Löschen.</p>
+    ${grid}
+  </div>`;
+}
+function fotoSpeichern(file, onDone){
+  resizeImage(file, 1600, data => {
+    state.fotos.push({ id:uid(), zeit:new Date().toISOString(), data, notiz:"" });
+    try{ markChange(); }catch(err){ state.fotos.pop(); modalInfo("Speicher voll – bitte alte Fotos löschen."); }
+    if(onDone) onDone();
+  });
+}
+// Live-Kamera für die Foto-Doku – bleibt offen, mehrere Aufnahmen nacheinander
+async function fotoDokuKamera(){
+  const mm = navigator.mediaDevices;
+  if(!mm || !mm.getUserMedia || !window.isSecureContext){ $("#fotoFile").click(); return; }  // http-LAN → native Kamera
+  let stream;
+  try{ stream = await mm.getUserMedia({ video:{ facingMode:{ ideal:"environment" },
+    width:{ ideal:1920 }, height:{ ideal:1080 } }, audio:false }); }
+  catch(e){ $("#fotoFile").click(); return; }
+  const host = document.createElement("div");
+  host.className = "cam-overlay";
+  host.innerHTML = `
+    <video autoplay playsinline muted></video>
+    <div class="cam-count" data-cam="count"></div>
+    <div class="cam-bar">
+      <button class="btn btn-ghost" data-cam="x">Fertig</button>
+      <button class="btn btn-primary" data-cam="shot" disabled>Kamera startet …</button>
+    </div>`;
+  document.body.appendChild(host);
+  const video = host.querySelector("video");
+  const shotBtn = host.querySelector('[data-cam="shot"]');
+  const countEl = host.querySelector('[data-cam="count"]');
+  let n = 0;
+  video.srcObject = stream;
+  try{ await video.play(); }catch(e){}
+  const bereit = () => { if(video.videoWidth > 0){ shotBtn.disabled = false; shotBtn.textContent = "📷 Auslösen"; } };
+  video.addEventListener("loadedmetadata", bereit);
+  video.addEventListener("playing", bereit);
+  setTimeout(bereit, 800);
+  const stop = () => { try{ stream.getTracks().forEach(t => t.stop()); }catch(e){} host.remove(); render(); };
+  host.querySelector('[data-cam="x"]').addEventListener("click", stop);
+  shotBtn.addEventListener("click", () => {
+    if(!video.videoWidth) return;
+    const c = document.createElement("canvas");
+    c.width = video.videoWidth; c.height = video.videoHeight;
+    c.getContext("2d").drawImage(video, 0, 0, c.width, c.height);
+    state.fotos.push({ id:uid(), zeit:new Date().toISOString(), data:c.toDataURL("image/jpeg", .72), notiz:"" });
+    try{ markChange(); }catch(err){ state.fotos.pop(); modalInfo("Speicher voll – bitte alte Fotos löschen."); return; }
+    n++; countEl.textContent = n + (n === 1 ? " Foto" : " Fotos") + " aufgenommen";
+    shotBtn.classList.add("flash"); setTimeout(() => shotBtn.classList.remove("flash"), 160);
+  });
+}
+function wireFotodoku(){
+  $("#fotoCam").addEventListener("click", fotoDokuKamera);
+  $("#fotoFileBtn").addEventListener("click", () => $("#fotoFile").click());
+  $("#fotoFile").addEventListener("change", e => {
+    const files = [...e.target.files]; e.target.value = "";
+    let i = 0;
+    const next = () => { if(i >= files.length){ render(); return; } fotoSpeichern(files[i++], next); };
+    next();
+  });
+  document.querySelectorAll("[data-foto]").forEach(el =>
+    el.addEventListener("click", () => openFotoSheet(el.dataset.foto)));
 }
 function baueArchivEintrag(){
   return {
@@ -1335,7 +1405,7 @@ function renderKraefte(){
   }
   return `
   <div class="statstrip" role="status" aria-label="Summen">
-    <div class="stat"><div class="k">Gesamtstärke</div><div class="v mono">${s.f+s.u+s.m}</div><div class="s mono">${s.f}/${s.u}/${s.m}</div></div>
+    <div class="stat"><div class="k">Gesamtstärke</div><div class="v mono">${s.f+s.u+s.m+state.fuehrung.length}</div><div class="s mono">${s.f+state.fuehrung.length}/${s.u}/${s.m}</div></div>
     <div class="stat"><div class="k">AGT / CSA</div><div class="v mono">${s.agt} / ${s.csa}</div><div class="s">Atemschutz</div></div>
     <div class="stat"><div class="k">Einheiten</div><div class="v mono">${act.length}</div><div class="s">an E-Stelle</div></div>
   </div>
@@ -1371,7 +1441,8 @@ function fkCard(f){
       <div class="u-meta">
         <span class="chip chip-${esc(f.org)}">${esc(org.short)}</span>
         <span>${esc(f.funktion)}</span>
-        ${f.funkrufname ? `<span class="mono">· ${esc(f.funkrufname)}</span>` : ""}
+        ${f.funkrufname && f.funkrufname !== f.name ? `<span class="mono">· ${esc(f.funkrufname)}</span>` : ""}
+        ${f.tatsaechlich === false ? `<span class="badge-schaetz">~ Schätzung</span>` : ""}
         ${f.einheit ? `<span>· ${esc(f.einheit)}</span>` : ""}
       </div>
     </div>
@@ -1611,9 +1682,11 @@ function renderOcrSheet(){
     for(const c of ocrList){
       const k = c.kat, bes = defaultBesatzung(c.kennung);
       if(bes && bes.fuehrung){
-        // Erster Kennungswert < 10 → Führungskraft (Schätzung, tatsächlich noch nicht bestätigt)
-        state.fuehrung.push({ id:uid(), org:"FW", name:c.name || "", funktion:"",
-          funkrufname:[c.name, c.kennung].filter(Boolean).join(" "), einheit:"", tatsaechlich:false });
+        // Erster Kennungswert < 10 → Führungskraft (Schätzung). Bis zur Bestätigung steht der
+        // Funkrufname im Namensfeld (Person noch unbekannt); danach manuell überschreibbar.
+        const funkruf = [c.name, c.kennung].filter(Boolean).join(" ");
+        state.fuehrung.push({ id:uid(), org:"FW", name:funkruf, funktion:"",
+          funkrufname:funkruf, einheit:"", tatsaechlich:false });
         nF++;
       }else{
         const crew = bes ? { f:bes.f, u:bes.u, m:bes.m }
@@ -3250,9 +3323,10 @@ function rotateAbschnitte(){
 function renderMonitor(){
   const e = state.einsatz;
   const act = aktive(), s = summen(act);
-  // Fortschritt: wie viele Kräfte sind tatsächlich abgefragt (nicht mehr Schätzung)?
-  const bestKraefte = act.filter(u => u.tatsaechlich !== false).length + state.fuehrung.filter(f => f.tatsaechlich !== false).length;
-  const gesKraefte = act.length + state.fuehrung.length;
+  // Fortschritt: wie viele Einträge (alle Einheiten + Führungskräfte) sind tatsächlich abgefragt
+  // (nicht mehr Schätzung)? Zählt Einträge, nicht Personenstärke – daher alle, inkl. abgerückt.
+  const bestKraefte = state.einheiten.filter(u => u.tatsaechlich !== false).length + state.fuehrung.filter(f => f.tatsaechlich !== false).length;
+  const gesKraefte = state.einheiten.length + state.fuehrung.length;
   const byOrg = Object.keys(ORGS).map(key => {
     const units = act.filter(u => u.org === key);
     return { key, ...ORGS[key], units, sum: summen(units) };
@@ -3339,9 +3413,12 @@ function renderMonitor(){
   const specialKey = monAbPage >= abPages ? specials[monAbPage - abPages] : null;
   const isLagePage = specialKey === "karte";
   const isSkizzePage = specialKey === "skizze";
+  const isFunkPage = specialKey === "funkchecks";
+  const isAsPage = specialKey === "as";
   const visible = specialKey ? [] : cardsData.slice(monAbPage*AB_PER_PAGE, monAbPage*AB_PER_PAGE + AB_PER_PAGE);
   const abCards = visible.map(c => abCard(c.title, c.units, c.opts)).join("");
   const pagerLabel = isLagePage ? "Lagekarte" : isSkizzePage ? "Funkskizze"
+    : isFunkPage ? "Funk & Checklisten" : isAsPage ? "Atemschutz-Trupps"
     : `${monAbPage*AB_PER_PAGE+1}–${Math.min((monAbPage+1)*AB_PER_PAGE, cardsData.length)} von ${cardsData.length}`;
   const abPager = totalPages > 1 ? `
     <div class="ab-pager" title="${monAbPaused ? "Rotation angehalten" : "Wechselt alle 30 Sekunden"}">
@@ -3387,14 +3464,17 @@ function renderMonitor(){
       </div>
       ${abPager ? `<div class="mon-abctrl">${abPager}</div>` : ""}
       <div class="kpis-compact">
-        <div class="kpic accent"><span class="k">Gesamtstärke</span><span class="v mono">${s.f+s.u+s.m}</span><span class="s mono">${s.f}/${s.u}/${s.m}</span></div>
+        <div class="kpic accent"><span class="k">Gesamtstärke</span><span class="v mono">${s.f+s.u+s.m+state.fuehrung.length}</span><span class="s mono">${s.f+state.fuehrung.length}/${s.u}/${s.m}</span></div>
+        ${gesKraefte ? (() => { const pct = Math.round(bestKraefte/gesKraefte*100);
+          const ampel = pct <= 40 ? "ist-rot" : pct <= 70 ? "ist-gelb" : "ist-gruen";
+          return `<div class="kpic ${bestKraefte < gesKraefte ? "warn" : ""} ${ampel}"><span class="k">Ist-Stärke bestätigt</span><span class="v mono">${bestKraefte}/${gesKraefte}</span><span class="kpi-bar"><i style="width:${pct}%"></i></span></div>`; })() : ""}
+        <div class="kpic"><span class="k">Führungskräfte</span><span class="v mono">${state.fuehrung.length}</span></div>
         <div class="kpic"><span class="k">AGT</span><span class="v mono">${s.agt}</span></div>
         <div class="kpic"><span class="k">CSA</span><span class="v mono">${s.csa}</span></div>
-        <div class="kpic"><span class="k">Einheiten</span><span class="v mono">${act.length}</span><span class="s">${state.einheiten.length - act.length} abgerückt</span></div>
-        <div class="kpic"><span class="k">Führungskräfte</span><span class="v mono">${state.fuehrung.length}</span></div>
-        ${gesKraefte ? `<div class="kpic ${bestKraefte < gesKraefte ? "warn" : ""}"><span class="k">Ist-Stärke bestätigt</span><span class="v mono">${bestKraefte}/${gesKraefte}</span><span class="kpi-bar"><i style="width:${Math.round(bestKraefte/gesKraefte*100)}%"></i></span></div>` : ""}
-        ${brUnits.length ? `<div class="kpic"><span class="k">Bereitstellung</span><span class="v mono">${brUnits.length}</span><span class="s">Einheiten</span></div>` : ""}
+        <div class="kpi-break"></div>
         ${state.anforderungen.some(a => a.status !== "eingetroffen") ? `<div class="kpic warn"><span class="k">Anrollend</span><span class="v mono">${state.anforderungen.filter(a => a.status !== "eingetroffen").length}</span><span class="s">nachgefordert</span></div>` : ""}
+        ${brUnits.length ? `<div class="kpic"><span class="k">Bereitstellung</span><span class="v mono">${brUnits.length}</span><span class="s">Einheiten</span></div>` : ""}
+        <div class="kpic"><span class="k">Abgerückt</span><span class="v mono">${state.einheiten.length - act.length}</span><span class="s">Einheiten</span></div>
         ${e.lagebespr ? `<div class="kpic warn"><span class="k">Nächste Lagebespr.</span><span class="v mono">${esc(e.lagebespr)}</span><span class="s" id="monLbRel"></span></div>` : ""}
       </div>
       ${isLagePage ? (() => {
@@ -3448,18 +3528,64 @@ function renderMonitor(){
             <button class="ab-jump" id="monSkEdit" style="margin-left:10px">Öffnen</button></div>
           ${renderFunkskizze()}
         </div>
-      </div>` : (() => {
+      </div>`
+      : isFunkPage ? (() => {
+        // Eigene Seite: Funksprüche + Checklisten nebeneinander – Checklisten mit einzelnen Punkten
+        const checksListe = state.checks.map(c => {
+          const done = c.punkte.filter(p => p.done).length;
+          const pct = c.punkte.length ? Math.round(done/c.punkte.length*100) : 0;
+          const punkte = c.punkte.map(p =>
+            `<div class="mon-chk-pt ${p.done ? "done" : ""}"><span class="mon-chk-box">${p.done ? "✓" : ""}</span><span class="mon-chk-txt">${esc(p.text)}</span></div>`).join("");
+          return `<div class="mon-chk">
+            <div class="mon-chk-head"><span class="mon-chk-name">${esc(c.name)}</span><span class="mono">${done}/${c.punkte.length}</span></div>
+            <div class="check-progress"><i style="width:${pct}%"></i></div>
+            ${punkte}
+          </div>`;
+        }).join("");
+        return `
+      <div class="mon-grid" style="grid-template-columns:1fr 1fr">
+        <div class="panel"><h3>Letzte Funksprüche</h3>${fsMonRows || `<p class="hint">Noch keine erfasst.</p>`}</div>
+        <div class="panel"><h3>Checklisten</h3>${checksListe || `<p class="hint">Noch keine Checkliste.</p>`}</div>
+      </div>`;
+      })()
+      : isAsPage ? (() => {
+        // Eigene Seite: Atemschutz-Trupps in 3 Spalten (Bereitschaft / Einsatz / abgelegt)
+        const spalten = [
+          { key:"registriert", titel:"In Bereitschaft" },
+          { key:"einsatz",      titel:"Im Einsatz" },
+          { key:"zurueck",      titel:"Abgelegt" },
+        ];
+        const kachel = t => {
+          const mit = (t.memberIds||[]).map(id => { const tr = state.asTraeger.find(x=>x.id===id)||{};
+            return `${esc(tr.name||"?")}${t.tf===id?" (TF)":""}`; }).join("<br>");
+          const rz = t.status==="einsatz" ? asRzTrupp(t) : null;
+          return `<div class="as-mon-kachel st-${esc(t.status)}">
+            ${asNrBadge(t)}
+            <div class="as-mon-info"><div class="as-mon-mit">${mit || "—"}</div>
+              ${t.abschnitt?`<div class="as-mon-sub">${esc(t.abschnitt)}</div>`:""}
+              ${rz?`<div class="as-mon-sub">Rückzug ${rz.sofort?"sofort":rz.bar+" bar"}</div>`:""}
+            </div></div>`;
+        };
+        const frei = asFreieTraeger().length;
+        return `
+      <div class="mon-grid" style="grid-template-columns:1fr">
+        <div class="panel">
+          <div class="as-mon-head">
+            <h3 style="margin:0">Atemschutz-Trupps (${state.asTrupps.length})</h3>
+            <div class="as-mon-reg"><span class="as-mon-reg-v mono">${state.asTraeger.length}</span> Geräteträger an der Sammelstelle registriert${frei ? ` · <span class="as-mon-reg-frei"><span class="mono">${frei}</span> frei</span>` : ""}</div>
+          </div>
+          <div class="as-mon-cols">
+            ${spalten.map(sp => { const trs = state.asTrupps.filter(t => t.status===sp.key);
+              return `<div class="as-mon-col"><div class="as-mon-coltitel">${sp.titel} <span class="mono">(${trs.length})</span></div>
+                ${trs.map(kachel).join("") || `<p class="hint" style="margin:4px 0">—</p>`}</div>`; }).join("")}
+          </div></div>
+      </div>`;
+      })()
+      : (() => {
         const hp = state.monHide.panels;
         const leftPanels = [
           !hp.org ? `<div class="panel"><h3>Stärke nach Organisation</h3>${orgRows}</div>` : "",
           !hp.fk ? `<div class="panel"><h3>Führungskräfte</h3>${fkRows || `<p class="hint">Noch keine erfasst.</p>`}</div>` : "",
-          !hp.funk ? `<div class="panel"><h3>Letzte Funksprüche</h3>${fsMonRows || `<p class="hint">Noch keine erfasst.</p>`}</div>` : "",
-          (!hp.checks && state.checks.length) ? `<div class="panel"><h3>Checklisten</h3>
-            ${state.checks.map(c => {
-              const done = c.punkte.filter(p => p.done).length;
-              return `<div class="fkrow"><span class="fk-n">${esc(c.name)}</span><span class="fk-f mono">${done}/${c.punkte.length}</span></div>`;
-            }).join("")}
-          </div>` : "",
         ].join("");
         return `
       <div class="mon-grid" ${leftPanels ? "" : `style="grid-template-columns:1fr"`}>
@@ -3493,12 +3619,15 @@ function monCardsData(){
   if(brUnits.length && !hid.BR) cards.push({ key:"BR", title:"Bereitstellungsraum", units:brUnits, opts:{ br:true, sub: state.einsatz.bereitstellungsraum } });
   return cards;
 }
-/* Sonderseiten des Monitors (Lagekarte, Funkskizze) – über den Kacheln-Dialog abschaltbar */
+/* Sonderseiten des Monitors (Lagekarte, Funkskizze, Funk & Checklisten, Atemschutz)
+   – als eigene durchschaltbare Seiten in der Rotation, über den Kacheln-Dialog abschaltbar */
 function monSpecialPages(){
   const hp = state.monHide.panels;
   const s = [];
   if(!hp.karte) s.push("karte");
   if(!hp.skizze) s.push("skizze");
+  if(!hp.funkchecks && (state.funk.length || state.checks.length)) s.push("funkchecks");
+  if(!hp.as && state.asTrupps.length) s.push("as");
   return s;
 }
 function monAbPagesCount(){
@@ -3524,15 +3653,15 @@ function openMonHideSheet(){
       <button class="sheet-close" data-close="1" aria-label="Schließen">×</button>
     </div>
     <div class="sheet-body">
-      <div class="field"><label>Info-Kacheln</label>
+      <div class="field"><label>Info-Kacheln (Kräfteseite)</label>
         ${row("Stärke nach Organisation", hp.org, "p:org")}
         ${row("Führungskräfte", hp.fk, "p:fk")}
-        ${row("Letzte Funksprüche", hp.funk, "p:funk")}
-        ${row("Checklisten", hp.checks, "p:checks")}
       </div>
       <div class="field"><label>Rotierende Seiten</label>
         ${row("Lagekarte", hp.karte, "p:karte")}
         ${row("Funkskizze", hp.skizze, "p:skizze")}
+        ${row("Funk & Checklisten", hp.funkchecks, "p:funkchecks")}
+        ${row("Atemschutz-Trupps", hp.as, "p:as")}
       </div>
       <div class="field"><label>Einsatzabschnitte</label>
         ${state.abschnitte.map(a => row(a.name, ha[a.id], "a:" + a.id)).join("")}
@@ -4914,8 +5043,8 @@ function doPrint(data){
       </figure>`).join("")}
     </div>` : ""}
     <p class="p-sum">
-      Gesamtstärke über den Einsatz: <span class="p-mono">${sAll.f}/${sAll.u}/${sAll.m}/${sAll.f+sAll.u+sAll.m}</span> · AGT: ${sAll.agt} · CSA: ${sAll.csa}
-      ${data.ende ? "" : ` &nbsp;|&nbsp; aktuell vor Ort: <span class="p-mono">${s.f}/${s.u}/${s.m}/${s.f+s.u+s.m}</span>`}
+      Gesamtstärke über den Einsatz: <span class="p-mono">${sAll.f+(data.fuehrung||[]).length}/${sAll.u}/${sAll.m}/${sAll.f+sAll.u+sAll.m+(data.fuehrung||[]).length}</span> · AGT: ${sAll.agt} · CSA: ${sAll.csa}
+      ${data.ende ? "" : ` &nbsp;|&nbsp; aktuell vor Ort: <span class="p-mono">${s.f+(data.fuehrung||[]).length}/${s.u}/${s.m}/${s.f+s.u+s.m+(data.fuehrung||[]).length}</span>`}
     </p>
     <div class="p-foot">
       <div class="p-sign">Ort, Datum</div>
@@ -4946,6 +5075,7 @@ function render(){
   else if(state.view === "kraefte"){ main.innerHTML = renderKraefte(); wireKraefte(); }
   else if(state.view === "funk"){ main.innerHTML = renderFunk(); wireFunk(); }
   else if(state.view === "bespr"){ main.innerHTML = renderBespr(); wireBespr(); }
+  else if(state.view === "fotodoku"){ main.innerHTML = renderFotodoku(); wireFotodoku(); }
   else if(state.view === "listen"){ main.innerHTML = renderListen(); wireListen(); }
   else if(state.view === "atemschutz"){ main.innerHTML = renderAtemschutz(); wireAtemschutz(); }
   else if(state.view === "skizze"){ main.innerHTML = renderSkizzeView(); }

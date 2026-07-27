@@ -314,6 +314,7 @@
   .kpi-bar{position:relative;flex:1;min-width:60px;height:6px;border-radius:3px;background:var(--surface2);align-self:center;overflow:hidden}
   .kpi-bar i{position:absolute;inset:0 auto 0 0;background:var(--warn);border-radius:3px}
   .kpic:not(.warn) .kpi-bar i{background:var(--good,#2e7d32)}
+  .kpi-break{flex-basis:100%;height:0}   /* erzwingt Zeilenumbruch nach der 1. KPI-Reihe */
 
   .org-FW{border-left-color:var(--fw)} .org-BRK{border-left-color:var(--brk)}
   .org-POL{border-left-color:var(--pol)} .org-THW{border-left-color:var(--thw)}
@@ -492,7 +493,8 @@
     .ab-card h4{font-size:1.2rem}
     .ab-card .ab-staerke{font-size:1.9rem}
     .ab-card .ab-sub{font-size:.88rem}
-    .fkrow .fk-n,.orgrow .num{font-size:1.1rem}
+    .fkrow .fk-n{font-size:.95rem}
+    .orgrow .num{font-size:1.1rem}
   }
   .panel{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin-bottom:0}
   .panel h3{font-size:.7rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--ink3);margin:0 0 8px}
@@ -506,8 +508,8 @@
 
   .fkrow{display:flex;align-items:center;gap:10px;padding:4px 0;border-bottom:1px solid var(--line)}
   .fkrow:last-child{border-bottom:none}
-  .fkrow .fk-n{font-weight:700}
-  .fkrow .fk-f{color:var(--ink2);font-size:.85rem;margin-left:auto;text-align:right}
+  .fkrow .fk-n{font-weight:700;font-size:.85rem}
+  .fkrow .fk-f{color:var(--ink2);font-size:.78rem;margin-left:auto;text-align:right}
 
   .mon-tablewrap{overflow-x:auto}
   table.mon-table{width:100%;border-collapse:collapse;font-size:.92rem}
@@ -1042,3 +1044,79 @@
 .ab-cardsub{font-size:.82rem;color:var(--ink2);font-weight:600;margin-top:1px;
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 @media (min-width:1500px){.ab-cardsub{font-size:.95rem}}
+
+/* Monitor: Atemschutz-Trupp-Übersicht (3 Spalten: Bereitschaft / Einsatz / abgelegt) */
+.as-mon-cols{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-top:4px}
+.as-mon-col{display:flex;flex-direction:column;gap:8px;min-width:0}
+.as-mon-coltitel{font-size:.85rem;font-weight:800;letter-spacing:.02em;color:var(--ink2);
+  text-transform:uppercase;padding-bottom:5px;border-bottom:2px solid var(--line)}
+.as-mon-coltitel .mono{color:var(--ink3);font-weight:700}
+.as-mon-kachel{display:flex;align-items:center;gap:10px;background:var(--surface);
+  border:1px solid var(--line);border-left:5px solid var(--son);border-radius:12px;padding:8px 10px;min-width:0}
+.as-mon-kachel.st-einsatz{border-left-color:var(--warn)}
+.as-mon-kachel.st-zurueck{border-left-color:var(--line);opacity:.68}
+.as-mon-kachel .as-nr{width:40px;height:40px;font-size:1.05rem}
+.as-mon-info{min-width:0;flex:1}
+.as-mon-mit{font-weight:700;font-size:.92rem;line-height:1.2;color:var(--ink)}
+.as-mon-sub{font-size:.8rem;font-weight:650;color:var(--warn);margin-top:2px}
+.as-mon-kachel.st-registriert .as-mon-sub,
+.as-mon-kachel.st-zurueck .as-mon-sub{color:var(--ink2)}
+@media (min-width:1500px){
+  .as-mon-mit{font-size:1.05rem}
+  .as-mon-sub{font-size:.9rem}
+  .as-mon-kachel .as-nr{width:46px;height:46px;font-size:1.2rem}
+}
+
+/* Monitor-KPI "Ist-Stärke bestätigt": Ampel nach Bestätigungsgrad (≤40 % rot, ≤70 % gelb, sonst grün) */
+.kpic.ist-rot .v{color:var(--accent)}
+.kpic.ist-rot .kpi-bar i{background:var(--accent)}
+.kpic.ist-gelb .v{color:var(--warn)}
+.kpic.ist-gelb .kpi-bar i{background:var(--warn)}
+.kpic.ist-gruen .v{color:var(--good)}
+.kpic.ist-gruen .kpi-bar i{background:var(--good)}
+
+/* Foto-Dokumentation (eigener Menüpunkt) */
+.foto-doku-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:14px}
+.foto-doku-item{margin:0;background:var(--surface);border:1px solid var(--line);border-radius:12px;
+  overflow:hidden;cursor:pointer;transition:box-shadow .12s,transform .12s}
+.foto-doku-item:hover{box-shadow:var(--shadow);transform:translateY(-1px)}
+.foto-doku-item img{display:block;width:100%;aspect-ratio:4/3;object-fit:cover;background:var(--surface2)}
+.foto-doku-item figcaption{padding:8px 10px;display:flex;flex-direction:column;gap:3px}
+.foto-doku-item .foto-zeit{font-size:.78rem;color:var(--ink3);font-weight:600}
+.foto-doku-item .foto-note{font-size:.9rem;color:var(--ink);font-weight:600;line-height:1.25;
+  display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.foto-doku-item .foto-note.leer{color:var(--ink3);font-weight:500;font-style:italic}
+
+/* Kamera-Overlay: Aufnahmezähler + Auslöse-Blitz */
+.cam-overlay .cam-count{position:absolute;top:16px;left:0;right:0;text-align:center;
+  color:#fff;font-weight:700;font-size:.95rem;text-shadow:0 1px 4px rgba(0,0,0,.7);pointer-events:none}
+.cam-overlay .btn.flash{filter:brightness(1.8)}
+
+/* Diktier-Feld: Textarea mit Mikrofon-Knopf in der Ecke */
+.dictate-wrap{position:relative}
+.dictate-wrap textarea{width:100%;padding-right:46px}
+.dictate-btn{position:absolute;top:8px;right:8px;width:34px;height:34px;border-radius:9px;
+  border:1.5px solid var(--line);background:var(--surface);cursor:pointer;font-size:1.05rem;line-height:1}
+.dictate-btn.rec{background:var(--accent);border-color:var(--accent);animation:dictpulse 1s infinite}
+@keyframes dictpulse{0%,100%{box-shadow:0 0 0 0 color-mix(in oklab,var(--accent) 55%,transparent)}
+  50%{box-shadow:0 0 0 6px transparent}}
+
+/* Monitor-Seite "Funk & Checklisten": Checklisten mit einzelnen Punkten */
+.mon-chk{margin-bottom:16px}
+.mon-chk:last-child{margin-bottom:0}
+.mon-chk-head{display:flex;align-items:baseline;justify-content:space-between;gap:10px}
+.mon-chk-name{font-weight:800;font-size:.98rem;color:var(--ink)}
+.mon-chk-head .mono{color:var(--ink3);font-weight:700;font-size:.85rem}
+.mon-chk-pt{display:flex;align-items:flex-start;gap:9px;padding:3px 0;font-size:.9rem;color:var(--ink)}
+.mon-chk-pt.done{color:var(--ink3);text-decoration:line-through}
+.mon-chk-box{flex:none;width:18px;height:18px;border-radius:5px;border:1.5px solid var(--line);
+  display:flex;align-items:center;justify-content:center;font-size:.8rem;font-weight:800;line-height:1;margin-top:1px}
+.mon-chk-pt.done .mon-chk-box{background:var(--good);border-color:var(--good);color:#fff}
+@media (min-width:1500px){.mon-chk-name{font-size:1.1rem}.mon-chk-pt{font-size:1rem}}
+
+/* Monitor-AS-Seite: Kopf mit registrierten Geräteträgern */
+.as-mon-head{display:flex;align-items:baseline;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:10px}
+.as-mon-reg{font-size:.95rem;font-weight:650;color:var(--ink2)}
+.as-mon-reg .as-mon-reg-v{font-size:1.25rem;font-weight:800;color:var(--ink)}
+.as-mon-reg-frei{color:var(--good)}
+@media (min-width:1500px){.as-mon-reg{font-size:1.1rem}.as-mon-reg .as-mon-reg-v{font-size:1.5rem}}
