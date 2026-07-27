@@ -1491,9 +1491,14 @@ function renderOcrSheet(){
       <button class="sheet-close" data-close="1" aria-label="Schließen">×</button></div>
     <div class="sheet-body">
       <div class="field">
-        <label for="ocr-file">Alarm-Foto / Screenshot / Fax-PDF</label>
-        <input id="ocr-file" type="file" accept="image/*,application/pdf" multiple>
-        <p class="hint">Läuft offline auf dem Gerät. Bilder <em>und PDF-Alarmfaxe</em> (alle Seiten) werden gelesen; mehrere Dateien werden zusammengeführt (Doppelte fallen weg). Erkannte Fahrzeuge unten per ✕ entfernen. <span id="ocr-progress"></span></p>
+        <label>Alarm-Foto / Screenshot / Fax-PDF</label>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button type="button" class="btn btn-primary" id="ocr-cam-btn">📷&nbsp; Foto aufnehmen</button>
+          <button type="button" class="btn btn-ghost" id="ocr-file-btn">Datei / PDF wählen</button>
+        </div>
+        <input id="ocr-cam" type="file" accept="image/*" capture="environment" style="display:none">
+        <input id="ocr-file" type="file" accept="image/*,application/pdf" multiple style="display:none">
+        <p class="hint">Läuft offline auf dem Gerät. Kamera (Tablet) oder Bilder <em>und PDF-Alarmfaxe</em> (alle Seiten); mehrere Dateien werden zusammengeführt (Doppelte fallen weg). Erkannte Fahrzeuge unten per ✕ entfernen. <span id="ocr-progress"></span></p>
       </div>
       <div class="field"><label style="margin-bottom:8px">Erkannte Fahrzeuge (${ocrList.length})</label>
         <div class="kat-list" id="ocr-list">${rows || `<p class="hint" style="margin:6px 4px">Noch nichts eingelesen – Bild wählen.</p>`}</div>
@@ -1507,7 +1512,9 @@ function renderOcrSheet(){
   document.querySelectorAll("[data-ocrdel]").forEach(b => b.addEventListener("click", () => {
     ocrList.splice(Number(b.dataset.ocrdel), 1); renderOcrSheet();
   }));
-  $("#ocr-file").addEventListener("change", async e => {
+  $("#ocr-cam-btn").addEventListener("click", () => $("#ocr-cam").click());
+  $("#ocr-file-btn").addEventListener("click", () => $("#ocr-file").click());
+  const verarbeite = async e => {
     const files = [...e.target.files]; if(!files.length) return;
     const setProg = t => { const el = $("#ocr-progress"); if(el) el.textContent = t; };
     try{
@@ -1533,7 +1540,9 @@ function renderOcrSheet(){
       setProg("");
       modalInfo("Einlesen nicht möglich: " + (err.message || err));
     }
-  });
+  };
+  $("#ocr-cam").addEventListener("change", verarbeite);
+  $("#ocr-file").addEventListener("change", verarbeite);
   $("#ocr-add").addEventListener("click", () => {
     let n = 0;
     for(const c of ocrList){
