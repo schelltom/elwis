@@ -3572,7 +3572,7 @@ function renderMonitor(){
         <div class="panel">
           <div class="as-mon-head">
             <h3 style="margin:0">Atemschutz-Trupps (${state.asTrupps.length})</h3>
-            <div class="as-mon-reg"><span class="as-mon-reg-v mono">${state.asTraeger.length}</span> Geräteträger an der Sammelstelle registriert${frei ? ` · <span class="as-mon-reg-frei"><span class="mono">${frei}</span> frei</span>` : ""}</div>
+            <div class="as-mon-reg"><span class="as-mon-reg-v mono">${frei}</span> registriert, noch keinem Trupp zugeteilt</div>
           </div>
           <div class="as-mon-cols">
             ${spalten.map(sp => { const trs = state.asTrupps.filter(t => t.status===sp.key);
