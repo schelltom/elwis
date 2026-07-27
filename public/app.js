@@ -1417,6 +1417,32 @@ async function tessWorker(){
   }
   return tessWorkerP;
 }
+function ladePdfJs(){
+  if(window.pdfjsLib) return Promise.resolve();
+  return new Promise((res, rej) => {
+    const s = document.createElement("script");
+    s.src = "./vendor/pdfjs/pdf.min.js";
+    s.onload = () => { window.pdfjsLib.GlobalWorkerOptions.workerSrc = "./vendor/pdfjs/pdf.worker.min.js"; res(); };
+    s.onerror = () => rej(new Error("pdf.js nicht ladbar"));
+    document.head.appendChild(s);
+  });
+}
+// PDF → ein Canvas je Seite (für die OCR)
+async function pdfSeiten(file){
+  await ladePdfJs();
+  const buf = await file.arrayBuffer();
+  const pdf = await window.pdfjsLib.getDocument({ data: buf }).promise;
+  const seiten = [];
+  for(let p = 1; p <= pdf.numPages; p++){
+    const page = await pdf.getPage(p);
+    const vp = page.getViewport({ scale: 2 });   // 2× für bessere OCR-Qualität
+    const c = document.createElement("canvas");
+    c.width = vp.width; c.height = vp.height;
+    await page.render({ canvasContext: c.getContext("2d"), viewport: vp }).promise;
+    seiten.push(c);
+  }
+  return seiten;
+}
 function ocrKandidaten(text){
   const KW = /\b(HLF|LF|TLF|DLK|DLA|DLAK|RW|GW|ELW|KdoW|MZF|MTW|TSF|SW|FL|Florian|Kater|Dekon)\b/i;
   const out = [];
@@ -1465,9 +1491,9 @@ function renderOcrSheet(){
       <button class="sheet-close" data-close="1" aria-label="Schließen">×</button></div>
     <div class="sheet-body">
       <div class="field">
-        <label for="ocr-file">Alarm-Foto(s) / Screenshot(s)</label>
-        <input id="ocr-file" type="file" accept="image/*" multiple>
-        <p class="hint">Läuft offline auf dem Gerät. Erkannte Fahrzeuge kannst du unten mit ✕ entfernen. Mehrere Bilder werden zusammengeführt (Doppelte fallen weg). <span id="ocr-progress"></span></p>
+        <label for="ocr-file">Alarm-Foto / Screenshot / Fax-PDF</label>
+        <input id="ocr-file" type="file" accept="image/*,application/pdf" multiple>
+        <p class="hint">Läuft offline auf dem Gerät. Bilder <em>und PDF-Alarmfaxe</em> (alle Seiten) werden gelesen; mehrere Dateien werden zusammengeführt (Doppelte fallen weg). Erkannte Fahrzeuge unten per ✕ entfernen. <span id="ocr-progress"></span></p>
       </div>
       <div class="field"><label style="margin-bottom:8px">Erkannte Fahrzeuge (${ocrList.length})</label>
         <div class="kat-list" id="ocr-list">${rows || `<p class="hint" style="margin:6px 4px">Noch nichts eingelesen – Bild wählen.</p>`}</div>
@@ -1483,18 +1509,29 @@ function renderOcrSheet(){
   }));
   $("#ocr-file").addEventListener("change", async e => {
     const files = [...e.target.files]; if(!files.length) return;
-    const prog = $("#ocr-progress");
+    const setProg = t => { const el = $("#ocr-progress"); if(el) el.textContent = t; };
     try{
       const w = await tessWorker();
       for(let i = 0; i < files.length; i++){
-        if(prog) prog.textContent = `Bild ${i+1}/${files.length} … `;
-        const { data } = await w.recognize(files[i]);
-        ocrMerge(ocrKandidaten(data.text));
-        renderOcrSheet();   // Zwischenstand zeigen (Sheet neu, Fortschritt geht weiter)
+        const f = files[i], istPdf = f.type === "application/pdf" || /\.pdf$/i.test(f.name);
+        if(istPdf){
+          setProg(`Datei ${i+1}/${files.length}: PDF wird gelesen … `);
+          const seiten = await pdfSeiten(f);
+          for(let s = 0; s < seiten.length; s++){
+            setProg(`Datei ${i+1}/${files.length}: Seite ${s+1}/${seiten.length} … `);
+            const { data } = await w.recognize(seiten[s]);
+            ocrMerge(ocrKandidaten(data.text)); renderOcrSheet();
+          }
+        }else{
+          setProg(`Datei ${i+1}/${files.length} … `);
+          const { data } = await w.recognize(f);
+          ocrMerge(ocrKandidaten(data.text)); renderOcrSheet();
+        }
       }
+      setProg("");
     }catch(err){
-      if(prog) prog.textContent = "";
-      modalInfo("OCR nicht verfügbar: " + (err.message || err) + "\n(Beim ersten Mal ist einmalig Internet nötig, danach offline.)");
+      setProg("");
+      modalInfo("Einlesen nicht möglich: " + (err.message || err));
     }
   });
   $("#ocr-add").addEventListener("click", () => {
