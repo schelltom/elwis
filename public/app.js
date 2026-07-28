@@ -5037,13 +5037,13 @@ function doPrint(data){
     ${(data.lage && data.lage.items && data.lage.items.length) ? `
     <h2>Lagekarte${data.ende ? " (Stand Einsatzende)" : " (aktueller Stand)"}</h2>
     ${printMapHtml(data.lage)}
-    ${printLegendHtml(data.lage.items, data.einheiten)}
-    ${(data.lage.snapshots||[]).length ? [...data.lage.snapshots]
+    ${printLegendHtml(data.lage.items, data.einheiten)}` : ""}
+    ${(data.lage && (data.lage.snapshots||[]).length) ? [...data.lage.snapshots]
       .sort((a,b) => (a.zeit||"").localeCompare(b.zeit||""))
       .map(s => `
       <h2>Lagebild ${fmtZeit(s.zeit)} Uhr (${fmtDatum(s.zeit)})</h2>
       ${printMapHtml(s)}
-      ${printLegendHtml(s.items, data.einheiten)}`).join("") : ""}` : ""}
+      ${printLegendHtml(s.items, data.einheiten)}`).join("") : ""}
     ${(data.fotos||[]).length ? `
     <h2>Fotodokumentation (${data.fotos.length})</h2>
     <div class="p-fotos">
