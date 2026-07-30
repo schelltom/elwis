@@ -578,20 +578,15 @@ function resizeImage(file, maxDim, cb){
   rd.readAsDataURL(file);
 }
 /* Sprachdiktat (Web Speech API) – Komfortfunktion am ELW, braucht Browser-Unterstützung */
-let iosDiktatHint = false;   // Diktat-Hinweis (iOS) nur einmal pro Sitzung zeigen
 function attachDictation(btn, target){
+  // Nur iPhone/iPad ausblenden (WebKit kann kein Web-Diktat → Tastatur-🎤 nutzen).
+  // Android und Desktop-Browser behalten das Mikro.
+  const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  if(isIOS){ btn.style.display = "none"; return; }
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   if(!SR){
-    // iOS/Safari kennt kein Web-Diktat. Button sichtbar lassen und auf die Tastatur-Diktatfunktion
-    // hinweisen (🎤-Taste der Bildschirmtastatur); Tippen fokussiert das Feld (öffnet die Tastatur).
-    btn.title = "Diktieren über die 🎤-Taste der Tastatur";
-    btn.addEventListener("click", () => {
-      try{ target.focus(); }catch(e){}
-      if(!iosDiktatHint){
-        iosDiktatHint = true;
-        modalInfo("Diktat auf diesem Gerät über die Mikrofon-Taste (🎤) der Bildschirmtastatur nutzen – Safari/iOS unterstützt kein direktes Web-Diktat.");
-      }
-    });
+    // Nicht-iOS ohne Web-Speech (z. B. Firefox): Symbol sichtbar lassen, Hinweis beim Antippen.
+    btn.addEventListener("click", () => modalInfo("Dieser Browser unterstützt kein direktes Diktat. Am zuverlässigsten mit Chrome/Edge (über HTTPS bzw. localhost) – sonst die Mikrofon-Taste der Tastatur nutzen."));
     return;
   }
   let rec = null;
@@ -1022,9 +1017,11 @@ function renderEinsatz(){
     <button class="btn btn-ghost btn-block" id="btnExport" style="margin-bottom:10px">Einsatz exportieren (Datei)</button>
     <button class="btn btn-ghost btn-block" id="btnImport">Einsatz importieren (Datei)</button>
     <input type="file" id="importFile" accept=".json,application/json" style="display:none">
-    <p class="hint">Der komplette Einsatz (Kräfte, Abschnitte, Lagekarte, Funk, Besprechungen, Checklisten, Fotos)
-    als Datei – für Backup, Gerätewechsel oder die Übergabe per USB-Stick vom Tablet zum ELW-Rechner.
-    Beim Import wird der aktuell erfasste Einsatz ersetzt; Archiv und Einstellungen bleiben unberührt.</p>
+    <p class="hint">Die Datei enthält <strong>alles</strong>: den kompletten Einsatz (Kräfte, Abschnitte,
+    Lagekarte inkl. Lagebilder, Funk, Besprechungen, Checklisten, Fotos, Atemschutz) sowie
+    <strong>Archiv und Einstellungen/Kataloge</strong> – also ein vollständiges Backup zur Wiederherstellung.
+    Beim Import wird der aktuelle Einsatz ersetzt; Archiv &amp; Einstellungen übernimmst du auf Nachfrage
+    (für die reine Übergabe eines Einsatzes zwischen Geräten → „Nein“).</p>
   </div>
   <div class="card">
     <h2>Prototyp-Werkzeuge</h2>
@@ -1135,12 +1132,13 @@ function syncEinsatzleiterFk(){
 /* Einsatz als Datei sichern / einlesen – Backup, Gerätewechsel, „Sync per USB-Stick“ */
 function exportEinsatz(){
   const data = {
-    elwis: 1, exportiert: new Date().toISOString(), ugName: state.config.ugName,
+    elwis: 1, full: 1, exportiert: new Date().toISOString(), ugName: state.config.ugName,
     einsatz: state.einsatz, einheiten: state.einheiten, fuehrung: state.fuehrung,
     abschnitte: state.abschnitte, lage: state.lage, funk: state.funk,
     besprechungen: state.besprechungen, anforderungen: state.anforderungen,
     checks: state.checks, fotos: state.fotos,
     asTraeger: state.asTraeger, asTrupps: state.asTrupps,
+    archiv: state.archiv, config: state.config,   // Komplett-Backup: auch Archiv + Einstellungen/Kataloge
   };
   const blob = new Blob([JSON.stringify(data)], { type: "application/json" });
   const a = document.createElement("a");
@@ -1172,6 +1170,19 @@ function importEinsatz(file){
       state.fotos = d.fotos || [];
       state.asTraeger = d.asTraeger || [];
       state.asTrupps = d.asTrupps || [];
+      // Komplett-Backup: auf Wunsch auch Archiv + Einstellungen/Kataloge wiederherstellen
+      // (beim reinen Übertragen eines Einsatzes „Nein“, damit lokale Einstellungen bleiben).
+      if(d.config || Array.isArray(d.archiv)){
+        const anz = Array.isArray(d.archiv) ? d.archiv.length : 0;
+        if(await modalConfirm(`Auch Einstellungen (UG-Name, Präfixe, Kataloge, ELW-Funkrufname, w3w-Key) und Archiv (${anz} abgeschlossene${anz===1?"r Einsatz":" Einsätze"}) aus der Sicherung übernehmen?\n\nJa = Komplett-Wiederherstellung · Nein = nur diesen Einsatz übernehmen (lokale Einstellungen/Archiv bleiben).`, "Ja, alles", "Nein")){
+          if(d.config){
+            state.config = Object.assign(defaultConfig(), d.config);
+            state.config.prefixes = Object.assign(defaultConfig().prefixes, d.config.prefixes || {});
+            applyTheme();
+          }
+          if(Array.isArray(d.archiv)) state.archiv = d.archiv;
+        }
+      }
       state.einsatzId = uid(); state.einsatzStart = new Date().toISOString();
       try{ markChange(); }catch(err){
         state.fotos = []; state.lage.bg = "";
