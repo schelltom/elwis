@@ -422,6 +422,7 @@
   .mon-head .eyebrow{font-size:.7rem;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--accent)}
   .mon-head h2{margin:2px 0 0;font-size:clamp(1.3rem,2.4vw,1.8rem);font-weight:800;line-height:1.15;text-wrap:balance}
   .mon-head .ort{color:var(--ink2);font-size:.95rem}
+  .mon-head .mon-el{color:var(--ink3);font-size:.9rem;font-weight:600;margin-top:2px}
   .mon-clockbox{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);text-align:center}
   .mon-clock{font-size:clamp(1.6rem,3vw,2.2rem);font-weight:800;line-height:1;font-variant-numeric:tabular-nums}
   .mon-dauer{color:var(--ink);font-size:clamp(1.6rem,3vw,2.2rem);font-weight:700;line-height:1;margin-top:4px}
@@ -446,11 +447,14 @@
   .mon-grid{display:grid;grid-template-columns:minmax(230px,.8fr) minmax(0,3.2fr);gap:12px}
   .mon-grid > *{min-width:0}
   @media (max-width:760px){.mon-grid{grid-template-columns:1fr}}
+  /* Verfügungsraum als KPI-Box (hinten in der Leiste, nur so breit wie der Text) */
+  .kpic.vr{border-color:color-mix(in oklab,var(--warn) 42%,var(--line));
+    background:color-mix(in oklab,var(--warn) 14%,var(--surface))}
+  .kpic.vr .k{color:var(--warn)}
 
-  /* Abschnitts-Kacheln – Hauptfläche auf dem 30-Zoll-Monitor, 6 Stück ohne Scrollen */
+  /* Abschnitts-Kacheln – breit genug, dass Fahrzeugname + AGT lesbar sind: max. 2 pro Reihe */
   .ab-grid{display:grid;grid-template-columns:1fr;gap:10px;align-items:start;min-width:0}
   @media (min-width:1000px){.ab-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
-  @media (min-width:1400px){.ab-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}
   .ab-pager{display:flex;align-items:center;gap:8px;margin-left:auto;font-size:.72rem;
     font-weight:700;color:var(--ink3);letter-spacing:.05em}
   .ab-pager .dot{width:8px;height:8px;border-radius:50%;background:var(--line)}
@@ -467,16 +471,25 @@
   .ab-cd{min-width:36px;text-align:right;font-weight:750;color:var(--ink2);font-size:.8rem}
   .panel-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px}
   .panel-head h3{margin:0}
+  /* Abschnitts-Tabelle: feste Spalten, keine Scrollbar; langer Fahrzeugname kürzt mit „…“,
+     Stärke und AGT bleiben immer sichtbar */
+  .ab-card .mon-tablewrap{overflow:visible}
+  .ab-table{table-layout:fixed}
   .ab-table th{padding:3px 6px}
-  .ab-table td{padding:3px 6px;font-size:.82rem}
+  .ab-table td{padding:3px 6px;font-size:.82rem;white-space:nowrap}
   .ab-table .chip{font-size:.64rem;padding:1px 6px}
+  .ab-table th:nth-child(1),.ab-table td:nth-child(1){width:34px}
+  .ab-table th:nth-child(3),.ab-table td:nth-child(3){width:76px}
+  .ab-table th:nth-child(4),.ab-table td:nth-child(4){width:40px}
+  .ab-table td.name{overflow:hidden;text-overflow:ellipsis}
   .ab-card{background:var(--surface);border:1px solid var(--line);border-radius:12px;
     padding:11px 13px;border-top:4px solid var(--accent);min-width:0}
   .ab-card .name{max-width:100%;overflow:hidden;text-overflow:ellipsis}
   .ab-card.none{border-top-color:var(--line)}
-  .ab-card .ab-head{display:flex;align-items:flex-start;gap:10px;margin-bottom:4px}
-  .ab-card h4{margin:0;font-size:1rem;font-weight:800;line-height:1.2;flex:1;text-wrap:balance}
-  .ab-card .ab-staerke{font-size:1.55rem;font-weight:800;line-height:1}
+  .ab-card .ab-head{display:flex;align-items:baseline;justify-content:space-between;gap:4px 10px;flex-wrap:wrap;margin-bottom:4px}
+  .ab-card .ab-head > div:first-child{flex:1 1 55%;min-width:0}
+  .ab-card h4{margin:0;font-size:1rem;font-weight:800;line-height:1.2;overflow-wrap:anywhere;text-wrap:balance}
+  .ab-card .ab-staerke{flex:0 0 auto;white-space:nowrap;font-size:1.4rem;font-weight:800;line-height:1}
   .ab-card .ab-sub{display:flex;gap:12px;flex-wrap:wrap;color:var(--ink2);font-size:.78rem}
   .ab-card .ab-sub strong{color:var(--ink)}
   .funkrow{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
@@ -610,7 +623,26 @@
     60%{transform:translate(-50%,-50%) rotate(5deg)}
     80%{transform:translate(-50%,-50%) rotate(-2deg)}}
   .lg-item.wackel,.lg-mk.wackel{animation:lg-wackel .8s ease-in-out;z-index:6}
+  /* Dauerhaftes Wackeln geänderter Symbole im Snapshot-Vergleich */
+  .lg-item.wackel-dauer,.lg-mk.wackel-dauer{animation:lg-wackel 1s ease-in-out infinite;z-index:6}
+  [data-shape].wackel-dauer{animation:lg-flash 1.2s ease-in-out infinite}
   [data-shape].flash{animation:lg-flash .9s ease-in-out}
+  /* Snapshot-Vergleich: zwei Panels nebeneinander + Vollbild */
+  .sheet.sheet-wide{width:min(1200px,calc(100vw - 24px))}
+  .lgsnap-pick{display:flex;align-items:center;padding:0 8px 0 2px;flex:none}
+  .lgsnap-pick input{width:22px;height:22px}
+  .lg-cmp{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .lg-cmp-col{min-width:0;display:flex;flex-direction:column;gap:6px}
+  .lg-cmp-t{font-size:.8rem;font-weight:700;color:var(--ink2)}
+  .lg-cmp-t span{font-weight:500;color:var(--ink3)}
+  .lg-cmp-map{aspect-ratio:auto;height:min(56vh,480px)}
+  @media (max-width:760px){.lg-cmp{grid-template-columns:1fr}.lg-cmp-map{height:44vh}}
+  .lg-fullbtn{min-height:38px;padding:4px 12px;font-size:1.1rem;flex:none}
+  .sheet:fullscreen{width:100vw;max-width:none;height:100vh;max-height:none;border-radius:0;top:0;left:0;transform:none;display:flex;flex-direction:column}
+  .sheet:fullscreen .sheet-body{flex:1;overflow:auto}
+  .sheet:fullscreen .lg-cmp-map{height:calc(100vh - 200px)}
+  .sheet:fullscreen #lgSnapMap{height:100%}
+  .sheet:fullscreen .lg-wrap{aspect-ratio:auto;height:calc(100vh - 200px)}
   @keyframes lg-flash{0%,100%{opacity:1}20%{opacity:.15}40%{opacity:1}60%{opacity:.15}80%{opacity:1}}
   .lg-find{background:none;border:0;padding:0;cursor:pointer;line-height:0}
   /* Legenden-Badge (klickbar → wackeln/blinken) für Marker, Formen, Linien */
@@ -845,7 +877,35 @@
     #printArea .p-fotos figure{margin:0;break-inside:avoid}
     #printArea .p-fotos img{width:100%;border:1px solid #999;border-radius:3px}
     #printArea .p-fotos figcaption{font-size:8pt;color:#333;margin-top:2px}
+    /* Seitenränder + Seitenzahl (Randbox) auf jeder Druckseite */
+    @page{
+      margin:24mm 13mm 17mm;
+      @bottom-right{content:"Seite " counter(page) " von " counter(pages);
+        font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;font-size:8pt;color:#666}
+    }
+    /* Laufender Kopf/Fuß – Chromium wiederholt position:fixed je Seite */
+    #printArea .p-run-head{position:fixed;top:0;left:0;right:0;height:16mm;
+      display:flex;justify-content:space-between;align-items:flex-end;gap:16px;
+      padding:6mm 13mm 2mm;font-size:8.5pt;color:#333;border-bottom:.75px solid #999}
+    #printArea .p-run-head .p-rh-r{font-weight:700;text-align:right;white-space:nowrap;
+      overflow:hidden;text-overflow:ellipsis}
+    #printArea .p-run-foot{position:fixed;bottom:0;left:0;height:12mm;
+      display:flex;align-items:center;padding:2mm 13mm;font-size:8pt;color:#666}
+    /* Funkskizze im Druck: ohne Schatten, klare S/W-Linien */
+    #printArea .p-skizze{break-inside:avoid;margin:6px 0 12px;print-color-adjust:exact;-webkit-print-color-adjust:exact}
+    #printArea .p-skizze .fkbox{box-shadow:none;background:#fff;border-color:#000}
+    #printArea .p-skizze .fkbox.ils{border-color:#555}
+    #printArea .p-skizze .fk-vline,#printArea .p-skizze .fk-hline{background:#666}
+    #printArea .p-skizze .fk-grp{background:#eee;color:#000}
+    #printArea .p-skizze .fk-legende{color:#333}
   }
+
+/* ---------- Druck-Auswahl (welche Bereiche in den Bericht) ---------- */
+.print-picks{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.print-pick{display:flex;align-items:center;gap:10px;padding:11px 12px;border:1px solid var(--line);
+  border-radius:10px;background:var(--surface);cursor:pointer;font-weight:600}
+.print-pick input{width:20px;height:20px;flex:none;accent-color:var(--fw)}
+@media (max-width:560px){.print-picks{grid-template-columns:1fr}}
 
 /* ---------- Dialoge (ersetzen Browser-alert/confirm) ---------- */
 .modal-backdrop{position:fixed;inset:0;z-index:60;background:rgba(20,16,14,.5)}
@@ -857,6 +917,39 @@
 .modal p{margin:0 0 18px;color:var(--ink2);line-height:1.5;white-space:pre-line}
 .modal-btns{display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap}
 .modal-btns .btn{min-height:48px}
+/* Formatierte Übernahme-Meldung (Alarm-Foto): Absätze + Org-Farben */
+.modal .ok-list{margin:2px 0 14px;display:flex;flex-direction:column;gap:10px}
+.modal .ok-row{display:flex;gap:12px;align-items:flex-start;padding:11px 13px;
+  border:1px solid var(--line);border-radius:12px;background:var(--surface2)}
+.modal .ok-row.ok-ort{background:color-mix(in oklab,#16a34a 11%,var(--surface));
+  border-color:color-mix(in oklab,#16a34a 32%,var(--line))}
+.modal .ok-ico{font-size:1.3rem;line-height:1.35;flex:none}
+.modal .ok-body{flex:1;min-width:0}
+.modal .ok-tt{font-weight:750;font-size:.9rem;color:var(--ink);margin-bottom:4px;letter-spacing:.01em}
+.modal .ok-row.ok-ort .ok-tt{color:#16a34a}
+.modal .ok-addr{color:var(--ink);font-weight:650;line-height:1.4}
+.modal .ok-ul{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
+.modal .ok-ul li{display:flex;align-items:center;gap:8px;font-size:.9rem;color:var(--ink2);min-width:0}
+.modal .ok-ul li span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.modal .ok-hint{margin:0;padding:10px 12px;border-radius:10px;white-space:normal;
+  background:color-mix(in oklab,#f59e0b 13%,var(--surface));
+  border:1px solid color-mix(in oklab,#f59e0b 32%,var(--line));
+  color:var(--ink2);font-size:.85rem;line-height:1.45}
+.modal .ok-row.ok-dup{opacity:.65}
+/* Kopf-Feld im Alarm-Foto-Fenster: Eingabe + ✕ zum Verwerfen */
+.ocr-kopf{display:flex;gap:8px;align-items:center}
+.ocr-kopf input{flex:1;min-width:0}
+.ocr-kopf .kat-x{flex:none}
+/* Feld-Kopfzeile: Label + Schalter (z. B. Verfügungs-/Bereitstellungsraum) */
+.field-head{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:6px;flex-wrap:wrap}
+.field-head label{margin:0}
+/* Funk: Schnellauswahl (erfasste Fahrzeuge/FK/Abschnitte) – mobiltauglich statt Datalist */
+.fs-pick{margin-top:6px;font-size:.92rem;color:var(--ink2)}
+
+/* what3words-Zeile (eigene vollbreite Zeile in den Einsatzstammdaten) */
+.w3w-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.w3w-row input{flex:1;min-width:160px;font-family:ui-monospace,Menlo,Consolas,monospace}
+.w3w-row .btn{flex:none;min-height:44px;white-space:nowrap}
 
 /* Beschriftung verknüpfter Abschnittsflächen auf der Lagekarte */
 .lg-arealbl{position:absolute;transform:translate(-50%,-50%);z-index:1;pointer-events:none;
@@ -1034,10 +1127,14 @@
 .lg-leg-sec h3{font-size:.72rem;font-weight:700;letter-spacing:.09em;text-transform:uppercase;color:var(--ink3);margin:0 0 8px}
 .lg-leg-sec + .lg-leg-sec{margin-top:0}
 
-/* Handy: Datums-/Zeitfelder nicht über den Rand hinaus */
+/* Handy: Datums-/Zeitfelder nicht über den Rand hinaus. iOS Safari gibt diesen Feldern eine
+   feste Inhaltsbreite, die width/min-width ignoriert – erst -webkit-appearance:none lässt sie
+   auf die Containerbreite schrumpfen. Nur mobil (am Desktop bliebe sonst der Kalender-Button weg). */
 @media (max-width:899px){
-  input[type="datetime-local"],input[type="time"],input[type="date"]{width:100%;min-width:0;max-width:100%}
+  input[type="datetime-local"],input[type="time"],input[type="date"]{
+    -webkit-appearance:none;appearance:none;width:100%;min-width:0;max-width:100%}
   .field{min-width:0}
+  .form-grid > *{min-width:0}
 }
 
 /* Monitor: Untertitel in der Abschnitts-/BR-Kachel (z. B. Bereitstellungsraum-Ort) */

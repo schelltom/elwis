@@ -300,6 +300,8 @@ function sichtbareTabs(){ return istGrossesGeraet() ? TABS : TABS.filter(t => !t
 function defaultConfig(){
   return {
     ugName:"UG-Weiden",
+    elwFunk:"Kater Weiden 1/12/1",   // Funkrufname des ELW – vorbelegt als Empfänger im Funktagebuch
+    w3wKey:"VLTV5K26",                // what3words-API-Key (für die 3-Wörter → Adresse-Umwandlung, nur online)
     prefixes:{ FW:"Florian", BRK:"RK", POL:"Donau", THW:"Heros", SON:"" },
     ilsName:"ILS Nordoberpfalz",
     ilsGruppe:{mode:"TMO",gruppe:""},
@@ -317,7 +319,7 @@ function defaultState(){
   return {
     einsatzId: uid(),                      // Identität für den Sync (welcher Einsatz?)
     einsatzStart: new Date().toISOString(),
-    einsatz: { stichwort:"", ort:"", objekt:"", beginn:"", ende:"", leiter:"", bereitstellungsraum:"", bemerkung:"", ilsGruppe:{mode:"TMO",gruppe:"2772"} },
+    einsatz: { stichwort:"", ort:"", objekt:"", beginn:"", ende:"", leiter:"", bereitstellungsraum:"", bereitstellung:false, bemerkung:"", ilsGruppe:{mode:"TMO",gruppe:"2772"} },
     einheiten: [], fuehrung: [], abschnitte: [], archiv: [],
     lage: { items: [], bg: "", snapshots: [], mode: "raster", mapView: null, mapLayer: "luftbild" },
     funk: [], besprechungen: [], anforderungen: [], checks: [], fotos: [],
@@ -337,6 +339,7 @@ function zustandAufbauen(stored){
   state = Object.assign(defaultState(), stored);
   state.config = Object.assign(defaultConfig(), stored.config || {});
   state.config.prefixes = Object.assign(defaultConfig().prefixes, (stored.config||{}).prefixes || {});
+  if(!state.config.w3wKey) state.config.w3wKey = defaultConfig().w3wKey;   // Key auch bei Altkonfig sicherstellen
   // Fahrzeugkatalog: beim ersten Start aus der Vorlage befüllen, danach frei pflegbar
   if(!Array.isArray(state.config.katalog)) state.config.katalog = FZG_KATALOG.map(k => ({...k, org:"FW"}));
   // Einsatzstichwort-Katalog: beim ersten Start aus der Vorlage befüllen, danach frei pflegbar
@@ -447,7 +450,7 @@ function modal(opts){
     <div class="modal-backdrop"></div>
     <div class="modal" role="alertdialog" aria-modal="true">
       ${opts.titel ? `<h2>${esc(opts.titel)}</h2>` : ""}
-      <p>${esc(opts.text)}</p>
+      ${opts.html ? opts.html : `<p>${esc(opts.text)}</p>`}
       <div class="modal-btns">
         ${opts.abbrechen ? `<button class="btn btn-ghost" data-md="0">${esc(opts.abbrechen)}</button>` : ""}
         <button class="btn btn-primary" data-md="1">${esc(opts.ok || "OK")}</button>
@@ -570,10 +573,18 @@ function attachDictation(btn, target){
   btn.addEventListener("click", () => {
     if(rec){ rec.stop(); return; }
     rec = new SR();
-    rec.lang = "de-DE"; rec.continuous = true; rec.interimResults = false;
+    rec.lang = "de-DE"; rec.continuous = true; rec.interimResults = true;
+    // Bestehenden Feldinhalt merken; bei jedem Ereignis das Feld live neu aufbauen:
+    // erkannte (finale) + noch vorläufige Wörter direkt anzeigen, nicht erst beim Stoppen.
+    const base = target.value ? target.value.replace(/\s+$/, "") : "";
     rec.onresult = ev => {
-      const t = [...ev.results].slice(ev.resultIndex).map(r => r[0].transcript).join(" ").trim();
-      if(t) target.value = (target.value ? target.value + " " : "") + t;
+      const fin = [], vorlaeufig = [];
+      for(let i = 0; i < ev.results.length; i++){
+        const r = ev.results[i];
+        (r.isFinal ? fin : vorlaeufig).push(r[0].transcript.trim());
+      }
+      const gesprochen = [...fin, ...vorlaeufig].filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
+      target.value = base ? (gesprochen ? base + " " + gesprochen : base) : gesprochen;
       target.dispatchEvent(new Event("input"));
     };
     rec.onend = () => { rec = null; btn.classList.remove("rec"); };
@@ -719,6 +730,16 @@ function renderSettingsSheet(){
         <input id="cfg-ug" value="${esc(c.ugName)}" placeholder="z. B. UG-Weiden" autocomplete="off">
         <p class="hint">Erscheint auf Startbildschirm, Kopfzeile und Einsatzbericht – so ist die Anwendung je Installation anpassbar (UG, Feuerwehr, Landkreis …).</p>
       </div>
+      <div class="field">
+        <label for="cfg-elw">Standard-Empfänger Funkgespräche (ELW)</label>
+        <input id="cfg-elw" class="mono" value="${esc(c.elwFunk||"")}" placeholder="z. B. Kater Weiden 1/12/1" autocomplete="off">
+        <p class="hint">Funkrufname des ELW – wird im Funktagebuch als Empfänger („An“) vorbelegt.</p>
+      </div>
+      <div class="field">
+        <label for="cfg-w3w">what3words API-Key</label>
+        <input id="cfg-w3w" class="mono" value="${esc(c.w3wKey||"")}" placeholder="kostenlos bei what3words registrieren" autocomplete="off">
+        <p class="hint">Ermöglicht in den Einsatzstammdaten die Umwandlung von <em>3 Wörtern</em> in eine echte Adresse (nur online). Ohne Key bleibt die Funktion inaktiv.</p>
+      </div>
       <div class="field"><label style="margin-bottom:10px">Funkskizze / Leitstelle</label>
         <div class="form-grid">
           <div class="field"><label for="cfg-ils">Leitstelle</label>
@@ -795,6 +816,8 @@ function renderSettingsSheet(){
   </div>`;
   const leseSettings = () => {
     state.config.ugName = $("#cfg-ug").value.trim();
+    state.config.elwFunk = $("#cfg-elw").value.trim();
+    state.config.w3wKey = $("#cfg-w3w").value.trim();
     state.config.ilsName = $("#cfg-ils").value.trim();
     state.config.ilsGruppe = { mode: $("#cfg-ils-mode").value, gruppe: $("#cfg-ilsgrp").value.trim() };
     document.querySelectorAll("[data-pfx]").forEach(inp => {
@@ -918,6 +941,12 @@ function renderEinsatz(){
         <input id="f-ort" data-ez="ort" value="${esc(e.ort)}" placeholder="Straße, Ort"></div>
       <div class="field"><label for="f-obj">Objekt</label>
         <input id="f-obj" data-ez="objekt" value="${esc(e.objekt||"")}" placeholder="z. B. Klinikum Weiden"></div>
+      <div class="field span2"><label for="f-w3w">Einsatzort per what3words</label>
+        <div class="w3w-row">
+          <input id="f-w3w" placeholder="wort.wort.wort" autocomplete="off" spellcheck="false">
+          <button type="button" class="btn btn-ghost" id="f-w3w-go">→ Einsatzort</button>
+        </div>
+        <p class="hint" style="margin:.4rem 0 0">3 Wörter in eine Adresse umwandeln und in den Einsatzort übernehmen (online; API-Key im Zahnrad).</p></div>
       <div class="field"><label for="f-beg">Alarmzeit</label>
         <input id="f-beg" data-ez="beginn" type="datetime-local" value="${esc(e.beginn)}"></div>
       <div class="field"><label for="f-ende">Einsatzende <span style="text-transform:none;font-weight:500">(wird beim Beenden gesetzt)</span></label>
@@ -926,11 +955,20 @@ function renderEinsatz(){
         <input id="f-el" data-ez="leiter" value="${esc(e.leiter)}" placeholder="Name / Funktion"></div>
       <div class="field"><label for="f-lb">Nächste Lagebesprechung</label>
         <input id="f-lb" data-ez="lagebespr" type="time" class="mono" value="${esc(e.lagebespr||"")}"></div>
-      <div class="field span2"><label for="f-br">Bereitstellungsraum</label>
-        <input id="f-br" data-ez="bereitstellungsraum" value="${esc(e.bereitstellungsraum||"")}" placeholder="z. B. Parkplatz Süd, Volksfestplatz"></div>
-      <div class="field span2" style="margin-bottom:0"><label for="f-bem">Bemerkungen</label>
+      <div class="field span2">
+        <div class="field-head">
+          <label for="f-br" style="margin:0">${e.bereitstellung ? "Bereitstellungsraum" : "Verfügungsraum"}</label>
+          <button type="button" id="br-switch" class="wlan-switch" role="switch" aria-checked="${e.bereitstellung ? "true" : "false"}" title="Als Bereitstellungsraum kennzeichnen – legt automatisch einen Einsatzabschnitt an">
+            <span>Bereitstellungsraum</span><span class="track"></span>
+          </button>
+        </div>
+        <input id="f-br" data-ez="bereitstellungsraum" value="${esc(e.bereitstellungsraum||"")}" placeholder="z. B. Parkplatz Süd, Volksfestplatz">
+        ${e.bereitstellung ? `<p class="hint" style="margin:.4rem 0 0">Einsatzabschnitt „Bereitstellungsraum“ ist angelegt. Schalter aus → Abschnitt wird wieder gelöscht.</p>` : ""}</div>
+      <div class="field span2"><label for="f-bem">Bemerkungen</label>
         <textarea id="f-bem" data-ez="bemerkung" placeholder="Lage, Abschnitte, Besonderheiten …">${esc(e.bemerkung)}</textarea></div>
     </div>
+    <button class="btn btn-ghost btn-block" id="btnOcr" style="margin-top:14px">📷&nbsp; Aus Alarm-Foto einlesen (Einsatzort &amp; Fahrzeuge)</button>
+    <p class="hint" style="margin:.5rem 0 0">Foto/Screenshot/Fax der Alarmierung offline auslesen: Einsatzadresse und alarmierte Fahrzeuge werden vorgeschlagen und vor der Übernahme im Fenster geprüft.</p>
   </div>
   <div class="card">
     <h2>Einsatzabschnitte</h2>
@@ -973,6 +1011,7 @@ function wireEinsatz(){
   document.querySelectorAll("[data-ez]").forEach(inp => {
     inp.addEventListener("change", () => {
       state.einsatz[inp.dataset.ez] = inp.value;
+      if(inp.dataset.ez === "leiter") syncEinsatzleiterFk();
       markChange(); renderHeader();
     });
   });
@@ -980,6 +1019,10 @@ function wireEinsatz(){
   const saveIls = () => { state.einsatz.ilsGruppe = { mode: ilsMode.value, gruppe: ilsGrp.value.trim() }; markChange(); };
   if(ilsMode) ilsMode.addEventListener("change", saveIls);
   if(ilsGrp) ilsGrp.addEventListener("change", saveIls);
+  const brSw = $("#br-switch"); if(brSw) brSw.addEventListener("click", toggleBereitstellung);
+  const w3wGo = $("#f-w3w-go"); if(w3wGo) w3wGo.addEventListener("click", w3wAufloesen);
+  const w3wIn = $("#f-w3w"); if(w3wIn) w3wIn.addEventListener("keydown", ev => { if(ev.key === "Enter"){ ev.preventDefault(); w3wAufloesen(); } });
+  const ocr = $("#btnOcr"); if(ocr) ocr.addEventListener("click", openOcrAssistent);
   $("#abAdd").addEventListener("click", () => openAbEditor(null));
   document.querySelectorAll("[data-abedit]").forEach(b =>
     b.addEventListener("click", () => openAbEditor(b.dataset.abedit)));
@@ -1000,7 +1043,7 @@ function wireEinsatz(){
     });
   });
   $("#btnPrintNow").addEventListener("click", () =>
-    doPrint({ einsatz:state.einsatz, einheiten:state.einheiten, fuehrung:state.fuehrung,
+    openPrintDialog({ einsatz:state.einsatz, einheiten:state.einheiten, fuehrung:state.fuehrung,
       abschnitte:state.abschnitte, funk:state.funk, besprechungen:state.besprechungen,
       anforderungen:state.anforderungen, checks:state.checks,
       asTraeger:state.asTraeger, asTrupps:state.asTrupps,
@@ -1010,7 +1053,7 @@ function wireEinsatz(){
     b.addEventListener("click", () => aktiviereArchiv(b.dataset.aakt)));
   document.querySelectorAll("[data-aprint]").forEach(b => b.addEventListener("click", () => {
     const a = state.archiv.find(x => x.id === b.dataset.aprint);
-    if(a) doPrint(a);
+    if(a) openPrintDialog(a);
   }));
   document.querySelectorAll("[data-adel]").forEach(b => b.addEventListener("click", () => {
     modalConfirm("Diesen Archiveintrag wirklich löschen?").then(ok => { if(!ok) return;
@@ -1018,6 +1061,51 @@ function wireEinsatz(){
       markChange(); render();
     });
   }));
+}
+/* Schalter „Bereitstellungsraum": ein → Feld heißt „Bereitstellungsraum" und ein gleichnamiger
+   Einsatzabschnitt wird automatisch angelegt (Marker br:true); aus → Feld heißt wieder
+   „Verfügungsraum" und der automatische Abschnitt wird gelöscht. */
+function toggleBereitstellung(){
+  const e = state.einsatz;
+  if(!e.bereitstellung){
+    e.bereitstellung = true;
+    if(!state.abschnitte.some(a => a.br)){
+      state.abschnitte.push({ id:uid(), name:"Bereitstellungsraum", ansprechpartner:"",
+        fuehrung:{ mode:"TMO", gruppe:"" }, arbeit:{ mode:"DMO", gruppe:"" }, br:true });
+    }
+    markChange(); render();
+  }else{
+    const ea = state.abschnitte.find(a => a.br);
+    const zugeordnet = ea ? state.einheiten.filter(u => u.abschnitt === ea.id).length : 0;
+    const weiter = () => {
+      e.bereitstellung = false;
+      if(ea){
+        state.abschnitte = state.abschnitte.filter(a => !a.br);
+        state.einheiten.forEach(u => { if(u.abschnitt === ea.id) u.abschnitt = ""; });
+      }
+      markChange(); render();
+    };
+    if(zugeordnet) modalConfirm(`Bereitstellungsraum ausschalten? Der Einsatzabschnitt „Bereitstellungsraum" wird gelöscht; ${zugeordnet} zugeordnete Einheit${zugeordnet===1?"":"en"} bleiben erhalten (ohne Abschnitt).`).then(ok => { if(ok) weiter(); });
+    else weiter();
+  }
+}
+/* Einsatzleiter-Feld ↔ Führungskraft koppeln: Eingetragener EL wird automatisch als
+   Führungskraft „Einsatzleiter" geführt (Marker elAuto); beim Leeren wieder entfernt. */
+function syncEinsatzleiterFk(){
+  const val = (state.einsatz.leiter || "").trim();
+  let fk = state.einsatz.leiterFkId ? state.fuehrung.find(f => f.id === state.einsatz.leiterFkId) : null;
+  if(val){
+    if(!fk){
+      fk = { id:uid(), org:"FW", name:val, funktion:"Einsatzleiter", funkrufname:"", einheit:"", tatsaechlich:true, elAuto:true };
+      state.fuehrung.push(fk);
+      state.einsatz.leiterFkId = fk.id;
+    }
+    fk.name = val;
+    if(!fk.funktion) fk.funktion = "Einsatzleiter";
+  }else if(fk){
+    if(fk.elAuto) state.fuehrung = state.fuehrung.filter(f => f.id !== fk.id);   // nur automatisch angelegte wieder entfernen
+    state.einsatz.leiterFkId = "";
+  }
 }
 /* Einsatz als Datei sichern / einlesen – Backup, Gerätewechsel, „Sync per USB-Stick“ */
 function exportEinsatz(){
@@ -1252,7 +1340,7 @@ async function endeEinsatz(){
   const entry = baueArchivEintrag();
   state.archiv.push(entry);
   state.einsatzId = uid(); state.einsatzStart = new Date().toISOString();
-  state.einsatz = { stichwort:"", ort:"", objekt:"", beginn:nowLocalInput(), ende:"", leiter:"", bereitstellungsraum:"", bemerkung:"", ilsGruppe:{mode:"TMO",gruppe:"2772"} };
+  state.einsatz = { stichwort:"", ort:"", objekt:"", beginn:nowLocalInput(), ende:"", leiter:"", bereitstellungsraum:"", bereitstellung:false, bemerkung:"", ilsGruppe:{mode:"TMO",gruppe:"2772"} };
   state.einheiten = []; state.fuehrung = []; state.abschnitte = [];
   state.lage = { items: [], bg: "", snapshots: [], mode: "raster", mapView: null, mapLayer: "luftbild" };
   state.funk = []; state.besprechungen = [];
@@ -1265,7 +1353,7 @@ async function endeEinsatz(){
     catch(e2){ state.archiv.pop(); markChange(); modalInfo("Lokaler Speicher voll – Einsatz konnte nicht archiviert werden. Bitte erst exportieren oder alte Archiveinträge löschen."); return; }
   }
   render();
-  if(await modalConfirm("Einsatz archiviert. Bericht jetzt drucken?", "Drucken", "Später")) doPrint(entry);
+  if(await modalConfirm("Einsatz archiviert. Bericht jetzt drucken?", "Drucken", "Später")) openPrintDialog(entry);
 }
 function loadDemo(){
   const t = (minAgo) => new Date(Date.now() - minAgo*60000).toISOString();
@@ -1392,7 +1480,10 @@ function renderKraefte(){
       <button class="btn btn-ghost" id="btnDemo2">Beispieldaten laden</button>
     </div>`;
   }else if(state.abschnitte.length || sorted.some(u => u.abschnitt === "BR")){
-    const groups = [...state.abschnitte, { id:"BR", name:"Bereitstellungsraum" }, { id:"", name:"Ohne Abschnitt" }];
+    // Legacy-„BR" nur, wenn kein echter Bereitstellungs-Abschnitt existiert (sonst doppelt)
+    const legacyBR = (!state.abschnitte.some(a => a.br) && sorted.some(u => u.abschnitt === "BR"))
+      ? [{ id:"BR", name:"Bereitstellungsraum" }] : [];
+    const groups = [...state.abschnitte, ...legacyBR, { id:"", name:"Ohne Abschnitt" }];
     list = groups.map(g => {
       const us = sorted.filter(u => (u.abschnitt||"") === g.id);
       if(!us.length) return "";
@@ -1410,8 +1501,7 @@ function renderKraefte(){
     <div class="stat"><div class="k">Einheiten</div><div class="v mono">${act.length}</div><div class="s">an E-Stelle</div></div>
   </div>
   ${seg}
-  <button class="btn btn-primary btn-block" id="btnAdd" style="margin-bottom:${state.ksub==="einheiten"?"8px":"16px"}">＋&nbsp; Kraft erfassen</button>
-  ${state.ksub==="einheiten" ? `<button class="btn btn-ghost btn-block" id="btnOcr" style="margin-bottom:16px">📷&nbsp; Fahrzeuge aus Alarm-Foto einlesen</button>` : ""}
+  <button class="btn btn-primary btn-block" id="btnAdd" style="margin-bottom:16px">＋&nbsp; Kraft erfassen</button>
   ${list}`;
 }
 function unitCard(u){
@@ -1452,7 +1542,6 @@ function wireKraefte(){
   document.querySelectorAll("[data-ksub]").forEach(b =>
     b.addEventListener("click", () => { state.ksub = b.dataset.ksub; save(); render(); }));
   const add = $("#btnAdd");   if(add) add.addEventListener("click", () => openEditor(null));
-  const ocr = $("#btnOcr");   if(ocr) ocr.addEventListener("click", openOcrAssistent);
   const addFk = $("#btnAddFk"); if(addFk) addFk.addEventListener("click", () => openFkEditor(null));
   const addAf = $("#btnAddAf"); if(addAf) addAf.addEventListener("click", () => openAfEditor(null));
   document.querySelectorAll("[data-editaf]").forEach(el =>
@@ -1519,19 +1608,88 @@ async function pdfSeiten(file){
   return seiten;
 }
 function ocrKandidaten(text){
-  // Fahrzeugzeilen „… <Funkruf> <Ort> <Funkkennung>": FL = Florian (Löschfahrzeug), Kater = ELW.
-  // Danach Ort, danach Kennung. Alle anderen Zeilen werden ignoriert.
-  const RE = /\b(F[LI1]|Kater)\b\s+([A-Za-zÄÖÜäöüß.\-]+(?:\s+[A-Za-zÄÖÜäöüß.\-]+){0,2})\s+(\d{1,2}\/\d{1,2}(?:\/\d{1,3})?)/i;
+  // Fahrzeugzeilen „… <Funkruf> <Ort> <Funkkennung>": FL = Florian (Löschfahrzeug), Kater = ELW
+  // → Feuerwehr; Heros = THW. Danach Ort, danach Kennung. Andere Zeilen werden ignoriert.
+  const RE = /\b(F[LI1]|Kater|Heros)\b\s+([A-Za-zÄÖÜäöüß.\-]+(?:\s+[A-Za-zÄÖÜäöüß.\-]+){0,2})\s+(\d{1,2}\/\d{1,2}(?:\/\d{1,3})?)/i;
   const out = [];
   (text || "").split(/\r?\n/).forEach(line => {
     const l = line.replace(/\s+/g, " ").trim();
     const m = l.match(RE);
     if(!m) return;
-    const funk = /^kater/i.test(m[1]) ? "Kater" : "Florian";
+    const funk = /^kater/i.test(m[1]) ? "Kater" : /^heros/i.test(m[1]) ? "Heros" : "Florian";
+    const org = funk === "Heros" ? "THW" : "FW";
     const ort = m[2].trim();
-    out.push({ raw: l, ort, kennung: m[3], name: `${funk} ${ort}`.trim() });
+    out.push({ raw: l, ort, kennung: m[3], name: `${funk} ${ort}`.trim(), org });
   });
   return out;
+}
+/* Einsatzadresse aus dem Alarm-Foto lesen (steht im Screenshot/Fax über der Fahrzeug-Liste).
+   Erst label-basiert (Straße:/Ort:/Einsatzort:), sonst heuristisch:
+   - Ort  = PLZ + Ort (z. B. „92637 Weiden i.d.OPf.“)
+   - Straße = ganze Zeile mit Straßen-Suffix (inkl. Zusatz wie „Obere …“), bevorzugt mit Hausnummer;
+     „Abschnitt:“-Zeilen werden ausgeschlossen.
+   Ergebnis ist ein Vorschlag – wird im Fenster geprüft, bevor es übernommen wird. */
+function ocrAdresse(text){
+  const lines = (text || "").split(/\r?\n/).map(l => l.replace(/\s+/g, " ").trim()).filter(Boolean);
+  const SUF = "(?:stra[ßs]{1,2}e|str\\.|weg|platz|gasse|allee|ring|damm|ufer|steig|markt)";
+  const sufRe = new RegExp(SUF + "\\b", "i");
+  let strasse = "", ort = "";
+  for(const l of lines){
+    let m;
+    if(!strasse && (m = l.match(new RegExp("^(?:einsatz\\s*)?(?:" + SUF + "|adresse|einsatzort)\\s*[:.\\-]\\s*(.+)$", "i")))) strasse = m[1].trim();
+    else if(!ort && (m = l.match(/^(?:plz\s*\/?\s*)?ort\s*[:.\-]\s*(.+)$/i))) ort = m[1].trim();
+  }
+  if(!ort) for(const l of lines){ const m = l.match(/\b(\d{5}\s+[A-ZÄÖÜ][A-Za-zÄÖÜäöüß.\-]+(?:\s+[A-Za-zÄÖÜäöüß.\-]+){0,3})/); if(m){ ort = m[1].trim(); break; } }
+  if(!strasse){
+    const kand = lines.filter(l => !/^abschnitt\b/i.test(l) && sufRe.test(l));
+    const hit = kand.find(l => /\d{1,4}\s*[a-z]?$/.test(l)) || kand[0] || "";
+    strasse = hit.replace(/^abschnitt\s*[:.\-]\s*/i, "").trim();
+  }
+  // OCR-Müll entfernen: Pipes raus, führenden und nachlaufenden Nicht-Adress-Müll
+  // (Ziffern/Striche vorn, Klammern/Quotes/Backslash hinten) abschneiden.
+  strasse = strasse.replace(/\|/g, " ")
+                   .replace(/^[^A-Za-zÄÖÜäöüß]+/, "")
+                   .replace(/[^0-9A-Za-zÄÖÜäöüß.]+$/, "")
+                   .replace(/\s+/g, " ").trim();
+  return [strasse, ort].filter(Boolean).join(", ");
+}
+/* Alarmzeit aus dem Alarm-Foto lesen (steht ganz oben, z. B. „27.07.26 08:42  Alarmierung“).
+   Erste/oberste Datum-Uhrzeit gewinnt (Alarmierung steht über dem Einsatzende).
+   Rückgabe: { val: datetime-local-Wert, roh: Anzeige } oder null. */
+function ocrDatum(text){
+  const m = (text || "").match(/\b(\d{1,2})\.(\d{1,2})\.(\d{2,4})\s+(\d{1,2}):(\d{2})\b/);
+  if(!m) return null;
+  let [, d, mo, y, h, mi] = m;
+  if(y.length === 2) y = "20" + y;
+  const p2 = n => String(n).padStart(2, "0");
+  const val = `${y}-${p2(mo)}-${p2(d)}T${p2(h)}:${p2(mi)}`;
+  if(isNaN(new Date(val))) return null;
+  return { val, roh: `${p2(d)}.${p2(mo)}.${y} ${p2(h)}:${p2(mi)}` };
+}
+/* Einsatzstichwort aus dem Alarm-Foto lesen: steht über dem Label „Stichwort“
+   (z. B. „B BMA“ oder „B 4 Brand Gewerbe“). Der Block darüber gehört zur Auslöser-/eMID-Sektion –
+   diese Zeilen (eMID, D_150, Wachalarm, #-Codes, ELP) werden ausgeschlossen. Bevorzugt eine Zeile,
+   die wie ein Feuerwehr-Stichwort beginnt (B/THL/H/…); sonst Kurzform aus einer Klammer „(B BMA)“. */
+function ocrStichwort(text){
+  const raw = (text || "").split(/\r?\n/).map(l => l.replace(/\s+/g, " ").trim());
+  const idx = raw.findIndex(l => /^stichwort\b/i.test(l) && l.length <= 20);
+  if(idx < 0) return "";
+  const HARD = /^(alarmierung|ausl[öo0eéë]*s?er|einsatzplan|einsatzort|geforderte|beendet|meldebild|priorit|ort$)/i;
+  const JUNK = l => !l || /^[#>|]/.test(l) || /^emid\b/i.test(l) || /^elp\b/i.test(l)
+    || /\bD[_ ]?\d{2,}\b/i.test(l) || /wachalarm|wa[- ]?technik/i.test(l) || /^stichwort/i.test(l);
+  const STW = /^(B|THL|TH|RD|R|ABC|H|IUK|SEG|Ö[Ll]|OEL|VU|VER|MANV|ELW|IN|SI)\b/;
+  const block = [], clean = [];
+  for(let i = idx - 1; i >= 0 && block.length < 8; i--){
+    const l = raw[i];
+    if(l === ""){ if(block.length) break; else continue; }
+    if(HARD.test(l)) break;
+    block.unshift(l);
+    if(!JUNK(l)) clean.unshift(l);
+  }
+  let val = clean.find(l => STW.test(l));
+  if(!val){ const par = (block.join(" ").match(/\(([^)]{2,40})\)/) || [])[1]; if(par && STW.test(par.trim())) val = par.trim(); }
+  if(!val) val = clean[0] || "";
+  return val.replace(/\|/g, "").replace(/^[#>\s]+/, "").replace(/\s+/g, " ").trim();
 }
 // Default-Besatzung (Schätzung) aus der Funkkennung. Typ-Zahl = zweitletzte Ziffernstelle
 // (z. B. 1/40/2 → 40, 46/1 → 46). < 10 ⇒ Führungskraft. Personenzahl je Typ-Bereich:
@@ -1550,7 +1708,16 @@ function ocrKatalogTreffer(kennung){
   const norm = s => (s || "").replace(/\s/g, "").toLowerCase();
   return (state.config.katalog || []).find(k => k.kennung && norm(k.kennung) === norm(kennung)) || null;
 }
-let ocrList = [];   // { raw, kennung, kat }
+let ocrList = [];   // Fahrzeuge: { raw, kennung, kat, org }
+// Erkannte Kopfdaten (im Fenster prüf-/editier-/entfernbar). „Touched“ = manuell geändert,
+// „Erkannt“ = kam aus einem Scan. Über mehrere Fotos hinweg gewinnt der erste Treffer.
+let ocrAddr = "", ocrAddrTouched = false, ocrAddrErkannt = false;
+let ocrDateVal = "", ocrDateTouched = false, ocrDateErkannt = false;
+let ocrStw = "", ocrStwTouched = false, ocrStwErkannt = false;
+function ocrMergeAdresse(text){ const a = ocrAdresse(text);   if(a && !ocrAddrTouched && !ocrAddr){ ocrAddr = a;    ocrAddrErkannt = true; } }
+function ocrMergeDatum(text){   const d = ocrDatum(text);     if(d && !ocrDateTouched && !ocrDateVal){ ocrDateVal = d.val; ocrDateErkannt = true; } }
+function ocrMergeStichwort(text){ const s = ocrStichwort(text); if(s && !ocrStwTouched && !ocrStw){ ocrStw = s;    ocrStwErkannt = true; } }
+function ocrMergeKopf(text){ ocrMergeDatum(text); ocrMergeStichwort(text); ocrMergeAdresse(text); }
 function ocrMerge(kandidaten){
   const norm = s => (s || "").replace(/\s/g, "").toLowerCase();
   for(const c of kandidaten){
@@ -1600,12 +1767,24 @@ async function ocrKamera(){
       const w = await tessWorker();
       const { data } = await w.recognize(c);
       const kand = ocrKandidaten(data.text);
-      ocrMerge(kand); renderOcrSheet(); setProg("");
-      if(!kand.length) modalInfo("Kein Fahrzeug erkannt. Foto näher/schärfer halten (Funkkennung muss lesbar sein) – oder „Datei / PDF wählen“.");
+      ocrMerge(kand); ocrMergeKopf(data.text); renderOcrSheet(); setProg("");
+      const hinweis = ocrNixErkannt(); if(hinweis) modalInfo(hinweis);
     }catch(err){ setProg(""); modalInfo("Einlesen nicht möglich: " + (err.message || err)); }
   });
 }
-function openOcrAssistent(){ ocrList = []; renderOcrSheet(); }
+function openOcrAssistent(){
+  ocrList = [];
+  ocrAddr = ""; ocrAddrTouched = false; ocrAddrErkannt = false;
+  ocrDateVal = ""; ocrDateTouched = false; ocrDateErkannt = false;
+  ocrStw = ""; ocrStwTouched = false; ocrStwErkannt = false;
+  renderOcrSheet();
+}
+// Prüft nach einem Scan, ob nichts erkannt/eingetragen wurde. Rückgabe: Hinweistext, sonst "".
+// Mehrere Fotos sind erlaubt – der Hinweis kommt nur, solange gar nichts vorliegt.
+function ocrNixErkannt(){
+  if(ocrList.length || ocrAddr || ocrDateVal || ocrStw) return "";
+  return "Nichts erkannt (weder Alarmzeit, Stichwort, Einsatzort noch Fahrzeug). Bitte ein neues, schärferes Foto aufnehmen oder „Datei / PDF wählen“ – du kannst mehrere Fotos nacheinander einlesen.";
+}
 function renderOcrSheet(){
   const rows = ocrList.map((c, i) => {
     const kat = c.kat;
@@ -1620,8 +1799,8 @@ function renderOcrSheet(){
   }).join("");
   $("#sheetHost").innerHTML = `
   <div class="sheet-backdrop" data-close="1"></div>
-  <div class="sheet" role="dialog" aria-modal="true" aria-label="Fahrzeuge aus Alarm-Foto">
-    <div class="sheet-head"><h2>Fahrzeuge aus Alarm-Foto</h2>
+  <div class="sheet" role="dialog" aria-modal="true" aria-label="Aus Alarm-Foto einlesen">
+    <div class="sheet-head"><h2>Aus Alarm-Foto einlesen</h2>
       <button class="sheet-close" data-close="1" aria-label="Schließen">×</button></div>
     <div class="sheet-body">
       <div class="field">
@@ -1632,19 +1811,46 @@ function renderOcrSheet(){
         </div>
         <input id="ocr-cam" type="file" accept="image/*" capture="environment" style="display:none">
         <input id="ocr-file" type="file" accept="image/*,application/pdf" multiple style="display:none">
-        <p class="hint">Läuft offline auf dem Gerät. Kamera (Tablet) oder Bilder <em>und PDF-Alarmfaxe</em> (alle Seiten); mehrere Dateien werden zusammengeführt (Doppelte fallen weg). Erkannte Fahrzeuge unten per ✕ entfernen. <span id="ocr-progress"></span></p>
+        <p class="hint">Läuft offline auf dem Gerät. <strong>Mehrere Fotos nacheinander</strong> möglich (z. B. Startseite + Fahrzeugliste); Erkanntes wird zusammengeführt, Doppelte fallen weg. Alarmzeit, Stichwort, Einsatzort und Fahrzeuge lassen sich per ✕ verwerfen; vor der Übernahme kommt eine Übersicht. <span id="ocr-progress"></span></p>
       </div>
+      <div class="field"><label for="ocr-date">Alarmzeit (erkannt – bitte prüfen)</label>
+        <div class="ocr-kopf">
+          <input id="ocr-date" type="datetime-local" value="${esc(ocrDateVal)}">
+          <button type="button" class="kat-x" data-ocr-clear="date" aria-label="Alarmzeit verwerfen"${ocrDateVal ? "" : " disabled"}>✕</button>
+        </div></div>
+      <div class="field"><label for="ocr-stw">Einsatzstichwort (erkannt – bitte prüfen)</label>
+        <div class="ocr-kopf">
+          <input id="ocr-stw" value="${esc(ocrStw)}" placeholder="z. B. B BMA / B 4 Brand Gewerbe">
+          <button type="button" class="kat-x" data-ocr-clear="stw" aria-label="Stichwort verwerfen"${ocrStw ? "" : " disabled"}>✕</button>
+        </div></div>
+      <div class="field"><label for="ocr-addr">Einsatzort (erkannt – bitte prüfen)</label>
+        <div class="ocr-kopf">
+          <input id="ocr-addr" value="${esc(ocrAddr)}" placeholder="Straße Nr., PLZ Ort">
+          <button type="button" class="kat-x" data-ocr-clear="addr" aria-label="Einsatzort verwerfen"${ocrAddr ? "" : " disabled"}>✕</button>
+        </div></div>
       <div class="field"><label style="margin-bottom:8px">Erkannte Fahrzeuge (${ocrList.length})</label>
         <div class="kat-list" id="ocr-list">${rows || `<p class="hint" style="margin:6px 4px">Noch nichts eingelesen – Bild wählen.</p>`}</div>
       </div>
     </div>
     <div class="sheet-foot">
-      <button class="btn btn-primary" id="ocr-add" style="flex:1"${ocrList.length ? "" : " disabled"}>Als Einheiten übernehmen (${ocrList.length})</button>
+      <button class="btn btn-primary" id="ocr-add" style="flex:1"${(ocrList.length || ocrDateVal || (ocrStw||"").trim() || (ocrAddr||"").trim()) ? "" : " disabled"}>Übernehmen …</button>
     </div>
   </div>`;
   document.querySelectorAll("[data-close]").forEach(el => el.addEventListener("click", closeEditor));
   document.querySelectorAll("[data-ocrdel]").forEach(b => b.addEventListener("click", () => {
     ocrList.splice(Number(b.dataset.ocrdel), 1); renderOcrSheet();
+  }));
+  const setAddBtn = () => { const add = $("#ocr-add"); if(add) add.disabled =
+    !(ocrList.length || ($("#ocr-date") && $("#ocr-date").value) || ($("#ocr-stw") && $("#ocr-stw").value.trim()) || ($("#ocr-addr") && $("#ocr-addr").value.trim())); };
+  const dInp = $("#ocr-date"); if(dInp) dInp.addEventListener("input", () => { ocrDateVal = dInp.value; ocrDateTouched = true; setAddBtn(); });
+  const sInp = $("#ocr-stw");  if(sInp) sInp.addEventListener("input", () => { ocrStw = sInp.value; ocrStwTouched = true; setAddBtn(); });
+  const aInp = $("#ocr-addr"); if(aInp) aInp.addEventListener("input", () => { ocrAddr = aInp.value; ocrAddrTouched = true; setAddBtn(); });
+  document.querySelectorAll("[data-ocr-clear]").forEach(b => b.addEventListener("click", () => {
+    const w = b.dataset.ocrClear;
+    if(w === "date"){ ocrDateVal = ""; ocrDateTouched = true; }
+    else if(w === "stw"){ ocrStw = ""; ocrStwTouched = true; }
+    else if(w === "addr"){ ocrAddr = ""; ocrAddrTouched = true; }
+    renderOcrSheet();
   }));
   $("#ocr-cam-btn").addEventListener("click", ocrKamera);
   $("#ocr-file-btn").addEventListener("click", () => $("#ocr-file").click());
@@ -1661,15 +1867,16 @@ function renderOcrSheet(){
           for(let s = 0; s < seiten.length; s++){
             setProg(`Datei ${i+1}/${files.length}: Seite ${s+1}/${seiten.length} … `);
             const { data } = await w.recognize(seiten[s]);
-            ocrMerge(ocrKandidaten(data.text)); renderOcrSheet();
+            ocrMerge(ocrKandidaten(data.text)); ocrMergeKopf(data.text); renderOcrSheet();
           }
         }else{
           setProg(`Datei ${i+1}/${files.length} … `);
           const { data } = await w.recognize(f);
-          ocrMerge(ocrKandidaten(data.text)); renderOcrSheet();
+          ocrMerge(ocrKandidaten(data.text)); ocrMergeKopf(data.text); renderOcrSheet();
         }
       }
       setProg("");
+      const hinweis = ocrNixErkannt(); if(hinweis) modalInfo(hinweis);
     }catch(err){
       setProg("");
       modalInfo("Einlesen nicht möglich: " + (err.message || err));
@@ -1677,31 +1884,70 @@ function renderOcrSheet(){
   };
   $("#ocr-cam").addEventListener("change", verarbeite);
   $("#ocr-file").addEventListener("change", verarbeite);
-  $("#ocr-add").addEventListener("click", () => {
-    let nE = 0, nF = 0;
-    for(const c of ocrList){
-      const k = c.kat, bes = defaultBesatzung(c.kennung);
-      if(bes && bes.fuehrung){
-        // Erster Kennungswert < 10 → Führungskraft (Schätzung). Bis zur Bestätigung steht der
-        // Funkrufname im Namensfeld (Person noch unbekannt); danach manuell überschreibbar.
-        const funkruf = [c.name, c.kennung].filter(Boolean).join(" ");
-        state.fuehrung.push({ id:uid(), org:"FW", name:funkruf, funktion:"",
-          funkrufname:funkruf, einheit:"", tatsaechlich:false });
-        nF++;
-      }else{
-        const crew = bes ? { f:bes.f, u:bes.u, m:bes.m }
-          : (k ? { f:k.f|0, u:k.u|0, m:k.m|0 } : { f:0, u:1, m:2 });
-        state.einheiten.push({ id:uid(), org: k ? (k.org||"FW") : "FW",
-          name: k ? k.name : (c.name || "Florian"), kennung: k ? k.kennung : (c.kennung || ""),
-          f:crew.f, u:crew.u, m:crew.m, agt: k ? (k.agt|0) : 0, csa: k ? (k.csa|0) : 0,
-          ankunft:new Date().toISOString(), abgerueckt:false, abschnitt:"", tatsaechlich:false });
-        nE++;
-      }
+  $("#ocr-add").addEventListener("click", ocrUebernehmen);
+}
+// Übernahme aus dem Alarm-Foto: Auswahl zusammenstellen, Duplikate (bereits erfasste Kennungen)
+// überspringen, Übersicht als Rückfrage zeigen und erst nach Bestätigung alles übernehmen.
+function ocrUebernehmen(){
+  const datum = ($("#ocr-date") ? $("#ocr-date").value : ocrDateVal).trim();
+  const stw   = ($("#ocr-stw")  ? $("#ocr-stw").value  : ocrStw).trim();
+  const ort   = ($("#ocr-addr") ? $("#ocr-addr").value : ocrAddr).trim();
+  const norm = s => (s || "").replace(/\s/g, "").toLowerCase();
+  const vorhanden = new Set(state.einheiten.filter(u => !u.abgerueckt).map(u => norm(u.kennung)).filter(Boolean));
+  const neueEinheiten = [], neueFk = [], fahrzeugeDisp = [], fkDisp = [], dubletten = [];
+  for(const c of ocrList){
+    const k = c.kat, bes = defaultBesatzung(c.kennung);
+    if(bes && bes.fuehrung){
+      // Kennung < 10 → Führungskraft (Schätzung); Funkrufname bis zur Klärung im Namensfeld.
+      const funkruf = [c.name, c.kennung].filter(Boolean).join(" ");
+      neueFk.push({ id:uid(), org: c.org || "FW", name:funkruf, funktion:"", funkrufname:funkruf, einheit:"", tatsaechlich:false });
+      fkDisp.push({ org: c.org || "FW", label: funkruf });
+    }else{
+      const org = k ? (k.org||"FW") : (c.org || "FW");
+      const name = k ? k.name : (c.name || "Florian");
+      const kennung = k ? k.kennung : (c.kennung || "");
+      const label = [name, kennung].filter(Boolean).join(" ");
+      if(kennung && vorhanden.has(norm(kennung))){ dubletten.push({ org, label }); continue; }   // schon erfasst → überspringen
+      if(kennung) vorhanden.add(norm(kennung));
+      const crew = bes ? { f:bes.f, u:bes.u, m:bes.m } : (k ? { f:k.f|0, u:k.u|0, m:k.m|0 } : { f:0, u:1, m:2 });
+      neueEinheiten.push({ id:uid(), org, name, kennung, f:crew.f, u:crew.u, m:crew.m,
+        agt: k ? (k.agt|0) : 0, csa: k ? (k.csa|0) : 0,
+        ankunft:new Date().toISOString(), abgerueckt:false, abschnitt:"", tatsaechlich:false });
+      fahrzeugeDisp.push({ org, label });
     }
+  }
+  const body = ocrUebersichtHtml({ datum, stw, ort, fahrzeugeDisp, fkDisp, dubletten });
+  modal({ titel: "Diese Daten übernehmen?", html: body, ok: "Übernehmen", abbrechen: "Abbrechen" }).then(ok => {
+    if(!ok) return;
+    if(datum) state.einsatz.beginn = datum;
+    if(stw)   state.einsatz.stichwort = stw;
+    if(ort)   state.einsatz.ort = ort;
+    neueEinheiten.forEach(u => state.einheiten.push(u));
+    neueFk.forEach(f => state.fuehrung.push(f));
     markChange(); closeEditor(); render();
-    modalInfo(`Übernommen als Schätzung: ${nE} Fahrzeug${nE===1?"":"e"}` + (nF ? `, ${nF} Führungskraft/-kräfte` : "") +
-      `.\nDie Personalstärke ist ein Schätzwert – bitte je Einheit prüfen und über „Stärke bestätigt" bestätigen.`);
   });
+}
+// Übersicht (Rückfrage) vor der Übernahme – Absätze + Org-Farben.
+function ocrUebersichtHtml({ datum, stw, ort, fahrzeugeDisp, fkDisp, dubletten }){
+  const chip = o => `<span class="chip chip-${esc(o)}">${esc((ORGS[o]||ORGS.SON).short)}</span>`;
+  const sektion = (ico, titel, inhalt, cls) => `
+    <div class="ok-row ${cls || ""}">
+      <span class="ok-ico">${ico}</span>
+      <div class="ok-body"><div class="ok-tt">${titel}</div>${inhalt}</div>
+    </div>`;
+  const liste = arr => `<ul class="ok-ul">${arr.map(x => `<li>${chip(x.org)} <span>${esc(x.label)}</span></li>`).join("")}</ul>`;
+  const teile = [];
+  if(datum){ const dt = new Date(datum);
+    const disp = isNaN(dt) ? datum : dt.toLocaleString("de-DE", { day:"2-digit", month:"2-digit", year:"numeric", hour:"2-digit", minute:"2-digit" }) + " Uhr";
+    teile.push(sektion("🕑", "Alarmzeit", `<div class="ok-addr">${esc(disp)}</div>`, "ok-ort")); }
+  if(stw) teile.push(sektion("🔺", "Einsatzstichwort", `<div class="ok-addr">${esc(stw)}</div>`));
+  if(ort) teile.push(sektion("📍", "Einsatzort", `<div class="ok-addr">${esc(ort)}</div>`, "ok-ort"));
+  if(fahrzeugeDisp.length) teile.push(sektion("🚒", `${fahrzeugeDisp.length} Fahrzeug${fahrzeugeDisp.length===1?"":"e"}`, liste(fahrzeugeDisp), "ok-fz"));
+  if(fkDisp.length) teile.push(sektion("👤", `${fkDisp.length} Führungskraft${fkDisp.length===1?"":"/-kräfte"}`, liste(fkDisp), "ok-fk"));
+  if(dubletten.length) teile.push(sektion("↩︎", `${dubletten.length} bereits erfasst – wird übersprungen`, liste(dubletten), "ok-dup"));
+  if(!teile.length) return `<p>Nichts ausgewählt.</p>`;
+  return `<div class="ok-list">${teile.join("")}</div>
+    <p class="ok-hint">Fahrzeuge und Führungskräfte sind eine <strong>Schätzung</strong> – bitte je Einheit prüfen und über „Stärke bestätigt“ bestätigen.</p>`;
 }
 
 /* ---------------- Editor: Einheit ---------------- */
@@ -1720,6 +1966,9 @@ function openEditor(id, prefill){
 function closeEditor(){
   editing = null; editingFk = null; editingAb = null;
   if(lgSnapObj){ try{ lgSnapObj.remove(); }catch(e){} lgSnapObj = null; }
+  if(lgCmpA){ try{ lgCmpA.remove(); }catch(e){} lgCmpA = null; }
+  if(lgCmpB){ try{ lgCmpB.remove(); }catch(e){} lgCmpB = null; }
+  if(document.fullscreenElement){ try{ document.exitFullscreen(); }catch(e){} }
   $("#sheetHost").innerHTML = "";
 }
 
@@ -1740,10 +1989,9 @@ function renderSheet(){
       <button data-step="${field}:1" aria-label="${label} erhöhen">＋</button>
     </div>`;
   const abField = `
-    <div class="field"><label>Einsatzabschnitt / Bereitstellung</label>
+    <div class="field"><label>Einsatzabschnitt</label>
       <div class="abpick">
         <button data-ab="" aria-pressed="${!u.abschnitt}">Kein Abschnitt</button>
-        <button data-ab="BR" aria-pressed="${u.abschnitt==="BR"}">Bereitstellungsraum</button>
         ${state.abschnitte.map(a => `
           <button data-ab="${esc(a.id)}" aria-pressed="${u.abschnitt===a.id}">${esc(a.name)}</button>`).join("")}
       </div>
@@ -2052,6 +2300,7 @@ function renderAbSheet(){
     modalConfirm(`Abschnitt „${a.name}“ löschen? Zugeordnete Einheiten bleiben erhalten (ohne Abschnitt).`).then(ok => { if(!ok) return;
       state.abschnitte = state.abschnitte.filter(x => x.id !== a.id);
       state.einheiten.forEach(u => { if(u.abschnitt === a.id) u.abschnitt = ""; });
+      if(a.br) state.einsatz.bereitstellung = false;   // Auto-Abschnitt manuell gelöscht → Schalter aus
       markChange(); closeEditor(); render();
     });
   });
@@ -2105,8 +2354,15 @@ function renderFkSheet(){
         <datalist id="fk-funktionen">${FUNKTIONEN.map(x=>`<option value="${esc(x)}">`).join("")}</datalist></div>
       <div class="field"><label for="fk-funkruf">Funkrufname</label>
         <input id="fk-funkruf" class="mono" value="${esc(f.funkrufname||"")}" placeholder="z. B. Florian Weiden 1" autocomplete="off"></div>
+      ${state.abschnitte.length ? `
+      <div class="field"><label for="fk-abschnitt">Einsatzabschnitt <span style="text-transform:none;font-weight:500">(optional)</span></label>
+        <select id="fk-abschnitt">
+          <option value="">– keinem Abschnitt zugeordnet –</option>
+          ${state.abschnitte.map(a => `<option value="${esc(a.name)}" ${f.einheit===a.name?"selected":""}>${esc(a.name)}</option>`).join("")}
+        </select>
+        <p class="hint" style="margin:.4rem 0 0">Vorhandenen Abschnitt wählen – oder unten frei eintragen.</p></div>` : ""}
       <div class="field"><label for="fk-einheit">Einheit / Abschnitt <span style="text-transform:none;font-weight:500">(optional)</span></label>
-        <input id="fk-einheit" value="${esc(f.einheit||"")}" placeholder="z. B. Abschnitt 1, ${esc(pfx("FW"))} Weiden 40/1" autocomplete="off"></div>
+        <input id="fk-einheit" value="${esc(f.einheit||"")}" placeholder="z. B. Abschnitt 1, ${esc(pfx("FW"))} Weiden 1/40/1" autocomplete="off"></div>
       <div class="field">
         <button class="leave-toggle" id="fk-tat" aria-pressed="${f.tatsaechlich !== false}">
           <span class="track"></span>
@@ -2137,6 +2393,10 @@ function renderFkSheet(){
   $("#fk-funktion").addEventListener("input", e => { f.funktion = e.target.value; });
   $("#fk-funkruf").addEventListener("input", e => { f.funkrufname = e.target.value; });
   $("#fk-einheit").addEventListener("input", e => { f.einheit = e.target.value; });
+  const fkAb = $("#fk-abschnitt");
+  if(fkAb) fkAb.addEventListener("change", () => {
+    if(fkAb.value){ f.einheit = fkAb.value; const inp = $("#fk-einheit"); if(inp) inp.value = fkAb.value; }
+  });
   const fkTat = $("#fk-tat");
   if(fkTat) fkTat.addEventListener("click", () => {
     f.tatsaechlich = !(f.tatsaechlich !== false);
@@ -2168,8 +2428,19 @@ function fsSuggestions(){
   state.einheiten.filter(u => u.abgerueckt).forEach(u => add(fullName(u)));
   state.fuehrung.forEach(f => { add(f.funkrufname); add(f.name); });
   state.abschnitte.forEach(a => { add(a.ansprechpartner); add(a.name); });
-  ["Leitstelle", "ELW", state.config.ugName].forEach(add);
+  ["Leitstelle", "ELW", state.config.elwFunk, state.config.ugName].forEach(add);
   return s;
+}
+/* Gruppierte <option>-Liste für die Funk-Auswahl (mobiltauglich, statt nur Datalist) */
+function fsPickOptions(){
+  const uniq = arr => { const s = new Set(), o = []; arr.forEach(v => { v = (v||"").trim(); if(v && !s.has(v)){ s.add(v); o.push(v); } }); return o; };
+  const opt = v => `<option value="${esc(v)}">${esc(v)}</option>`;
+  const grp = (label, arr) => arr.length ? `<optgroup label="${esc(label)}">${arr.map(opt).join("")}</optgroup>` : "";
+  const fahrzeuge = uniq([...aktive().map(fullName), ...state.einheiten.filter(u => u.abgerueckt).map(fullName)]);
+  const fk = uniq(state.fuehrung.flatMap(f => [f.funkrufname, f.name]));
+  const ab = uniq(state.abschnitte.flatMap(a => [a.name, a.ansprechpartner]));
+  const stellen = uniq([state.config.ilsName, "Leitstelle", "ELW", state.config.elwFunk, state.config.ugName]);
+  return grp("Fahrzeuge / Einheiten", fahrzeuge) + grp("Führungskräfte", fk) + grp("Abschnitte", ab) + grp("Stellen", stellen);
 }
 function renderFunk(){
   const list = [...state.funk].sort((a,b) => (b.zeit||"").localeCompare(a.zeit||""));
@@ -2236,7 +2507,7 @@ function openFsEditor(id){
     if(!f) return;
     editingFs = { fs: {...f}, isNew:false };
   }else{
-    editingFs = { fs: { id:uid(), zeit:new Date().toISOString(), von:"", an:state.config.ugName||"ELW",
+    editingFs = { fs: { id:uid(), zeit:new Date().toISOString(), von:"", an:state.config.elwFunk||"Kater Weiden 1/12/1",
       text:"", wichtig:false }, isNew:true };
   }
   renderFsSheet();
@@ -2245,6 +2516,7 @@ function renderFsSheet(){
   if(!editingFs){ $("#sheetHost").innerHTML = ""; return; }
   const f = editingFs.fs;
   const sugg = fsSuggestions().map(x => `<option value="${esc(x)}">`).join("");
+  const pick = fsPickOptions();
   $("#sheetHost").innerHTML = `
   <div class="sheet-backdrop" data-close="1"></div>
   <div class="sheet" role="dialog" aria-modal="true" aria-label="${editingFs.isNew?"Funkspruch erfassen":"Funkspruch bearbeiten"}">
@@ -2265,10 +2537,12 @@ function renderFsSheet(){
       <div class="field">
         <div class="swap-row">
           <div><label for="fs-von">Von (Sender)</label>
-            <input id="fs-von" value="${esc(f.von)}" list="fs-sugg" placeholder="z. B. Florian Weiden 40/1" autocomplete="off"></div>
+            <input id="fs-von" value="${esc(f.von)}" list="fs-sugg" placeholder="z. B. Florian Weiden 1/40/1" autocomplete="off">
+            ${pick ? `<select id="fs-von-pick" class="fs-pick" aria-label="Von aus erfassten wählen"><option value="">＋ aus erfassten wählen …</option>${pick}</select>` : ""}</div>
           <button class="swapbtn" id="fs-swap" title="Sender und Empfänger tauschen" aria-label="Sender und Empfänger tauschen">⇄</button>
           <div><label for="fs-an">An (Empfänger)</label>
-            <input id="fs-an" value="${esc(f.an)}" list="fs-sugg" placeholder="z. B. ELW" autocomplete="off"></div>
+            <input id="fs-an" value="${esc(f.an)}" list="fs-sugg" placeholder="z. B. Kater Weiden 1/12/1" autocomplete="off">
+            ${pick ? `<select id="fs-an-pick" class="fs-pick" aria-label="An aus erfassten wählen"><option value="">＋ aus erfassten wählen …</option>${pick}</select>` : ""}</div>
         </div>
         <datalist id="fs-sugg">${sugg}</datalist>
       </div>
@@ -2298,6 +2572,11 @@ function renderFsSheet(){
     $("#fs-von").value = $("#fs-an").value;
     $("#fs-an").value = v;
   });
+  const pickFill = (selId, inpId) => { const s = $("#" + selId); if(s) s.addEventListener("change", () => {
+    if(s.value){ const inp = $("#" + inpId); inp.value = s.value; inp.dispatchEvent(new Event("input")); } s.selectedIndex = 0;
+  }); };
+  pickFill("fs-von-pick", "fs-von");
+  pickFill("fs-an-pick", "fs-an");
   $("#fs-imp").addEventListener("click", () => {
     f.wichtig = !f.wichtig;
     $("#fs-imp").setAttribute("aria-pressed", f.wichtig);
@@ -3306,10 +3585,11 @@ function openBesprEditor(id){
 }
 
 /* ---------------- Ansicht: Monitor ---------------- */
-let monAbPage = 0;                 // aktuelle Abschnitts-Seite (3 Kacheln je Seite)
+let monAbPage = 0;                 // aktuelle Abschnitts-Seite
 let monAbLast = Date.now();        // Zeitpunkt des letzten Seitenwechsels
 let monAbPaused = false;           // Rotation per Play/Pause anhaltbar
 let monFull = false;               // Monitor-Vollbild: nur der graue Monitor, ohne App-Menü
+let monAbAvailH = 0;               // gemessene nutzbare Höhe für Abschnitts-Kacheln (px), self-correcting
 function rotateAbschnitte(){
   if(monAbPaused) return;
   const pages = monAbPagesCount();
@@ -3319,6 +3599,40 @@ function rotateAbschnitte(){
     monAbPage = (monAbPage + 1) % pages;
     render();
   }
+}
+// Spaltenzahl dynamisch aus der Breite: pro Kachel mind. ~360px, damit Fahrzeugname + AGT lesbar bleiben.
+function monAbColumns(){
+  const hp = state.monHide.panels;
+  const leftShown = (!hp.org || !hp.fk);   // linke Spalte (Stärke/FK) sichtbar → Kachelfläche schmaler
+  const w = window.innerWidth || 1280;
+  const gridW = (leftShown ? w * 0.78 : w) - 40;
+  return Math.max(1, Math.min(4, Math.floor((gridW + 10) / 360)));
+}
+// grobe (eher großzügige) Höhen-Schätzung einer Abschnitts-Kachel – für die Einpassung ohne Scroll
+function abCardEstH(card){
+  const funk = (card.opts && (gruppeStr(card.opts.fuehrung) || gruppeStr(card.opts.arbeit))) ? 34 : 0;
+  return 150 + funk + (card.units.length || 0) * 34;
+}
+// Seiten so packen, dass möglichst viele vollständige Kacheln (ganze Reihen) ohne Scroll passen
+function monAbPages(){
+  const cards = monCardsData();
+  const n = cards.length;
+  const cols = monAbColumns();
+  const availH = monAbAvailH || ((window.innerHeight || 800) - 260);
+  const pages = [];
+  let i = 0;
+  while(i < n){
+    let used = 0, start = i;
+    while(i < n){
+      const rowCards = cards.slice(i, i + cols);
+      const rowH = Math.max(...rowCards.map(abCardEstH)) + 12;
+      if(i > start && used + rowH > availH) break;   // Reihe passt nicht mehr → neue Seite (mind. 1 Reihe)
+      used += rowH; i += rowCards.length;
+      if(used >= availH) break;
+    }
+    pages.push({ start, count: i - start });
+  }
+  return pages.length ? pages : [{ start: 0, count: 0 }];
 }
 function renderMonitor(){
   const e = state.einsatz;
@@ -3372,7 +3686,7 @@ function renderMonitor(){
     const rows = sorted.map(u => `
       <tr>
         <td><span class="chip chip-${esc(u.org)}">${esc((ORGS[u.org]||ORGS.SON).short)}</span></td>
-        <td class="name mono">${esc(fullName(u))}</td>
+        <td class="name mono">${esc(fullName(u).replace(/\bFlorian\b/gi, "Fl."))}</td>
         <td class="num mono">${staerkeStr(u)}</td>
         <td class="num mono">${u.agt||"–"}</td>
       </tr>`).join("");
@@ -3408,8 +3722,9 @@ function renderMonitor(){
   // Kachel-Daten sammeln (gefiltert um ausgeblendete); Rotation seitenweise
   const brUnits = act.filter(u => u.abschnitt === "BR");
   const cardsData = monCardsData();
-  const AB_PER_PAGE = 3;
-  const abPages = Math.max(1, Math.ceil(cardsData.length / AB_PER_PAGE));
+  const abCols = monAbColumns();
+  const abPageList = monAbPages();
+  const abPages = abPageList.length;
   const specials = monSpecialPages();
   const totalPages = abPages + specials.length;
   if(monAbPage >= totalPages) monAbPage = 0;
@@ -3418,11 +3733,12 @@ function renderMonitor(){
   const isSkizzePage = specialKey === "skizze";
   const isFunkPage = specialKey === "funkchecks";
   const isAsPage = specialKey === "as";
-  const visible = specialKey ? [] : cardsData.slice(monAbPage*AB_PER_PAGE, monAbPage*AB_PER_PAGE + AB_PER_PAGE);
+  const pg = (!specialKey && abPageList[monAbPage]) ? abPageList[monAbPage] : { start:0, count:0 };
+  const visible = specialKey ? [] : cardsData.slice(pg.start, pg.start + pg.count);
   const abCards = visible.map(c => abCard(c.title, c.units, c.opts)).join("");
   const pagerLabel = isLagePage ? "Lagekarte" : isSkizzePage ? "Funkskizze"
     : isFunkPage ? "Funk & Checklisten" : isAsPage ? "Atemschutz-Trupps"
-    : `${monAbPage*AB_PER_PAGE+1}–${Math.min((monAbPage+1)*AB_PER_PAGE, cardsData.length)} von ${cardsData.length}`;
+    : `${pg.start+1}–${pg.start+pg.count} von ${cardsData.length}`;
   const abPager = totalPages > 1 ? `
     <div class="ab-pager" title="${monAbPaused ? "Rotation angehalten" : "Wechselt alle 30 Sekunden"}">
       <span>${pagerLabel}</span>
@@ -3454,7 +3770,8 @@ function renderMonitor(){
         <div class="mon-title">
           <div class="eyebrow"><span style="color:var(--accent)">ELW</span><span style="color:var(--ink)">IS</span> · ${esc(state.config.ugName)} · Kräfteübersicht</div>
           <h2>${esc(e.stichwort) || "Kein Einsatz angelegt"}</h2>
-          <div class="ort">${esc(e.ort)}${e.leiter ? " · EL: " + esc(e.leiter) : ""}</div>
+          <div class="ort">${esc(e.ort)}</div>
+          ${e.leiter ? `<div class="mon-el">EL: ${esc(e.leiter)}</div>` : ""}
         </div>
         <div class="mon-clockbox">
           <div class="mon-clock mono" id="monClock">--:--</div>
@@ -3479,6 +3796,7 @@ function renderMonitor(){
         ${brUnits.length ? `<div class="kpic"><span class="k">Bereitstellung</span><span class="v mono">${brUnits.length}</span><span class="s">Einheiten</span></div>` : ""}
         <div class="kpic"><span class="k">Abgerückt</span><span class="v mono">${state.einheiten.length - act.length}</span><span class="s">Einheiten</span></div>
         ${e.lagebespr ? `<div class="kpic warn"><span class="k">Nächste Lagebespr.</span><span class="v mono">${esc(e.lagebespr)}</span><span class="s" id="monLbRel"></span></div>` : ""}
+        ${(!e.bereitstellung && (e.bereitstellungsraum||"").trim()) ? `<div class="kpic vr"><span class="k">Verfügungsraum</span><span class="v vr-val">${esc(e.bereitstellungsraum.trim())}</span></div>` : ""}
       </div>
       ${isLagePage ? (() => {
         const nums = state.lage.items.filter(i => i.type === "num").sort((a,b) => a.num - b.num);
@@ -3595,7 +3913,7 @@ function renderMonitor(){
         ${leftPanels ? `<div class="mon-col">${leftPanels}</div>` : ""}
         <div class="panel">
           <div class="panel-head"><h3>Einsatzabschnitte</h3></div>
-          <div class="ab-grid">${abCards}</div>
+          <div class="ab-grid" id="monAbGrid" style="grid-template-columns:repeat(${abCols},minmax(0,1fr))">${abCards}</div>
         </div>
       </div>`;
       })()}
@@ -3619,7 +3937,8 @@ function monCardsData(){
     cards.push({ key:"all", title:"Alle Einheiten an der Einsatzstelle",
       units:act.filter(u => u.abschnitt !== "BR"), opts:{ none:true } });
   }
-  if(brUnits.length && !hid.BR) cards.push({ key:"BR", title:"Bereitstellungsraum", units:brUnits, opts:{ br:true, sub: state.einsatz.bereitstellungsraum } });
+  // Legacy-BR-Kachel nur, wenn kein echter Bereitstellungs-Abschnitt existiert (sonst doppelt)
+  if(brUnits.length && !hid.BR && !state.abschnitte.some(a => a.br)) cards.push({ key:"BR", title:"Bereitstellungsraum", units:brUnits, opts:{ br:true, sub: state.einsatz.bereitstellungsraum } });
   return cards;
 }
 /* Sonderseiten des Monitors (Lagekarte, Funkskizze, Funk & Checklisten, Atemschutz)
@@ -3634,7 +3953,7 @@ function monSpecialPages(){
   return s;
 }
 function monAbPagesCount(){
-  return Math.max(1, Math.ceil(Math.max(1, monCardsData().length) / 3)) + monSpecialPages().length;
+  return monAbPages().length + monSpecialPages().length;
 }
 function openMonHideSheet(){
   const hp = state.monHide.panels, ha = state.monHide.ab;
@@ -3733,6 +4052,13 @@ function wireMonitor(){
     render();
   });
   tickClock();
+  // Nutzbare Höhe der Kachelfläche messen → Einpassung self-correcting (einmal nachziehen bei Änderung).
+  const grid = document.getElementById("monAbGrid");
+  if(grid){
+    const top = grid.getBoundingClientRect().top;
+    const h = (window.innerHeight || 800) - top - 20;
+    if(h > 140 && Math.abs(h - monAbAvailH) > 24){ monAbAvailH = h; render(); }
+  }
 }
 function tickClock(){
   const c = $("#monClock");
@@ -4088,6 +4414,7 @@ function renderLagekarte(){
     <h2>Lagebilder (eingefrorene Stände)</h2>
     ${[...state.lage.snapshots].sort((a,b) => (b.zeit||"").localeCompare(a.zeit||"")).map(s => `
     <div class="arch">
+      <label class="lgsnap-pick" title="Zum Vergleich markieren"><input type="checkbox" data-lgsnapsel="${esc(s.id)}" ${lgSnapSel.includes(s.id)?"checked":""}></label>
       <div class="a-main">
         <div class="a-t">Lagebild ${fmtZeit(s.zeit)} Uhr</div>
         <div class="a-s">${fmtDatum(s.zeit)} · ${s.items.length} Symbole</div>
@@ -4095,7 +4422,8 @@ function renderLagekarte(){
       <button class="btn btn-ghost" data-lgsnap="${esc(s.id)}">Ansehen</button>
       <button class="btn btn-danger-ghost" data-lgsnapdel="${esc(s.id)}" aria-label="Lagebild löschen">✕</button>
     </div>`).join("")}
-    <p class="hint">Ein Snapshot friert den aktuellen Kartenstand ein – die Lagekarte entwickelt sich danach normal weiter (z. B. für die Dokumentation je Lagebesprechung).</p>
+    <button class="btn btn-ghost btn-block" id="lgSnapCompare" style="margin-top:8px"${lgSnapSel.length===2?"":" disabled"}>Zwei Lagebilder nebeneinander vergleichen${lgSnapSel.length?` (${lgSnapSel.length}/2 markiert)`:""}</button>
+    <p class="hint">Ein Snapshot friert den aktuellen Kartenstand ein. Zwei Lagebilder ankreuzen und vergleichen – Änderungen wackeln. „Ansehen" öffnet ein Lagebild (mit Vollbild).</p>
   </div>` : ""}
   `;
 }
@@ -4147,14 +4475,17 @@ function fkVia(via){
   return via==="gateway" ? `<span class="fk-via">⇄ Gateway ↔ TMO</span>`
     : via==="repeater" ? `<span class="fk-via">⟳ Repeater</span>` : "";
 }
-function renderFunkskizze(){
-  const c = state.config;
-  const act = aktive();
-  const ilsG = (state.einsatz.ilsGruppe && state.einsatz.ilsGruppe.gruppe) ? state.einsatz.ilsGruppe : c.ilsGruppe;
+function renderFunkskizze(src){
+  src = src || state;                    // Standard: laufender Einsatz; für Archiv-Druck: Archiv-Eintrag
+  const c = state.config;                // Konfiguration (ILS-Name, UG-Name) ist app-global
+  const einsatz = src.einsatz || {};
+  const abschnitte = src.abschnitte || [];
+  const act = (src.einheiten || []).filter(u => !u.abgerueckt);
+  const ilsG = (einsatz.ilsGruppe && einsatz.ilsGruppe.gruppe) ? einsatz.ilsGruppe : c.ilsGruppe;
   const elBox = `
     <div class="fkbox el">
       <strong>Einsatzleitung</strong>
-      <small>${esc(c.ugName)} · ELW${state.einsatz.leiter ? " · EL: " + esc(state.einsatz.leiter) : ""}</small>
+      <small>${esc(c.ugName)} · ELW${einsatz.leiter ? " · EL: " + esc(einsatz.leiter) : ""}</small>
     </div>`;
   const ilsTeil = `
     <div class="fkbox ils"><strong>${esc(c.ilsName || "Leitstelle")}</strong><small>Leitstelle</small></div>
@@ -4163,15 +4494,15 @@ function renderFunkskizze(){
     <span><i class="fk-dot mode-TMO"></i>TMO · Netzbetrieb</span>
     <span><i class="fk-dot mode-DMO"></i>DMO · Direktbetrieb</span>
     <span>⇄ Gateway · ⟳ Repeater</span></div>`;
-  if(!state.abschnitte.length){
+  if(!abschnitte.length){
     return `<div class="fk-skizze">${ilsTeil}${elBox}</div>${legende}
       <p class="hint" style="text-align:center">Noch keine Einsatzabschnitte angelegt – die Skizze wächst automatisch mit (Tab „Einsatz“).</p>`;
   }
-  const n = state.abschnitte.length;
+  const n = abschnitte.length;
   // Gemeinsame Führungsrufgruppe: haben alle Abschnitte dieselbe → einmal an der Sammellinie darstellen
-  const fgS = state.abschnitte.map(a => gruppeStr(a.fuehrung));
-  const commonFg = (n > 1 && fgS.every(s => s && s === fgS[0])) ? state.abschnitte[0].fuehrung : null;
-  const branches = state.abschnitte.map(a => {
+  const fgS = abschnitte.map(a => gruppeStr(a.fuehrung));
+  const commonFg = (n > 1 && fgS.every(s => s && s === fgS[0])) ? abschnitte[0].fuehrung : null;
+  const branches = abschnitte.map(a => {
     const units = act.filter(u => u.abschnitt === a.id);
     const via = a.arbeit && a.arbeit.via;
     return `
@@ -4199,7 +4530,8 @@ function renderFunkskizze(){
   ${legende}`;
 }
 /* ==================== Lagekarte: Online-Karten-Modus (Leaflet) ==================== */
-let lgMapObj = null, lgMapLayer = null, lgMonObj = null, lgSnapObj = null;
+let lgMapObj = null, lgMapLayer = null, lgMonObj = null, lgSnapObj = null, lgCmpA = null, lgCmpB = null;
+let lgSnapSel = [];   // markierte Lagebilder (max. 2) für den Vergleich
 function lgMapTeardown(){
   if(lgMapObj){ try{ lgMapObj.remove(); }catch(e){} }
   if(lgMonObj){ try{ lgMonObj.remove(); }catch(e){} }
@@ -4232,6 +4564,45 @@ function lgGeocode(q, cb){
     .catch(() => cb(null));
 }
 function lgEinsatzAdresse(){ return (state.einsatz.ort || state.einsatz.objekt || "").trim(); }
+/* Koordinaten → Adresse (OpenStreetMap/Nominatim Reverse, nur online) */
+function reverseGeocode(lat, lng, cb){
+  fetch("https://nominatim.openstreetmap.org/reverse?format=json&zoom=18&addressdetails=1&lat=" + lat + "&lon=" + lng,
+    { headers:{ "Accept":"application/json" } })
+    .then(r => r.ok ? r.json() : null)
+    .then(d => cb(d && !d.error ? d : null))
+    .catch(() => cb(null));
+}
+function nominatimAdresse(d){
+  const a = (d && d.address) || {};
+  const strasse = [a.road, a.house_number].filter(Boolean).join(" ");
+  const ort = [a.postcode, a.city || a.town || a.village || a.suburb || a.municipality].filter(Boolean).join(" ");
+  return [strasse, ort].filter(Boolean).join(", ") || (d && d.display_name) || "";
+}
+/* what3words: 3 Wörter → Koordinaten (w3w-API, Key nötig) → Adresse (Nominatim) → Einsatzort.
+   Läuft nur online. Key wird im Zahnrad hinterlegt. */
+async function w3wAufloesen(){
+  const key = (state.config.w3wKey || "").trim();
+  const roh = ($("#f-w3w") ? $("#f-w3w").value : "").trim();
+  const w = roh.replace(/^\/+/, "").replace(/\s+/g, ".").toLowerCase();
+  if(!/^[^.\s]+\.[^.\s]+\.[^.\s]+$/.test(w)){ modalInfo("Bitte drei Wörter eingeben – Format „wort.wort.wort“ (oder ///wort.wort.wort)."); return; }
+  if(!key){ modalInfo("Kein what3words-API-Key hinterlegt. Bitte im Zahnrad (Einstellungen) eintragen – kostenlos bei what3words registrierbar."); return; }
+  if(navigator.onLine === false){ modalInfo("what3words benötigt Internet – Gerät ist aktuell offline."); return; }
+  const btn = $("#f-w3w-go");
+  const reset = () => { if(btn){ btn.disabled = false; btn.textContent = "→ Einsatzort"; } };
+  if(btn){ btn.disabled = true; btn.textContent = "…"; }
+  try{
+    const res = await fetch("https://api.what3words.com/v3/convert-to-coordinates?words=" + encodeURIComponent(w) + "&key=" + encodeURIComponent(key));
+    const data = await res.json().catch(() => null);
+    const c = data && data.coordinates;
+    if(!c){ reset(); modalInfo("what3words: " + ((data && data.error && (data.error.message || data.error)) || "Adresse zu diesen Wörtern nicht gefunden.")); return; }
+    reverseGeocode(c.lat, c.lng, rd => {
+      const adr = nominatimAdresse(rd);
+      if(!adr){ reset(); modalInfo(`Keine Adresse zu diesen Koordinaten gefunden (${c.lat.toFixed(5)}, ${c.lng.toFixed(5)}).`); return; }
+      state.einsatz.ort = adr; markChange(); render();
+      modalInfo(`Einsatzort aus ///${w} gesetzt:\n${adr}`);
+    });
+  }catch(e){ reset(); modalInfo("what3words-Abfrage fehlgeschlagen: " + (e.message || e)); }
+}
 /* Symbole/Linien/Flächen in eine Ebene zeichnen; interactive=false → schreibgeschützt (Monitor) */
 function lgAddItems(layer, interactive, items){
   items = items || state.lage.items;
@@ -4396,10 +4767,21 @@ function wireLagekarte(){
   $("#lgSnapBtn").addEventListener("click", () => { lgFreeze(); render(); });
   document.querySelectorAll("[data-lgsnap]").forEach(b =>
     b.addEventListener("click", () => openLgSnapshot(b.dataset.lgsnap)));
+  document.querySelectorAll("[data-lgsnapsel]").forEach(cb =>
+    cb.addEventListener("change", () => {
+      const id = cb.dataset.lgsnapsel;
+      lgSnapSel = lgSnapSel.filter(x => x !== id);
+      if(cb.checked) lgSnapSel.push(id);
+      while(lgSnapSel.length > 2) lgSnapSel.shift();   // nur die letzten 2 behalten
+      render();
+    }));
+  const cmpBtn = $("#lgSnapCompare");
+  if(cmpBtn) cmpBtn.addEventListener("click", () => { if(lgSnapSel.length === 2) openLgCompare(lgSnapSel[0], lgSnapSel[1]); });
   document.querySelectorAll("[data-lgsnapdel]").forEach(b =>
     b.addEventListener("click", () => {
       modalConfirm("Dieses Lagebild wirklich löschen?").then(ok => { if(!ok) return;
         state.lage.snapshots = state.lage.snapshots.filter(s => s.id !== b.dataset.lgsnapdel);
+        lgSnapSel = lgSnapSel.filter(x => x !== b.dataset.lgsnapdel);
         markChange(); render();
       });
     }));
@@ -4614,14 +4996,16 @@ function openLgSnapshot(id){
   const nums = s.items.filter(i => i.type === "num").sort((a,b) => a.num - b.num);
   $("#sheetHost").innerHTML = `
   <div class="sheet-backdrop" data-close="1"></div>
-  <div class="sheet" role="dialog" aria-modal="true" aria-label="Lagebild ${fmtZeit(s.zeit)} Uhr">
+  <div class="sheet sheet-wide" id="lgSnapSheet" role="dialog" aria-modal="true" aria-label="Lagebild ${fmtZeit(s.zeit)} Uhr">
     <div class="sheet-head">
       <h2>Lagebild ${fmtZeit(s.zeit)} Uhr <span style="font-weight:500;color:var(--ink3);font-size:.85rem">· eingefroren, ${fmtDatum(s.zeit)}</span></h2>
+      ${lgFullBtn()}
       <button class="sheet-close" data-close="1" aria-label="Schließen">×</button>
     </div>
     <div class="sheet-body">
       ${s.mode === "karte" ? `
-      <div class="lg-wrap" style="overflow:hidden"><div id="lgSnapMap" style="width:100%;height:100%"></div></div>` : `
+      <div class="lg-wrap" style="overflow:hidden"><div id="lgSnapMap" style="width:100%;height:100%"></div></div>
+      <p class="hint" style="margin:8px 2px 0">Karte frei zoom-/verschiebbar (nur online) – die eingefrorenen Lage-Symbole bleiben ortsfest.</p>` : `
       <div class="lg-wrap" style="pointer-events:none;overflow:hidden">
         <div class="lg-canvas ${s.bg ? "hasbg" : ""}" ${s.bg ? `style="background-image:url('${s.bg}')"` : ""}>
           ${lgShapesSvg(s.items, null)}
@@ -4645,18 +5029,110 @@ function openLgSnapshot(id){
     </div>
   </div>`;
   document.querySelectorAll("[data-close]").forEach(el => el.addEventListener("click", closeEditor));
+  wireLgFull();
   if(s.mode === "karte" && typeof L !== "undefined"){
     const el = document.getElementById("lgSnapMap");
     if(el){
       if(lgSnapObj){ try{ lgSnapObj.remove(); }catch(e){} }
       const v = s.mapView || { center:[49.6767, 12.1625], zoom:15 };
-      lgSnapObj = L.map(el, { zoomControl:false, dragging:false, scrollWheelZoom:false,
-        doubleClickZoom:false, boxZoom:false, keyboard:false, touchZoom:false, tap:false }).setView(v.center, v.zoom);
+      // Karte frei zoom-/verschiebbar (nur Ansicht) – die Lage-Symbole sind geografisch verankert
+      // und bleiben ortsfest. Der Ausschnitt wird NICHT in den Snapshot zurückgeschrieben.
+      lgSnapObj = L.map(el, { zoomControl:true }).setView(v.center, v.zoom);
       lgBaseLayer(s.mapLayer).addTo(lgSnapObj);
       lgAddItems(L.layerGroup().addTo(lgSnapObj), false, s.items);
       setTimeout(() => { if(lgSnapObj) lgSnapObj.invalidateSize(); }, 60);
     }
   }
+}
+/* Vollbild-Umschalter für Lagebild-/Vergleichs-Fenster (nutzt das Sheet-Element). */
+function lgFullBtn(){ return `<button type="button" class="btn btn-ghost lg-fullbtn" data-lgfull="1" title="Vollbild">⛶</button>`; }
+function wireLgFull(){
+  document.querySelectorAll("[data-lgfull]").forEach(b => b.addEventListener("click", () => {
+    const sheet = b.closest(".sheet");
+    if(!sheet) return;
+    if(document.fullscreenElement){ document.exitFullscreen().catch(()=>{}); }
+    else if(sheet.requestFullscreen){ sheet.requestFullscreen().catch(()=>{}); }
+  }));
+}
+/* Vergleichs-Signatur eines Lage-Items (Position + darstellungsrelevante Felder). */
+function lgItemSig(i){
+  const pos = Array.isArray(i.ll) ? i.ll.map(n => (+n).toFixed(6)).join(",")
+    : Array.isArray(i.llpoints) ? i.llpoints.map(p => `${(+p.lat).toFixed(6)},${(+p.lng).toFixed(6)}`).join(";")
+    : (i.x != null ? `${(+i.x).toFixed(2)},${(+i.y).toFixed(2)}` : "");
+  return [i.type, i.sym||"", i.num||"", i.text||"", i.label||"", i.color||"", i.shape||"", i.kurz||"", i.org||"", i.unitId||"", pos].join("|");
+}
+/* IDs der Symbole, die sich zwischen zwei Lagebildern geändert haben (neu/entfernt/verschoben/geändert). */
+function lgChangedIds(itemsA, itemsB){
+  const A = new Map((itemsA||[]).map(i => [i.id, lgItemSig(i)]));
+  const B = new Map((itemsB||[]).map(i => [i.id, lgItemSig(i)]));
+  const changed = new Set();
+  A.forEach((sig, id) => { if(!B.has(id) || B.get(id) !== sig) changed.add(id); });
+  B.forEach((sig, id) => { if(!A.has(id) || A.get(id) !== sig) changed.add(id); });
+  return changed;
+}
+/* Geänderte Symbole in einem Panel dauerhaft wackeln lassen (Marker + Formen). */
+function lgApplyWackel(container, changed){
+  if(!container || !changed || !changed.size) return;
+  container.querySelectorAll("[data-id]").forEach(el => { if(changed.has(el.getAttribute("data-id"))) el.classList.add("wackel-dauer"); });
+  container.querySelectorAll("[data-shape]").forEach(el => { if(changed.has(el.getAttribute("data-shape"))) el.classList.add("wackel-dauer"); });
+}
+/* Ein Lagebild als Panel (Karte oder Raster) für den Vergleich rendern. */
+function lgSnapPanelHtml(s, side){
+  if(s.mode === "karte") return `<div class="lg-wrap lg-cmp-map" style="overflow:hidden"><div id="lgCmpMap${side}" style="width:100%;height:100%"></div></div>`;
+  return `<div class="lg-wrap lg-cmp-map" style="pointer-events:none;overflow:hidden">
+    <div class="lg-canvas ${s.bg ? "hasbg" : ""}" id="lgCmpCanvas${side}" ${s.bg ? `style="background-image:url('${s.bg}')"` : ""}>
+      ${lgShapesSvg(s.items, null)}
+      ${s.items.filter(i => i.x != null).map(lgMarkerHtml).join("")}
+    </div></div>`;
+}
+function lgSnapPanelSetup(s, side, changed){
+  if(s.mode === "karte" && typeof L !== "undefined"){
+    const el = document.getElementById("lgCmpMap" + side);
+    if(!el) return;
+    const v = s.mapView || { center:[49.6767, 12.1625], zoom:15 };
+    const map = L.map(el, { zoomControl:true }).setView(v.center, v.zoom);
+    lgBaseLayer(s.mapLayer).addTo(map);
+    lgAddItems(L.layerGroup().addTo(map), false, s.items);
+    if(side === "A") lgCmpA = map; else lgCmpB = map;
+    setTimeout(() => { try{ map.invalidateSize(); }catch(e){} lgApplyWackel(el, changed); }, 80);
+  }else{
+    lgApplyWackel(document.getElementById("lgCmpCanvas" + side), changed);
+  }
+}
+/* Zwei Lagebilder nebeneinander vergleichen; geänderte Symbole wackeln dauerhaft. */
+function openLgCompare(idA, idB){
+  const snaps = state.lage.snapshots || [];
+  const a = snaps.find(x => x.id === idA), b = snaps.find(x => x.id === idB);
+  if(!a || !b) return;
+  const [s1, s2] = (a.zeit||"") <= (b.zeit||"") ? [a, b] : [b, a];   // älter links, neuer rechts
+  const changed = lgChangedIds(s1.items, s2.items);
+  $("#sheetHost").innerHTML = `
+  <div class="sheet-backdrop" data-close="1"></div>
+  <div class="sheet sheet-wide" id="lgCmpSheet" role="dialog" aria-modal="true" aria-label="Lagebilder vergleichen">
+    <div class="sheet-head">
+      <h2>Lagebilder vergleichen <span style="font-weight:500;color:var(--ink3);font-size:.85rem">· ${changed.size} Änderung${changed.size===1?"":"en"} wackeln</span></h2>
+      ${lgFullBtn()}
+      <button class="sheet-close" data-close="1" aria-label="Schließen">×</button>
+    </div>
+    <div class="sheet-body">
+      <div class="lg-cmp">
+        <div class="lg-cmp-col">
+          <div class="lg-cmp-t">${fmtDatum(s1.zeit)} · ${fmtZeit(s1.zeit)} Uhr <span>(älter)</span></div>
+          ${lgSnapPanelHtml(s1, "A")}
+        </div>
+        <div class="lg-cmp-col">
+          <div class="lg-cmp-t">${fmtDatum(s2.zeit)} · ${fmtZeit(s2.zeit)} Uhr <span>(neuer)</span></div>
+          ${lgSnapPanelHtml(s2, "B")}
+        </div>
+      </div>
+      <p class="hint" style="margin:8px 2px 0">Geänderte, neue oder entfernte Symbole wackeln dauerhaft. Karten frei zoom-/verschiebbar (nur online). ⛶ für Vollbild.</p>
+    </div>
+    <div class="sheet-foot"><button class="btn btn-primary btn-block" data-close="1">Schließen</button></div>
+  </div>`;
+  document.querySelectorAll("[data-close]").forEach(el => el.addEventListener("click", closeEditor));
+  wireLgFull();
+  lgSnapPanelSetup(s1, "A", changed);
+  lgSnapPanelSetup(s2, "B", changed);
 }
 /* Symbolsuche: die gängigsten taktischen Zeichen (DV 102) mit Filterfeld */
 function openSymSearch(){
@@ -4733,15 +5209,16 @@ function openLgShapeEdit(id){
     </div>
   </div>`;
   document.querySelectorAll("[data-close]").forEach(el => el.addEventListener("click", closeEditor));
+  const cur = () => state.lage.items.find(i => i.id === it.id) || it;   // frisch aus State (Sync-sicher)
   document.querySelectorAll("[data-shcolor]").forEach(b => b.addEventListener("click", () => {
-    it.color = b.dataset.shcolor;
+    const c = cur(); c.color = b.dataset.shcolor;
     document.querySelectorAll("[data-shcolor]").forEach(x =>
-      x.setAttribute("aria-pressed", x.dataset.shcolor === it.color));
+      x.setAttribute("aria-pressed", x.dataset.shcolor === c.color));
     markChange(); render();   // Fläche und EA-Label sofort in der neuen Farbe zeichnen
   }));
   const abSel = $("#sh-abschnitt");
   if(abSel) abSel.addEventListener("change", () => {
-    it.abschnittId = abSel.value || "";
+    cur().abschnittId = abSel.value || "";
     markChange(); render();   // Label sofort ein-/ausblenden (Farbe bleibt frei wählbar)
   });
   $("#sh-del").addEventListener("click", () => {
@@ -4749,7 +5226,7 @@ function openLgShapeEdit(id){
     markChange(); closeEditor(); render();
   });
   $("#sh-save").addEventListener("click", () => {
-    const t = $("#sh-text"); if(t) it.text = t.value.trim();
+    const t = $("#sh-text"); if(t) cur().text = t.value.trim();
     markChange(); closeEditor(); render();
   });
 }
@@ -4784,22 +5261,23 @@ function openLgFormEdit(id){
   </div>`;
   document.querySelectorAll("[data-close]").forEach(el => el.addEventListener("click", closeEditor));
   const txt = $("#form-text"); txt.focus();
+  const cur = () => state.lage.items.find(i => i.id === it.id) || it;   // frisch aus State (Sync-sicher)
   document.querySelectorAll("[data-formshape]").forEach(b => b.addEventListener("click", () => {
-    it.shape = b.dataset.formshape;
-    document.querySelectorAll("[data-formshape]").forEach(x => x.classList.toggle("active", x.dataset.formshape === it.shape));
-    it.text = txt.value.trim(); markChange(); render();
+    const c = cur(); c.shape = b.dataset.formshape;
+    document.querySelectorAll("[data-formshape]").forEach(x => x.classList.toggle("active", x.dataset.formshape === c.shape));
+    c.text = txt.value.trim(); markChange(); render();
   }));
   document.querySelectorAll("[data-shcolor]").forEach(b => b.addEventListener("click", () => {
-    it.color = b.dataset.shcolor;
-    document.querySelectorAll("[data-shcolor]").forEach(x => x.setAttribute("aria-pressed", x.dataset.shcolor === it.color));
-    it.text = txt.value.trim(); markChange(); render();
+    const c = cur(); c.color = b.dataset.shcolor;
+    document.querySelectorAll("[data-shcolor]").forEach(x => x.setAttribute("aria-pressed", x.dataset.shcolor === c.color));
+    c.text = txt.value.trim(); markChange(); render();
   }));
   txt.addEventListener("keydown", e => { if(e.key === "Enter") $("#form-save").click(); });
   $("#form-del").addEventListener("click", () => {
     state.lage.items = state.lage.items.filter(i => i.id !== it.id);
     markChange(); closeEditor(); render();
   });
-  $("#form-save").addEventListener("click", () => { it.text = txt.value.trim(); markChange(); closeEditor(); render(); });
+  $("#form-save").addEventListener("click", () => { cur().text = txt.value.trim(); markChange(); closeEditor(); render(); });
 }
 function openLgEdit(id){
   const it = state.lage.items.find(i => i.id === id);
@@ -4844,13 +5322,16 @@ function openLgEdit(id){
     markChange(); closeEditor(); render();
   });
   $("#lg-save").addEventListener("click", () => {
+    // Item frisch aus dem State holen – ein Sync-Tick kann state.lage.items zwischenzeitlich
+    // durch neue Objekte ersetzt haben (sonst ginge die Zuordnung beim 1. Speichern verloren).
+    const cur = state.lage.items.find(i => i.id === it.id) || it;
     if(numbered){
-      it.num = Math.max(1, Math.min(99, parseInt($("#lg-num").value, 10) || it.num));
-      it.text = inp.value.trim();
+      cur.num = Math.max(1, Math.min(99, parseInt($("#lg-num").value, 10) || cur.num));
+      cur.text = inp.value.trim();
     }else if(isCar){
-      it.unitId = $("#lg-unit").value;
+      cur.unitId = $("#lg-unit").value;
     }else{
-      it.label = inp.value.trim();
+      cur.label = inp.value.trim();
     }
     markChange(); closeEditor(); render();
   });
@@ -4906,7 +5387,8 @@ function doPrintLagekarte(){
     <p style="font-size:8pt;color:#666;margin-top:16px">Gedruckt am ${new Date().toLocaleString("de-DE")} · ELWIS – Lagekarte · ${esc(state.config.ugName)}</p>`;
   window.print();
 }
-function doPrint(data){
+function doPrint(data, sel){
+  const on = id => !sel || sel[id] !== false;   // ohne Auswahl: alle Bereiche drucken
   const e = data.einsatz;
   const pEnde = e.ende || data.ende;   // Einsatzende: Stammdatenfeld, sonst Archiv-Zeitstempel
   const abs = data.abschnitte || [];
@@ -4938,17 +5420,19 @@ function doPrint(data){
       <td>${esc((ORGS[f.org]||ORGS.SON).label)}</td>
       <td>${esc(f.einheit||"–")}</td>
     </tr>`).join("");
-  $("#printArea").innerHTML = `
-    <div class="p-head">
-      <div>
-        <div class="p-sub">${esc(state.config.ugName)} · Einsatzbericht · Kräfteübersicht${pEnde ? "" : " · Zwischenstand"}</div>
-        <h1>${esc(e.stichwort) || "Ohne Stichwort"}</h1>
-        <div>${esc(e.ort)}${e.objekt ? " · " + esc(e.objekt) : ""}</div>
-      </div>
-      <div class="p-mark">ELWIS</div>
-    </div>
+  // Laufender Kopf/Fuß auf jeder Seite (Chromium wiederholt position:fixed-Elemente je Druckseite);
+  // Seitenzahl über die @page-Randbox (@bottom-right) in der Druck-CSS.
+  const runHead = `
+    <div class="p-run-head">
+      <span class="p-rh-l">${esc(state.config.ugName)} · Einsatzbericht${pEnde ? "" : " · Zwischenstand"}</span>
+      <span class="p-rh-r">${esc(e.stichwort) || "Ohne Stichwort"}${e.ort ? " · " + esc(e.ort) : ""}</span>
+    </div>`;
+  const runFoot = `
+    <div class="p-run-foot">Gedruckt am ${new Date().toLocaleString("de-DE")} · ELWIS – Kräfteerfassung (Prototyp) · ${esc(state.config.ugName)}</div>`;
+  const secEinsatz = on("einsatz") ? `
     <table class="meta">
       ${e.objekt ? `<tr><td>Objekt</td><td>${esc(e.objekt)}</td></tr>` : ""}
+      <tr><td>Einsatzort</td><td>${esc(e.ort) || "–"}</td></tr>
       <tr><td>Alarmzeit</td><td>${e.beginn ? fmtDatum(e.beginn)+" "+fmtZeit(e.beginn)+" Uhr" : "–"}</td></tr>
       <tr><td>Einsatzende</td><td>${pEnde ? fmtDatum(pEnde)+" "+fmtZeit(pEnde)+" Uhr" : "– (Einsatz läuft)"}</td></tr>
       <tr><td>Einsatzdauer</td><td>${dauerStr(e.beginn, pEnde) || "–"}</td></tr>
@@ -4962,12 +5446,72 @@ function doPrint(data){
         return esc(a.name)+(funk?` (${esc(funk)})`:"");
       }).join(" · ")}</td></tr>` : ""}
       ${e.bemerkung ? `<tr><td>Bemerkungen</td><td>${esc(e.bemerkung)}</td></tr>` : ""}
-    </table>
+    </table>` : "";
+  const secKraefte = on("kraefte") ? `
     <h2>Führungskräfte (${data.fuehrung.length})</h2>
     ${fkRows ? `<table><thead><tr><th>Name</th><th>Funktion</th><th>Funkrufname</th><th>Organisation</th><th>Einheit / Abschnitt</th></tr></thead><tbody>${fkRows}</tbody></table>` : "<p>Keine erfasst.</p>"}
     <h2>Einheiten (${data.einheiten.length})</h2>
     ${unitRows ? `<table><thead><tr><th>Ankunft</th><th>Organisation</th><th>Funkrufname</th>${showAb?"<th>Abschnitt</th>":""}<th>Stärke</th><th>AGT</th><th>CSA</th><th>Status</th></tr></thead><tbody>${unitRows}</tbody></table>` : "<p>Keine erfasst.</p>"}
-    ${(data.asTrupps||[]).length ? `
+    <h2>Nachforderungen (${(data.anforderungen||[]).length})</h2>
+    ${(data.anforderungen||[]).length ? `<table><thead><tr><th>Was</th><th>Status</th><th>Angefordert</th><th>Alarmiert</th><th>Eingetroffen</th></tr></thead><tbody>
+      ${[...data.anforderungen].sort((a,b) => (a.angefordert||"").localeCompare(b.angefordert||"")).map(a => `
+      <tr>
+        <td>${esc(a.was)}</td><td>${esc(a.status)}</td>
+        <td class="p-mono">${fmtZeit(a.angefordert)}</td>
+        <td class="p-mono">${a.alarmiert ? fmtZeit(a.alarmiert) : "–"}</td>
+        <td class="p-mono">${a.eingetroffen ? fmtZeit(a.eingetroffen) : "–"}</td>
+      </tr>`).join("")}
+    </tbody></table>` : "<p>Keine.</p>"}` : "";
+  const secFunk = on("funk") ? `
+    <h2>Funksprüche / Einsatztagebuch (${(data.funk||[]).length})</h2>
+    ${(data.funk||[]).length ? (() => {
+      const sorted = [...data.funk].sort((a,b) => (a.zeit||"").localeCompare(b.zeit||""));
+      // Datum nur anzeigen, wenn das Tagebuch über einen Tageswechsel geht
+      const mehrtaegig = new Set(sorted.map(f => new Date(f.zeit).toDateString())).size > 1;
+      return `<table><thead><tr><th>Nr.</th><th>Zeit</th><th>Von</th><th>An</th><th>Inhalt</th></tr></thead><tbody>
+      ${sorted.map((f,idx) => `
+      <tr>
+        <td class="p-mono">${idx+1}${f.wichtig ? " !" : ""}</td>
+        <td class="p-mono">${mehrtaegig ? fmtTagKurz(f.zeit) + " " : ""}${fmtZeit(f.zeit)}</td>
+        <td>${esc(f.von)}</td>
+        <td>${esc(f.an)}</td>
+        <td>${f.wichtig ? `<strong>${esc(f.text)}</strong>` : esc(f.text)}</td>
+      </tr>`).join("")}
+    </tbody></table>`;})() : "<p>Keine erfasst.</p>"}` : "";
+  const secSkizze = on("skizze") ? `
+    <h2>Funkskizze / Kommunikationsskizze</h2>
+    <div class="p-skizze">${renderFunkskizze(data)}</div>` : "";
+  const secBespr = on("bespr") ? `
+    <h2>Lagebesprechungen (${(data.besprechungen||[]).length})</h2>
+    ${(data.besprechungen||[]).length ? `<table><thead><tr><th style="width:110px">Zeit</th><th style="width:180px">Teilnehmer</th><th>Protokoll</th></tr></thead><tbody>
+      ${[...data.besprechungen].sort((a,b) => (a.zeit||"").localeCompare(b.zeit||"")).map(b => `
+      <tr>
+        <td class="p-mono">${fmtTagKurz(b.zeit)} ${fmtZeit(b.zeit)}</td>
+        <td>${esc(b.teilnehmer||"–")}</td>
+        <td style="white-space:pre-wrap">${esc(b.protokoll)}</td>
+      </tr>`).join("")}
+    </tbody></table>` : "<p>Keine protokolliert.</p>"}` : "";
+  const secFotos = on("fotodoku") && (data.fotos||[]).length ? `
+    <h2>Fotodokumentation (${data.fotos.length})</h2>
+    <div class="p-fotos">
+      ${[...data.fotos].sort((a,b) => (a.zeit||"").localeCompare(b.zeit||"")).map(f => `
+      <figure>
+        <img src="${f.data}" alt="Einsatzfoto">
+        <figcaption class="p-mono">${fmtZeit(f.zeit)} Uhr${f.notiz ? " – " + esc(f.notiz) : ""}</figcaption>
+      </figure>`).join("")}
+    </div>` : "";
+  const secListen = on("listen") ? `
+    <h2>Checklisten (${(data.checks||[]).length})</h2>
+    ${(data.checks||[]).length ? (data.checks).map(c => `
+      <p style="margin:8px 0 4px"><strong>${esc(c.name)}</strong> – ${c.punkte.filter(p=>p.done).length}/${c.punkte.length} erledigt</p>
+      <table><tbody>
+        ${c.punkte.map(p => `<tr>
+          <td style="width:24px">${p.done ? "☑" : "☐"}</td>
+          <td>${esc(p.text)}</td>
+          <td class="p-mono" style="width:70px;text-align:right">${p.zeit ? fmtZeit(p.zeit) : ""}</td>
+        </tr>`).join("")}
+      </tbody></table>`).join("") : "<p>Keine.</p>"}` : "";
+  const secAtem = on("atemschutz") && (data.asTrupps||[]).length ? `
     <h2>Atemschutz – Trupps (${data.asTrupps.length})</h2>
     <table><thead><tr><th>Nr.</th><th>Träger</th><th>Feuerwehr</th><th>Gerät</th><th>Maske</th><th>LA</th><th>CSA</th><th>Start</th><th>Ende</th><th>Abschnitt / Funk</th><th>ausgerückt</th><th>angeschl.</th><th>zurück</th></tr></thead><tbody>
       ${[...data.asTrupps].sort((a,b)=>a.nr-b.nr).map(t => {
@@ -4989,51 +5533,8 @@ function doPrint(data){
           </tr>`;
         }).join("");
       }).join("")}
-    </tbody></table>` : ""}
-    <h2>Nachforderungen (${(data.anforderungen||[]).length})</h2>
-    ${(data.anforderungen||[]).length ? `<table><thead><tr><th>Was</th><th>Status</th><th>Angefordert</th><th>Alarmiert</th><th>Eingetroffen</th></tr></thead><tbody>
-      ${[...data.anforderungen].sort((a,b) => (a.angefordert||"").localeCompare(b.angefordert||"")).map(a => `
-      <tr>
-        <td>${esc(a.was)}</td><td>${esc(a.status)}</td>
-        <td class="p-mono">${fmtZeit(a.angefordert)}</td>
-        <td class="p-mono">${a.alarmiert ? fmtZeit(a.alarmiert) : "–"}</td>
-        <td class="p-mono">${a.eingetroffen ? fmtZeit(a.eingetroffen) : "–"}</td>
-      </tr>`).join("")}
-    </tbody></table>` : "<p>Keine.</p>"}
-    <h2>Checklisten (${(data.checks||[]).length})</h2>
-    ${(data.checks||[]).length ? (data.checks).map(c => `
-      <p style="margin:8px 0 4px"><strong>${esc(c.name)}</strong> – ${c.punkte.filter(p=>p.done).length}/${c.punkte.length} erledigt</p>
-      <table><tbody>
-        ${c.punkte.map(p => `<tr>
-          <td style="width:24px">${p.done ? "☑" : "☐"}</td>
-          <td>${esc(p.text)}</td>
-          <td class="p-mono" style="width:70px;text-align:right">${p.zeit ? fmtZeit(p.zeit) : ""}</td>
-        </tr>`).join("")}
-      </tbody></table>`).join("") : "<p>Keine.</p>"}
-    <h2>Lagebesprechungen (${(data.besprechungen||[]).length})</h2>
-    ${(data.besprechungen||[]).length ? `<table><thead><tr><th style="width:110px">Zeit</th><th style="width:180px">Teilnehmer</th><th>Protokoll</th></tr></thead><tbody>
-      ${[...data.besprechungen].sort((a,b) => (a.zeit||"").localeCompare(b.zeit||"")).map(b => `
-      <tr>
-        <td class="p-mono">${fmtTagKurz(b.zeit)} ${fmtZeit(b.zeit)}</td>
-        <td>${esc(b.teilnehmer||"–")}</td>
-        <td style="white-space:pre-wrap">${esc(b.protokoll)}</td>
-      </tr>`).join("")}
-    </tbody></table>` : "<p>Keine protokolliert.</p>"}
-    <h2>Funksprüche / Einsatztagebuch (${(data.funk||[]).length})</h2>
-    ${(data.funk||[]).length ? (() => {
-      const sorted = [...data.funk].sort((a,b) => (a.zeit||"").localeCompare(b.zeit||""));
-      // Datum nur anzeigen, wenn das Tagebuch über einen Tageswechsel geht
-      const mehrtaegig = new Set(sorted.map(f => new Date(f.zeit).toDateString())).size > 1;
-      return `<table><thead><tr><th>Nr.</th><th>Zeit</th><th>Von</th><th>An</th><th>Inhalt</th></tr></thead><tbody>
-      ${sorted.map((f,idx) => `
-      <tr>
-        <td class="p-mono">${idx+1}${f.wichtig ? " !" : ""}</td>
-        <td class="p-mono">${mehrtaegig ? fmtTagKurz(f.zeit) + " " : ""}${fmtZeit(f.zeit)}</td>
-        <td>${esc(f.von)}</td>
-        <td>${esc(f.an)}</td>
-        <td>${f.wichtig ? `<strong>${esc(f.text)}</strong>` : esc(f.text)}</td>
-      </tr>`).join("")}
-    </tbody></table>`;})() : "<p>Keine erfasst.</p>"}
+    </tbody></table>` : "";
+  const secLage = on("lagekarte") ? `
     ${(data.lage && data.lage.items && data.lage.items.length) ? `
     <h2>Lagekarte${data.ende ? " (Stand Einsatzende)" : " (aktueller Stand)"}</h2>
     ${printMapHtml(data.lage)}
@@ -5043,16 +5544,19 @@ function doPrint(data){
       .map(s => `
       <h2>Lagebild ${fmtZeit(s.zeit)} Uhr (${fmtDatum(s.zeit)})</h2>
       ${printMapHtml(s)}
-      ${printLegendHtml(s.items, data.einheiten)}`).join("") : ""}
-    ${(data.fotos||[]).length ? `
-    <h2>Fotodokumentation (${data.fotos.length})</h2>
-    <div class="p-fotos">
-      ${[...data.fotos].sort((a,b) => (a.zeit||"").localeCompare(b.zeit||"")).map(f => `
-      <figure>
-        <img src="${f.data}" alt="Einsatzfoto">
-        <figcaption class="p-mono">${fmtZeit(f.zeit)} Uhr${f.notiz ? " – " + esc(f.notiz) : ""}</figcaption>
-      </figure>`).join("")}
-    </div>` : ""}
+      ${printLegendHtml(s.items, data.einheiten)}`).join("") : ""}` : "";
+  $("#printArea").innerHTML = `
+    ${runHead}
+    ${runFoot}
+    <div class="p-head">
+      <div>
+        <div class="p-sub">${esc(state.config.ugName)} · Einsatzbericht · Kräfteübersicht${pEnde ? "" : " · Zwischenstand"}</div>
+        <h1>${esc(e.stichwort) || "Ohne Stichwort"}</h1>
+        <div>${esc(e.ort)}${e.objekt ? " · " + esc(e.objekt) : ""}</div>
+      </div>
+      <div class="p-mark">ELWIS</div>
+    </div>
+    ${secEinsatz}${secKraefte}${secFunk}${secSkizze}${secBespr}${secFotos}${secListen}${secAtem}${secLage}
     <p class="p-sum">
       Gesamtstärke über den Einsatz: <span class="p-mono">${sAll.f+(data.fuehrung||[]).length}/${sAll.u}/${sAll.m}/${sAll.f+sAll.u+sAll.m+(data.fuehrung||[]).length}</span> · AGT: ${sAll.agt} · CSA: ${sAll.csa}
       ${data.ende ? "" : ` &nbsp;|&nbsp; aktuell vor Ort: <span class="p-mono">${s.f+(data.fuehrung||[]).length}/${s.u}/${s.m}/${s.f+s.u+s.m+(data.fuehrung||[]).length}</span>`}
@@ -5060,9 +5564,46 @@ function doPrint(data){
     <div class="p-foot">
       <div class="p-sign">Ort, Datum</div>
       <div class="p-sign">Unterschrift Einsatzleiter</div>
-    </div>
-    <p style="font-size:8pt;color:#666;margin-top:16px">Gedruckt am ${new Date().toLocaleString("de-DE")} · ELWIS – Kräfteerfassung (Prototyp) · ${esc(state.config.ugName)}</p>`;
+    </div>`;
   window.print();
+}
+/* Druck-Auswahl: vor dem Drucken wählen, welche Bereiche (= Navigationspunkte ohne Monitor)
+   in den Bericht kommen – standardmäßig alle markiert. */
+function openPrintDialog(data){
+  const bereiche = TABS.filter(t => t.id !== "monitor");
+  const rows = bereiche.map(t => `
+    <label class="print-pick">
+      <input type="checkbox" data-psec="${t.id}" checked>
+      <span>${esc(t.label)}</span>
+    </label>`).join("");
+  $("#sheetHost").innerHTML = `
+  <div class="sheet-backdrop" data-close="1"></div>
+  <div class="sheet" role="dialog" aria-modal="true" aria-label="Bericht drucken">
+    <div class="sheet-head"><h2>Bericht drucken</h2>
+      <button class="sheet-close" data-close="1" aria-label="Schließen">×</button></div>
+    <div class="sheet-body">
+      <p class="hint" style="margin-top:0">Welche Bereiche sollen in den Bericht? Alles ist vorausgewählt – abwählen, was nicht gedruckt werden soll.</p>
+      <div style="display:flex;gap:10px;margin-bottom:12px">
+        <button type="button" class="btn btn-ghost" id="pick-all">Alle</button>
+        <button type="button" class="btn btn-ghost" id="pick-none">Keine</button>
+      </div>
+      <div class="print-picks">${rows}</div>
+    </div>
+    <div class="sheet-foot">
+      <button class="btn btn-primary" id="print-go" style="flex:1">Drucken</button>
+    </div>
+  </div>`;
+  document.querySelectorAll("[data-close]").forEach(el => el.addEventListener("click", closeEditor));
+  const boxes = () => [...document.querySelectorAll("[data-psec]")];
+  $("#pick-all").addEventListener("click", () => boxes().forEach(b => b.checked = true));
+  $("#pick-none").addEventListener("click", () => boxes().forEach(b => b.checked = false));
+  $("#print-go").addEventListener("click", () => {
+    const sel = {};
+    boxes().forEach(b => sel[b.dataset.psec] = b.checked);
+    closeEditor();
+    // kurzer Aufschub, damit das Fenster geschlossen ist, bevor der Druckdialog aufgeht
+    setTimeout(() => doPrint(data, sel), 60);
+  });
 }
 
 /* ---------------- Render-Hauptschleife ---------------- */
@@ -5105,6 +5646,17 @@ window.matchMedia("(min-width:900px)").addEventListener("change", () => {
 // Seite den letzten Stand noch anstoßen, damit die letzte Eingabe nicht verloren geht.
 document.addEventListener("visibilitychange", () => { if(document.visibilityState === "hidden") save(); });
 window.addEventListener("pagehide", () => save());
+// Nach Vollbild-Wechsel die (Snapshot-/Vergleichs-)Karten neu vermessen
+document.addEventListener("fullscreenchange", () => {
+  setTimeout(() => { [lgSnapObj, lgCmpA, lgCmpB].forEach(m => { if(m){ try{ m.invalidateSize(); }catch(e){} } }); }, 150);
+});
+// Monitor bei Fenster-Größenänderung neu berechnen (Spalten/Einpassung dynamisch)
+let monResizeT = null;
+window.addEventListener("resize", () => {
+  if(!state || state.view !== "monitor") return;
+  clearTimeout(monResizeT);
+  monResizeT = setTimeout(() => { if(state && state.view === "monitor") render(); }, 200);
+});
 
 /* ---------------- PWA: Service Worker registrieren ---------------- */
 if("serviceWorker" in navigator && (location.protocol === "https:" || location.hostname === "localhost")){
