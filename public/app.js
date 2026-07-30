@@ -437,6 +437,18 @@ function uid(){ return Date.now().toString(36) + Math.random().toString(36).slic
 function save(){ if(state) idbSet("state", JSON.stringify(state)).catch(e => console.warn("[ELWIS] Speichern (IndexedDB) fehlgeschlagen:", e)); }
 function markChange(){ if(!state.wlan) state.pending++; save(); }
 function pfx(org){ return state.config.prefixes[org] ?? ""; }
+/* Funkrufname normalisieren: führendes Gattungswort (z. B. „Feuerwehr"/„FF") durch das je
+   Organisation konfigurierte Präfix ersetzen – „Feuerwehr Schirmitz" → „Florian Schirmitz". */
+function normFunkname(name, org){
+  name = (name || "").trim();
+  const p = (state.config.prefixes[org] || "").trim();
+  if(!name || !p) return name;
+  const alias = { FW:"feuerwehr|ff|florian", BRK:"brk|rk|rotes kreuz|rot[- ]?kreuz|rettungsdienst",
+    POL:"polizei|pol|donau", THW:"thw|technisches hilfswerk|heros" }[org];
+  if(!alias) return name;
+  const re = new RegExp("^(?:" + alias + "|" + p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + ")\\b[\\s.\\-]*", "i");
+  return re.test(name) ? (p + " " + name.replace(re, "")).trim() : name;
+}
 
 /* ---------------- Hilfsfunktionen ---------------- */
 const $ = sel => document.querySelector(sel);
@@ -566,9 +578,22 @@ function resizeImage(file, maxDim, cb){
   rd.readAsDataURL(file);
 }
 /* Sprachdiktat (Web Speech API) – Komfortfunktion am ELW, braucht Browser-Unterstützung */
+let iosDiktatHint = false;   // Diktat-Hinweis (iOS) nur einmal pro Sitzung zeigen
 function attachDictation(btn, target){
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if(!SR){ btn.style.display = "none"; return; }
+  if(!SR){
+    // iOS/Safari kennt kein Web-Diktat. Button sichtbar lassen und auf die Tastatur-Diktatfunktion
+    // hinweisen (🎤-Taste der Bildschirmtastatur); Tippen fokussiert das Feld (öffnet die Tastatur).
+    btn.title = "Diktieren über die 🎤-Taste der Tastatur";
+    btn.addEventListener("click", () => {
+      try{ target.focus(); }catch(e){}
+      if(!iosDiktatHint){
+        iosDiktatHint = true;
+        modalInfo("Diktat auf diesem Gerät über die Mikrofon-Taste (🎤) der Bildschirmtastatur nutzen – Safari/iOS unterstützt kein direktes Web-Diktat.");
+      }
+    });
+    return;
+  }
   let rec = null;
   btn.addEventListener("click", () => {
     if(rec){ rec.stop(); return; }
@@ -1214,10 +1239,11 @@ function renderFotodoku(){
     <h2>Foto-Dokumentation${fotos.length ? ` <span class="mono" style="color:var(--ink3);font-weight:600">(${fotos.length})</span>` : ""}</h2>
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
       <button class="btn btn-primary" id="fotoCam">📷&nbsp; Kamera öffnen</button>
-      <button class="btn btn-ghost" id="fotoFileBtn">Aus Datei wählen</button>
-      <input type="file" id="fotoFile" accept="image/*" capture="environment" multiple style="display:none">
+      <button class="btn btn-ghost" id="fotoFileBtn">Dateien hinzufügen</button>
+      <input type="file" id="fotoFile" accept="image/*" multiple style="display:none">
+      <input type="file" id="fotoCamNative" accept="image/*" capture="environment" multiple style="display:none">
     </div>
-    <p class="hint" style="margin-top:0">Kamera bleibt für mehrere Aufnahmen geöffnet. Foto antippen für Kommentar (Tastatur <em>oder Sprache 🎤</em>) oder zum Löschen.</p>
+    <p class="hint" style="margin-top:0">Kamera bleibt für mehrere Aufnahmen geöffnet. „Dateien hinzufügen" wählt Bilder vom Gerät (z. B. per Mail erhaltene Drohnen-Fotos) – Mehrfachauswahl möglich. Foto antippen für Kommentar (Tastatur <em>oder Sprache 🎤</em>) oder zum Löschen.</p>
     ${grid}
   </div>`;
 }
@@ -1231,7 +1257,7 @@ function fotoSpeichern(file, onDone){
 // Live-Kamera für die Foto-Doku – bleibt offen, mehrere Aufnahmen nacheinander
 async function fotoDokuKamera(){
   const mm = navigator.mediaDevices;
-  if(!mm || !mm.getUserMedia || !window.isSecureContext){ $("#fotoFile").click(); return; }  // http-LAN → native Kamera
+  if(!mm || !mm.getUserMedia || !window.isSecureContext){ $("#fotoCamNative").click(); return; }  // http-LAN → native Kamera
   let stream;
   try{ stream = await mm.getUserMedia({ video:{ facingMode:{ ideal:"environment" },
     width:{ ideal:1920 }, height:{ ideal:1080 } }, audio:false }); }
@@ -1272,12 +1298,14 @@ async function fotoDokuKamera(){
 function wireFotodoku(){
   $("#fotoCam").addEventListener("click", fotoDokuKamera);
   $("#fotoFileBtn").addEventListener("click", () => $("#fotoFile").click());
-  $("#fotoFile").addEventListener("change", e => {
+  const fotoImport = e => {
     const files = [...e.target.files]; e.target.value = "";
     let i = 0;
     const next = () => { if(i >= files.length){ render(); return; } fotoSpeichern(files[i++], next); };
     next();
-  });
+  };
+  $("#fotoFile").addEventListener("change", fotoImport);
+  $("#fotoCamNative").addEventListener("change", fotoImport);
   document.querySelectorAll("[data-foto]").forEach(el =>
     el.addEventListener("click", () => openFotoSheet(el.dataset.foto)));
 }
@@ -2140,7 +2168,7 @@ function wireSheet(){
     });
   });
   $("#e-save").addEventListener("click", () => {
-    u.name = (u.name||"").trim();
+    u.name = normFunkname(u.name, u.org);   // „Feuerwehr Schirmitz“ → „Florian Schirmitz“
     u.kennung = (u.kennung||"").replace(/\/+$/,"");
     katalogHinzufuegen(u);   // noch unbekanntes Fahrzeug in den Katalog übernehmen
     const idx = state.einheiten.findIndex(x => x.id === u.id);
@@ -2431,17 +2459,6 @@ function fsSuggestions(){
   ["Leitstelle", "ELW", state.config.elwFunk, state.config.ugName].forEach(add);
   return s;
 }
-/* Gruppierte <option>-Liste für die Funk-Auswahl (mobiltauglich, statt nur Datalist) */
-function fsPickOptions(){
-  const uniq = arr => { const s = new Set(), o = []; arr.forEach(v => { v = (v||"").trim(); if(v && !s.has(v)){ s.add(v); o.push(v); } }); return o; };
-  const opt = v => `<option value="${esc(v)}">${esc(v)}</option>`;
-  const grp = (label, arr) => arr.length ? `<optgroup label="${esc(label)}">${arr.map(opt).join("")}</optgroup>` : "";
-  const fahrzeuge = uniq([...aktive().map(fullName), ...state.einheiten.filter(u => u.abgerueckt).map(fullName)]);
-  const fk = uniq(state.fuehrung.flatMap(f => [f.funkrufname, f.name]));
-  const ab = uniq(state.abschnitte.flatMap(a => [a.name, a.ansprechpartner]));
-  const stellen = uniq([state.config.ilsName, "Leitstelle", "ELW", state.config.elwFunk, state.config.ugName]);
-  return grp("Fahrzeuge / Einheiten", fahrzeuge) + grp("Führungskräfte", fk) + grp("Abschnitte", ab) + grp("Stellen", stellen);
-}
 function renderFunk(){
   const list = [...state.funk].sort((a,b) => (b.zeit||"").localeCompare(a.zeit||""));
   const items = list.length ? `<div class="fs-list">${list.map(f => `
@@ -2516,7 +2533,6 @@ function renderFsSheet(){
   if(!editingFs){ $("#sheetHost").innerHTML = ""; return; }
   const f = editingFs.fs;
   const sugg = fsSuggestions().map(x => `<option value="${esc(x)}">`).join("");
-  const pick = fsPickOptions();
   $("#sheetHost").innerHTML = `
   <div class="sheet-backdrop" data-close="1"></div>
   <div class="sheet" role="dialog" aria-modal="true" aria-label="${editingFs.isNew?"Funkspruch erfassen":"Funkspruch bearbeiten"}">
@@ -2537,12 +2553,10 @@ function renderFsSheet(){
       <div class="field">
         <div class="swap-row">
           <div><label for="fs-von">Von (Sender)</label>
-            <input id="fs-von" value="${esc(f.von)}" list="fs-sugg" placeholder="z. B. Florian Weiden 1/40/1" autocomplete="off">
-            ${pick ? `<select id="fs-von-pick" class="fs-pick" aria-label="Von aus erfassten wählen"><option value="">＋ aus erfassten wählen …</option>${pick}</select>` : ""}</div>
+            <input id="fs-von" value="${esc(f.von)}" list="fs-sugg" placeholder="z. B. Florian Weiden 1/40/1" autocomplete="off"></div>
           <button class="swapbtn" id="fs-swap" title="Sender und Empfänger tauschen" aria-label="Sender und Empfänger tauschen">⇄</button>
           <div><label for="fs-an">An (Empfänger)</label>
-            <input id="fs-an" value="${esc(f.an)}" list="fs-sugg" placeholder="z. B. Kater Weiden 1/12/1" autocomplete="off">
-            ${pick ? `<select id="fs-an-pick" class="fs-pick" aria-label="An aus erfassten wählen"><option value="">＋ aus erfassten wählen …</option>${pick}</select>` : ""}</div>
+            <input id="fs-an" value="${esc(f.an)}" list="fs-sugg" placeholder="z. B. Kater Weiden 1/12/1" autocomplete="off"></div>
         </div>
         <datalist id="fs-sugg">${sugg}</datalist>
       </div>
@@ -2572,11 +2586,6 @@ function renderFsSheet(){
     $("#fs-von").value = $("#fs-an").value;
     $("#fs-an").value = v;
   });
-  const pickFill = (selId, inpId) => { const s = $("#" + selId); if(s) s.addEventListener("change", () => {
-    if(s.value){ const inp = $("#" + inpId); inp.value = s.value; inp.dispatchEvent(new Event("input")); } s.selectedIndex = 0;
-  }); };
-  pickFill("fs-von-pick", "fs-von");
-  pickFill("fs-an-pick", "fs-an");
   $("#fs-imp").addEventListener("click", () => {
     f.wichtig = !f.wichtig;
     $("#fs-imp").setAttribute("aria-pressed", f.wichtig);
@@ -2610,30 +2619,138 @@ function renderFsSheet(){
 
 /* ---------------- Ansicht: Checklisten ---------------- */
 /* Vorlagen – im Endausbau je Mandant in den Einstellungen pflegbar */
+/* Checklisten-Vorlagen (Inhalte angelehnt an FwDV 100 / Einsatzleiterwiki). Ein Eintrag mit
+   führendem "# " ist eine Abschnitts-Überschrift (nicht abhakbar), alles andere ein Prüfpunkt. */
 const CHECK_VORLAGEN = [
-  { name:"Einsatzleiter – Erstmaßnahmen", punkte:[
-    "Lage erkunden", "Rückmeldung an Leitstelle", "Einsatzstelle absichern",
-    "Bereitstellungsraum festlegen", "Abschnitte bilden", "Atemschutzüberwachung sicherstellen",
-    "Lagekarte anlegen", "Presse/Behörden informieren", "Lagebesprechung ansetzen" ] },
-  { name:"MANV", punkte:[
-    "MANV-Stufe festlegen", "Patientenablage einrichten", "ELRD / OrgL anfordern",
-    "Sichtung veranlassen", "Transportorganisation aufbauen", "Betreuung anfordern" ] },
-  { name:"Gefahrgut", punkte:[
-    "Gefahr erkennen (Kennzeichnung)", "Absperrbereich 50/100 m", "Anfahrt mit Wind beachten",
-    "GW-Gefahrgut anfordern", "Dekon-Platz einrichten", "Fachberater hinzuziehen" ] },
+  { name:"Einsatzleiter – Erstmaßnahmen (Führungsvorgang)", punkte:[
+    "# Erkundung & Lage",
+    "Eigene Sicherheit / Gefahren der Einsatzstelle prüfen (4A/1C/4E)",
+    "Lage erkunden: Was ist passiert? Menschen in Gefahr? Ausdehnung?",
+    "Besondere Gefahren ausschließen (Gefahrgut, Elektro, Absturz, Einsturz)",
+    "# Melden & Nachfordern",
+    "Erste Rückmeldung an Leitstelle (Lage – Maßnahmen – Nachforderung)",
+    "Kräfte/Fachdienste nachfordern (Fahrzeuge, Führung, RD, THW)",
+    "# Sicherheit",
+    "Einsatzstelle absichern (Verkehr, Absperrgrenzen)",
+    "Gefahrenbereich festlegen, Unbeteiligte fernhalten",
+    "# Ordnung des Raumes",
+    "Verfügungs-/Bereitstellungsraum festlegen",
+    "Einsatzabschnitte bilden",
+    "An- und Abfahrts-/Rettungswege freihalten",
+    "# Kräfte führen",
+    "Aufträge erteilen (Auftrag – Ort – Weg – Mittel – Ziel)",
+    "Atemschutzüberwachung sicherstellen",
+    "Abschnittsleiter / Führungsstruktur benennen",
+    "# Kommunikation & Doku",
+    "Rufgruppen / Funkskizze festlegen",
+    "Lagekarte anlegen und fortführen",
+    "Einsatztagebuch & Kräfteübersicht führen",
+    "Presse / Behörden / Angehörige berücksichtigen",
+    "# Fortlaufend",
+    "Regelmäßige Lagekontrolle (Lage – Möglichkeiten – Entschluss – Befehl)",
+    "Nächste Lagebesprechung ansetzen",
+    "Ablösung, Verpflegung und Kräftereserve planen" ] },
+  { name:"Brandeinsatz", punkte:[
+    "# Erkundung",
+    "Menschen in Gefahr? Lage und Ausdehnung erkunden",
+    "Objekt/Nutzung und Gefahren (Gas, Elektro, Absturz, Rückzündung)",
+    "Anfahrt/Aufstellung, Windrichtung beachten",
+    "# Menschenrettung",
+    "Menschenrettung einleiten (Trupps, Rettungsgeräte)",
+    "Anzahl / Vermisste klären",
+    "# Brandbekämpfung",
+    "Innen-/Außenangriff festlegen",
+    "Riegelstellung / Nachbarbereiche schützen",
+    "Ausreichend Rohre & Trupps, Rückzugsweg sichern",
+    "# Wasserversorgung",
+    "Löschwasser sicherstellen (Hydrant / offenes Gewässer)",
+    "Wasserförderung über lange Wegstrecke prüfen",
+    "# Atemschutz",
+    "Atemschutzüberwachung einrichten",
+    "Rückzugssignal / Notfallmeldung festlegen, Sicherheitstrupp bereit",
+    "# Kontrolle & Abschluss",
+    "Kontrolle auf Brandausbreitung / Glutnester (Wärmebildkamera)",
+    "Nachlösch-/Aufräumarbeiten, Objektübergabe",
+    "BMA / Schlüsseldepot zurücksetzen, Betreiber informieren" ] },
+  { name:"Technische Hilfe – Verkehrsunfall", punkte:[
+    "# Absichern",
+    "Einsatzstelle & Verkehr absichern, Eigensicherung (Warnkleidung)",
+    "Auslaufende Betriebsstoffe / Brandgefahr beachten",
+    "# Sofortmaßnahmen",
+    "Brandschutz sicherstellen (Löschbereitschaft)",
+    "Fahrzeug gegen Wegrollen/Kippen stabilisieren",
+    "Zündung aus / Batterie abklemmen",
+    "Nicht ausgelöste Airbags / Rückhaltesysteme beachten",
+    "# Patient",
+    "Zugang schaffen, Erstkontakt und Erstversorgung",
+    "Rettungsdienst/Notarzt einbinden (medizinische Rettung)",
+    "# Rettung",
+    "Rettungsart festlegen (Crash- vs. schonende Rettung)",
+    "Rettungsöffnung schaffen, patientengerecht befreien",
+    "# Umwelt & Abschluss",
+    "Betriebsstoffe binden/auffangen (Umweltschutz)",
+    "Einsatzstelle an Polizei/Abschleppdienst übergeben" ] },
+  { name:"Gefahrgut / ABC (GAMS-Regel)", punkte:[
+    "# G – Gefahr erkennen",
+    "Kennzeichnung erkennen (ADR/Gefahrzettel, GHS, UN-Nummer)",
+    "Beförderungspapiere / Sicherheitsdatenblatt / ERICard sichern",
+    "# A – Absperren",
+    "Gefahren-/Absperrbereich festlegen (mind. 50 m, ggf. 100 m)",
+    "Anfahrt/Aufstellung mit dem Wind (luvseitig, oberhalb)",
+    "Unbeteiligte fernhalten / evakuieren",
+    "# M – Menschenrettung",
+    "Menschenrettung nur mit geeignetem Schutz (CSA/Atemschutz)",
+    "Kontaminationsverschleppung vermeiden",
+    "# S – Spezialkräfte",
+    "Messtrupp zur Stofferkundung einsetzen",
+    "Fachberater / Umweltzug / analytische Task Force anfordern",
+    "TUIS / Giftnotruf zur Fachberatung kontaktieren",
+    "# Weitere Maßnahmen",
+    "Austritt eindämmen (Bindemittel, Abdichten)",
+    "Dekon-Platz (Personen/Geräte) einrichten",
+    "Behörden alarmieren (Wasser-/Umweltbehörde bei Gewässergefahr)",
+    "# Abschluss",
+    "Kontaminationsnachweis, Probenahme, Dokumentation" ] },
+  { name:"MANV – Massenanfall von Verletzten", punkte:[
+    "# Sofort (erste 15 Minuten)",
+    "Sofort-/Lagemeldung absetzen, MANV-Stufe festlegen",
+    "Gefahren prüfen (CBRN/Bedrohung?), Ereignis abgeschlossen?",
+    "Massiv nachfordern (RD, Führung, Fachdienste)",
+    "# Führung & Fachdienst",
+    "OrgL und Leitenden Notarzt (LNA) anfordern/einbinden",
+    "Einsatzabschnitte bilden (RD/FW getrennt)",
+    "# Raumordnung",
+    "Zu-/Abfahrten freihalten (ggf. Einbahnregelung)",
+    "Patientenablage einrichten (ab ~10, mit Witterungsschutz)",
+    "Behandlungsplatz aufbauen (ab ~30 Verletzten)",
+    "Rettungsmittel-Halteplatz / Bereitstellungsraum",
+    "Hubschrauberlandeplatz / ggf. Dekon-Platz",
+    "# Sichtung & Behandlung",
+    "Sichtung/Triage veranlassen (SK I–IV dokumentieren)",
+    "Behandlung nach Sichtungskategorie sicherstellen",
+    "# Transport & Kliniken",
+    "Transportorganisation aufbauen, Kliniken früh informieren",
+    "Leichtverletzte (SK III) gesammelt verteilen/betreuen",
+    "# Registrierung & Betreuung",
+    "Patienten registrieren (Verbleib / Zielklinik)",
+    "Betreuung Unverletzter, PSNV alarmieren",
+    "Ablösung und Verpflegung planen" ] },
 ];
 function renderListen(){
   const cards = state.checks.map(c => {
-    const done = c.punkte.filter(p => p.done).length;
+    const punkte = c.punkte.filter(p => !p.head);   // Überschriften zählen nicht
+    const done = punkte.filter(p => p.done).length;
+    const total = punkte.length || 1;
     return `
     <div class="card">
       <div style="display:flex;align-items:center;gap:10px">
-        <h2 style="margin:0;flex:1">${esc(c.name)} · <span class="mono">${done}/${c.punkte.length}</span></h2>
+        <h2 style="margin:0;flex:1">${esc(c.name)} · <span class="mono">${done}/${punkte.length}</span></h2>
         <button class="btn btn-danger-ghost" data-checkdel="${esc(c.id)}" style="min-height:40px;padding:6px 12px;font-size:.8rem">✕</button>
       </div>
-      <div class="check-progress"><i style="width:${Math.round(done/c.punkte.length*100)}%"></i></div>
-      ${c.punkte.map((p,idx) => `
-      <button class="check-item ${p.done ? "done" : ""}" data-check="${esc(c.id)}:${idx}">
+      <div class="check-progress"><i style="width:${Math.round(done/total*100)}%"></i></div>
+      ${c.punkte.map((p,idx) => p.head
+        ? `<div class="check-head">${esc(p.text)}</div>`
+        : `<button class="check-item ${p.done ? "done" : ""}" data-check="${esc(c.id)}:${idx}">
         <span class="check-box">✓</span>
         <span class="check-text">${esc(p.text)}</span>
         ${p.zeit ? `<span class="check-zeit mono">${fmtZeit(p.zeit)}</span>` : ""}
@@ -2645,7 +2762,7 @@ function renderListen(){
     <h2>Checkliste starten</h2>
     <div class="addrow">
       <select id="checkVorlage">
-        ${CHECK_VORLAGEN.map((v,idx) => `<option value="${idx}">${esc(v.name)} (${v.punkte.length} Punkte)</option>`).join("")}
+        ${CHECK_VORLAGEN.map((v,idx) => `<option value="${idx}">${esc(v.name)} (${v.punkte.filter(t => !t.startsWith("# ")).length} Punkte)</option>`).join("")}
       </select>
       <button class="btn btn-ghost" id="checkStart">Starten</button>
     </div>
@@ -2658,7 +2775,7 @@ function wireListen(){
     const v = CHECK_VORLAGEN[Number($("#checkVorlage").value)];
     if(!v) return;
     state.checks.push({ id:uid(), name:v.name,
-      punkte: v.punkte.map(text => ({ text, done:false, zeit:"" })) });
+      punkte: v.punkte.map(t => t.startsWith("# ") ? { text:t.slice(2), head:true } : { text:t, done:false, zeit:"" }) });
     markChange(); render();
   });
   document.querySelectorAll("[data-check]").forEach(b => b.addEventListener("click", () => {
@@ -3589,7 +3706,6 @@ let monAbPage = 0;                 // aktuelle Abschnitts-Seite
 let monAbLast = Date.now();        // Zeitpunkt des letzten Seitenwechsels
 let monAbPaused = false;           // Rotation per Play/Pause anhaltbar
 let monFull = false;               // Monitor-Vollbild: nur der graue Monitor, ohne App-Menü
-let monAbAvailH = 0;               // gemessene nutzbare Höhe für Abschnitts-Kacheln (px), self-correcting
 function rotateAbschnitte(){
   if(monAbPaused) return;
   const pages = monAbPagesCount();
@@ -3600,38 +3716,20 @@ function rotateAbschnitte(){
     render();
   }
 }
-// Spaltenzahl dynamisch aus der Breite: pro Kachel mind. ~360px, damit Fahrzeugname + AGT lesbar bleiben.
+// Spalten nach Auflösung: große Fläche → 3 Abschnitte, sonst 2 (klein 1). Mehr als 3 passen nicht auf einen Screen.
 function monAbColumns(){
   const hp = state.monHide.panels;
   const leftShown = (!hp.org || !hp.fk);   // linke Spalte (Stärke/FK) sichtbar → Kachelfläche schmaler
   const w = window.innerWidth || 1280;
   const gridW = (leftShown ? w * 0.78 : w) - 40;
-  return Math.max(1, Math.min(4, Math.floor((gridW + 10) / 360)));
+  return gridW >= 1080 ? 3 : gridW >= 640 ? 2 : 1;
 }
-// grobe (eher großzügige) Höhen-Schätzung einer Abschnitts-Kachel – für die Einpassung ohne Scroll
-function abCardEstH(card){
-  const funk = (card.opts && (gruppeStr(card.opts.fuehrung) || gruppeStr(card.opts.arbeit))) ? 34 : 0;
-  return 150 + funk + (card.units.length || 0) * 34;
-}
-// Seiten so packen, dass möglichst viele vollständige Kacheln (ganze Reihen) ohne Scroll passen
+// Eine Reihe je Seite: so viele Kacheln wie Spalten (2 bzw. 3), Rest rotiert.
 function monAbPages(){
-  const cards = monCardsData();
-  const n = cards.length;
+  const n = monCardsData().length;
   const cols = monAbColumns();
-  const availH = monAbAvailH || ((window.innerHeight || 800) - 260);
   const pages = [];
-  let i = 0;
-  while(i < n){
-    let used = 0, start = i;
-    while(i < n){
-      const rowCards = cards.slice(i, i + cols);
-      const rowH = Math.max(...rowCards.map(abCardEstH)) + 12;
-      if(i > start && used + rowH > availH) break;   // Reihe passt nicht mehr → neue Seite (mind. 1 Reihe)
-      used += rowH; i += rowCards.length;
-      if(used >= availH) break;
-    }
-    pages.push({ start, count: i - start });
-  }
+  for(let i = 0; i < n; i += cols) pages.push({ start:i, count: Math.min(cols, n - i) });
   return pages.length ? pages : [{ start: 0, count: 0 }];
 }
 function renderMonitor(){
@@ -3853,12 +3951,14 @@ function renderMonitor(){
       : isFunkPage ? (() => {
         // Eigene Seite: Funksprüche + Checklisten nebeneinander – Checklisten mit einzelnen Punkten
         const checksListe = state.checks.map(c => {
-          const done = c.punkte.filter(p => p.done).length;
-          const pct = c.punkte.length ? Math.round(done/c.punkte.length*100) : 0;
-          const punkte = c.punkte.map(p =>
-            `<div class="mon-chk-pt ${p.done ? "done" : ""}"><span class="mon-chk-box">${p.done ? "✓" : ""}</span><span class="mon-chk-txt">${esc(p.text)}</span></div>`).join("");
+          const pk = c.punkte.filter(p => !p.head);
+          const done = pk.filter(p => p.done).length;
+          const pct = pk.length ? Math.round(done/pk.length*100) : 0;
+          const punkte = c.punkte.map(p => p.head
+            ? `<div class="mon-chk-head2">${esc(p.text)}</div>`
+            : `<div class="mon-chk-pt ${p.done ? "done" : ""}"><span class="mon-chk-box">${p.done ? "✓" : ""}</span><span class="mon-chk-txt">${esc(p.text)}</span></div>`).join("");
           return `<div class="mon-chk">
-            <div class="mon-chk-head"><span class="mon-chk-name">${esc(c.name)}</span><span class="mono">${done}/${c.punkte.length}</span></div>
+            <div class="mon-chk-head"><span class="mon-chk-name">${esc(c.name)}</span><span class="mono">${done}/${pk.length}</span></div>
             <div class="check-progress"><i style="width:${pct}%"></i></div>
             ${punkte}
           </div>`;
@@ -4052,13 +4152,6 @@ function wireMonitor(){
     render();
   });
   tickClock();
-  // Nutzbare Höhe der Kachelfläche messen → Einpassung self-correcting (einmal nachziehen bei Änderung).
-  const grid = document.getElementById("monAbGrid");
-  if(grid){
-    const top = grid.getBoundingClientRect().top;
-    const h = (window.innerHeight || 800) - top - 20;
-    if(h > 140 && Math.abs(h - monAbAvailH) > 24){ monAbAvailH = h; render(); }
-  }
 }
 function tickClock(){
   const c = $("#monClock");
@@ -5420,15 +5513,9 @@ function doPrint(data, sel){
       <td>${esc((ORGS[f.org]||ORGS.SON).label)}</td>
       <td>${esc(f.einheit||"–")}</td>
     </tr>`).join("");
-  // Laufender Kopf/Fuß auf jeder Seite (Chromium wiederholt position:fixed-Elemente je Druckseite);
-  // Seitenzahl über die @page-Randbox (@bottom-right) in der Druck-CSS.
-  const runHead = `
-    <div class="p-run-head">
-      <span class="p-rh-l">${esc(state.config.ugName)} · Einsatzbericht${pEnde ? "" : " · Zwischenstand"}</span>
-      <span class="p-rh-r">${esc(e.stichwort) || "Ohne Stichwort"}${e.ort ? " · " + esc(e.ort) : ""}</span>
-    </div>`;
-  const runFoot = `
-    <div class="p-run-foot">Gedruckt am ${new Date().toLocaleString("de-DE")} · ELWIS – Kräfteerfassung (Prototyp) · ${esc(state.config.ugName)}</div>`;
+  // Laufender Seitenkopf/-fuß über @page-Randboxen (kein position:fixed → keine Überlagerung
+   // des Inhalts). Die Kopfzeile stammt aus dieser versteckten Quelle (CSS string-set).
+  const runSrc = `<div class="p-run-src">${esc(state.config.ugName)} · ${esc(e.stichwort) || "Einsatzbericht"}${pEnde ? "" : " · Zwischenstand"}</div>`;
   const secEinsatz = on("einsatz") ? `
     <table class="meta">
       ${e.objekt ? `<tr><td>Objekt</td><td>${esc(e.objekt)}</td></tr>` : ""}
@@ -5502,15 +5589,19 @@ function doPrint(data, sel){
     </div>` : "";
   const secListen = on("listen") ? `
     <h2>Checklisten (${(data.checks||[]).length})</h2>
-    ${(data.checks||[]).length ? (data.checks).map(c => `
-      <p style="margin:8px 0 4px"><strong>${esc(c.name)}</strong> – ${c.punkte.filter(p=>p.done).length}/${c.punkte.length} erledigt</p>
+    ${(data.checks||[]).length ? (data.checks).map(c => {
+      const pk = c.punkte.filter(p => !p.head);
+      return `
+      <p style="margin:8px 0 4px"><strong>${esc(c.name)}</strong> – ${pk.filter(p=>p.done).length}/${pk.length} erledigt</p>
       <table><tbody>
-        ${c.punkte.map(p => `<tr>
+        ${c.punkte.map(p => p.head
+          ? `<tr><td></td><td colspan="2" style="font-weight:700;padding-top:6px">${esc(p.text)}</td></tr>`
+          : `<tr>
           <td style="width:24px">${p.done ? "☑" : "☐"}</td>
           <td>${esc(p.text)}</td>
           <td class="p-mono" style="width:70px;text-align:right">${p.zeit ? fmtZeit(p.zeit) : ""}</td>
         </tr>`).join("")}
-      </tbody></table>`).join("") : "<p>Keine.</p>"}` : "";
+      </tbody></table>`;}).join("") : "<p>Keine.</p>"}` : "";
   const secAtem = on("atemschutz") && (data.asTrupps||[]).length ? `
     <h2>Atemschutz – Trupps (${data.asTrupps.length})</h2>
     <table><thead><tr><th>Nr.</th><th>Träger</th><th>Feuerwehr</th><th>Gerät</th><th>Maske</th><th>LA</th><th>CSA</th><th>Start</th><th>Ende</th><th>Abschnitt / Funk</th><th>ausgerückt</th><th>angeschl.</th><th>zurück</th></tr></thead><tbody>
@@ -5546,8 +5637,7 @@ function doPrint(data, sel){
       ${printMapHtml(s)}
       ${printLegendHtml(s.items, data.einheiten)}`).join("") : ""}` : "";
   $("#printArea").innerHTML = `
-    ${runHead}
-    ${runFoot}
+    ${runSrc}
     <div class="p-head">
       <div>
         <div class="p-sub">${esc(state.config.ugName)} · Einsatzbericht · Kräfteübersicht${pEnde ? "" : " · Zwischenstand"}</div>
@@ -5564,7 +5654,8 @@ function doPrint(data, sel){
     <div class="p-foot">
       <div class="p-sign">Ort, Datum</div>
       <div class="p-sign">Unterschrift Einsatzleiter</div>
-    </div>`;
+    </div>
+    <p class="p-print-ts">Gedruckt am ${new Date().toLocaleString("de-DE")} · ELWIS – Kräfteerfassung (Prototyp) · ${esc(state.config.ugName)}</p>`;
   window.print();
 }
 /* Druck-Auswahl: vor dem Drucken wählen, welche Bereiche (= Navigationspunkte ohne Monitor)

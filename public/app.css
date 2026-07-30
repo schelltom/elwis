@@ -481,7 +481,7 @@
   .ab-table th:nth-child(1),.ab-table td:nth-child(1){width:34px}
   .ab-table th:nth-child(3),.ab-table td:nth-child(3){width:76px}
   .ab-table th:nth-child(4),.ab-table td:nth-child(4){width:40px}
-  .ab-table td.name{overflow:hidden;text-overflow:ellipsis}
+  .ab-table td.name{white-space:normal;overflow-wrap:anywhere;word-break:break-word;line-height:1.15}
   .ab-card{background:var(--surface);border:1px solid var(--line);border-radius:12px;
     padding:11px 13px;border-top:4px solid var(--accent);min-width:0}
   .ab-card .name{max-width:100%;overflow:hidden;text-overflow:ellipsis}
@@ -775,6 +775,10 @@
   .check-zeit{margin-left:auto;font-size:.75rem;color:var(--ink3);white-space:nowrap;padding-top:5px}
   .check-progress{height:8px;border-radius:4px;background:var(--surface2);overflow:hidden;margin:6px 0 12px}
   .check-progress i{display:block;height:100%;background:var(--good);border-radius:4px}
+  /* Abschnitts-Überschrift innerhalb einer Checkliste */
+  .check-head{font-size:.72rem;font-weight:800;letter-spacing:.08em;text-transform:uppercase;
+    color:var(--accent);margin:14px 0 4px;padding-top:8px;border-top:1px solid var(--line)}
+  .check-head:first-child{border-top:none;padding-top:0;margin-top:2px}
   .micbtn{width:52px;height:52px;border-radius:10px;border:1.5px solid var(--line);flex:none;
     display:grid;place-items:center;color:var(--ink2);background:var(--surface)}
   .micbtn svg{width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
@@ -877,20 +881,19 @@
     #printArea .p-fotos figure{margin:0;break-inside:avoid}
     #printArea .p-fotos img{width:100%;border:1px solid #999;border-radius:3px}
     #printArea .p-fotos figcaption{font-size:8pt;color:#333;margin-top:2px}
-    /* Seitenränder + Seitenzahl (Randbox) auf jeder Druckseite */
+    /* Seitenkopf/-fuß + Seitenzahl über @page-Randboxen (kein position:fixed → keine Überlagerung
+       des Inhalts). Kopftext kommt aus der versteckten Quelle .p-run-src via string-set. */
     @page{
-      margin:24mm 13mm 17mm;
+      margin:20mm 13mm 16mm;
+      @top-right{content:string(rptHead);
+        font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;font-size:8pt;color:#777}
+      @bottom-left{content:"ELWIS – Einsatzbericht";
+        font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;font-size:8pt;color:#888}
       @bottom-right{content:"Seite " counter(page) " von " counter(pages);
-        font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;font-size:8pt;color:#666}
+        font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;font-size:8pt;color:#777}
     }
-    /* Laufender Kopf/Fuß – Chromium wiederholt position:fixed je Seite */
-    #printArea .p-run-head{position:fixed;top:0;left:0;right:0;height:16mm;
-      display:flex;justify-content:space-between;align-items:flex-end;gap:16px;
-      padding:6mm 13mm 2mm;font-size:8.5pt;color:#333;border-bottom:.75px solid #999}
-    #printArea .p-run-head .p-rh-r{font-weight:700;text-align:right;white-space:nowrap;
-      overflow:hidden;text-overflow:ellipsis}
-    #printArea .p-run-foot{position:fixed;bottom:0;left:0;height:12mm;
-      display:flex;align-items:center;padding:2mm 13mm;font-size:8pt;color:#666}
+    #printArea .p-run-src{string-set:rptHead content(text);height:0;line-height:0;font-size:0;color:transparent;overflow:hidden}
+    #printArea .p-print-ts{margin-top:16px;font-size:8pt;color:#666}
     /* Funkskizze im Druck: ohne Schatten, klare S/W-Linien */
     #printArea .p-skizze{break-inside:avoid;margin:6px 0 12px;print-color-adjust:exact;-webkit-print-color-adjust:exact}
     #printArea .p-skizze .fkbox{box-shadow:none;background:#fff;border-color:#000}
@@ -943,9 +946,6 @@
 /* Feld-Kopfzeile: Label + Schalter (z. B. Verfügungs-/Bereitstellungsraum) */
 .field-head{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:6px;flex-wrap:wrap}
 .field-head label{margin:0}
-/* Funk: Schnellauswahl (erfasste Fahrzeuge/FK/Abschnitte) – mobiltauglich statt Datalist */
-.fs-pick{margin-top:6px;font-size:.92rem;color:var(--ink2)}
-
 /* what3words-Zeile (eigene vollbreite Zeile in den Einsatzstammdaten) */
 .w3w-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .w3w-row input{flex:1;min-width:160px;font-family:ui-monospace,Menlo,Consolas,monospace}
@@ -1206,6 +1206,7 @@
 .mon-chk-head .mono{color:var(--ink3);font-weight:700;font-size:.85rem}
 .mon-chk-pt{display:flex;align-items:flex-start;gap:9px;padding:3px 0;font-size:.9rem;color:var(--ink)}
 .mon-chk-pt.done{color:var(--ink3);text-decoration:line-through}
+.mon-chk-head2{font-size:.68rem;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--accent);margin:8px 0 2px}
 .mon-chk-box{flex:none;width:18px;height:18px;border-radius:5px;border:1.5px solid var(--line);
   display:flex;align-items:center;justify-content:center;font-size:.8rem;font-weight:800;line-height:1;margin-top:1px}
 .mon-chk-pt.done .mon-chk-box{background:var(--good);border-color:var(--good);color:#fff}
