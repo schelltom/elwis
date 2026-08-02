@@ -1546,7 +1546,7 @@ function renderKraefte(){
       ? [{ id:"BR", name:"Bereitstellungsraum" }] : [];
     // Einsatzleitung nur einblenden, wenn ihr Einheiten zugeordnet sind (leere Gruppen fallen ohnehin raus)
     const elGrp = sorted.some(u => u.abschnitt === AB_EL_ID) ? [AB_EL] : [];
-    const groups = [...elGrp, ...state.abschnitte, ...legacyBR, { id:"", name:"Ohne Abschnitt" }];
+    const groups = [...state.abschnitte, ...legacyBR, ...elGrp, { id:"", name:"Ohne Abschnitt" }];
     list = groups.map(g => {
       const us = sorted.filter(u => (u.abschnitt||"") === g.id);
       if(!us.length) return "";
@@ -4065,21 +4065,20 @@ function monCardsData(){
   const cards = [];
   const brUnits = act.filter(u => u.abschnitt === "BR");
   const elUnits = act.filter(u => u.abschnitt === AB_EL_ID);
-  if(elUnits.length && !hid[AB_EL_ID]) cards.push({ key:AB_EL_ID, title:AB_EL.name, units:elUnits, opts:{ none:true } });
-  if(state.abschnitte.length){
-    state.abschnitte.forEach(a => { if(!hid[a.id]) cards.push({
-      key:a.id, title:a.name, units:act.filter(u => u.abschnitt === a.id),
-      opts:{ fuehrung:a.fuehrung, arbeit:a.arbeit, ansprechpartner:abAnsprech(a) } }); });
-    const rest = act.filter(u => u.abschnitt !== "BR" && u.abschnitt !== AB_EL_ID &&
-      (!u.abschnitt || !state.abschnitte.some(a => a.id === u.abschnitt)));
-    if(rest.length && !hid.rest) cards.push({ key:"rest", title:"Ohne Abschnitt", units:rest, opts:{ none:true } });
-  }else{
-    const allRest = act.filter(u => u.abschnitt !== "BR" && u.abschnitt !== AB_EL_ID);
-    if(allRest.length || !elUnits.length) cards.push({ key:"all", title:"Alle Einheiten an der Einsatzstelle",
-      units:allRest, opts:{ none:true } });
-  }
+  // Reihenfolge: 1) echte Abschnitte  2) Bereitstellungsraum  3) Einsatzleitung  4) Ohne Abschnitt (immer zuletzt)
+  state.abschnitte.forEach(a => { if(!hid[a.id]) cards.push({
+    key:a.id, title:a.name, units:act.filter(u => u.abschnitt === a.id),
+    opts:{ fuehrung:a.fuehrung, arbeit:a.arbeit, ansprechpartner:abAnsprech(a) } }); });
   // Legacy-BR-Kachel nur, wenn kein echter Bereitstellungs-Abschnitt existiert (sonst doppelt)
   if(brUnits.length && !hid.BR && !state.abschnitte.some(a => a.br)) cards.push({ key:"BR", title:"Bereitstellungsraum", units:brUnits, opts:{ br:true, sub: state.einsatz.bereitstellungsraum } });
+  if(elUnits.length && !hid[AB_EL_ID]) cards.push({ key:AB_EL_ID, title:AB_EL.name, units:elUnits, opts:{ none:true } });
+  const rest = act.filter(u => u.abschnitt !== "BR" && u.abschnitt !== AB_EL_ID &&
+    (!u.abschnitt || !state.abschnitte.some(a => a.id === u.abschnitt)));
+  if(state.abschnitte.length){
+    if(rest.length && !hid.rest) cards.push({ key:"rest", title:"Ohne Abschnitt", units:rest, opts:{ none:true } });
+  }else{
+    cards.push({ key:"all", title:"Alle Einheiten an der Einsatzstelle", units:rest, opts:{ none:true } });
+  }
   return cards;
 }
 /* Sonderseiten des Monitors (Lagekarte, Komm-Skizze, Funk & Checklisten, Atemschutz)
@@ -4106,7 +4105,6 @@ function openMonHideSheet(){
     </button>`;
   const act = aktive();
   const hatBR = act.some(u => u.abschnitt === "BR");
-  const hatEL = act.some(u => u.abschnitt === AB_EL_ID);
   const hatRest = state.abschnitte.length > 0 && act.some(u => u.abschnitt !== "BR" && u.abschnitt !== AB_EL_ID &&
     (!u.abschnitt || !state.abschnitte.some(a => a.id === u.abschnitt)));
   $("#sheetHost").innerHTML = `
@@ -4128,11 +4126,10 @@ function openMonHideSheet(){
         ${row("Atemschutz-Trupps", hp.as, "p:as")}
       </div>
       <div class="field"><label>Einsatzabschnitte</label>
-        ${hatEL ? row(AB_EL.name, ha[AB_EL_ID], "a:" + AB_EL_ID) : ""}
         ${state.abschnitte.map(a => row(a.name, ha[a.id], "a:" + a.id)).join("")}
         ${hatBR ? row("Bereitstellungsraum", ha.BR, "a:BR") : ""}
+        ${row(AB_EL.name, ha[AB_EL_ID], "a:" + AB_EL_ID)}
         ${hatRest ? row("Ohne Abschnitt", ha.rest, "a:rest") : ""}
-        ${!state.abschnitte.length && !hatBR && !hatEL ? `<p class="hint">Noch keine Abschnitte angelegt.</p>` : ""}
       </div>
       <p class="hint">Ausgeblendete Abschnitte laufen auch nicht in der Rotation mit. Die Einstellung gilt nur für die Anzeige – erfasst bleibt alles.</p>
     </div>
