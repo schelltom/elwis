@@ -14,13 +14,23 @@ import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
+import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
 
 const HIER = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT || process.argv[2] || 8474);
-const DIST = [path.join(HIER, "..", "dist"), path.join(process.cwd(), "dist")]
-  .find(p => fs.existsSync(path.join(p, "index.html")));
+const BASIS = path.join(HIER, "..");
+// Ziel-Ordner der ausgelieferten App. Existiert er noch nicht, holt ihn der
+// Auto-Mirror beim ersten Internet-Kontakt selbst von GitHub Pages.
+const DIST = [path.join(BASIS, "dist"), path.join(process.cwd(), "dist")]
+  .find(p => fs.existsSync(path.join(p, "index.html"))) || path.join(BASIS, "dist");
+const STAGING = DIST + ".neu";   // frisch geladene Version wartet hier auf den Neustart
+const ALT = DIST + ".alt";       // vorherige Version (Rückfall-Ebene)
 const DATEI = path.join(HIER, "elwis-daten.json");
+
+// Quelle + Takt des Auto-Mirrors (per Umgebungsvariable überschreibbar)
+const GH_BASIS = (process.env.ELWIS_QUELLE || "https://schelltom.github.io/elwis/").replace(/\/?$/, "/");
+const UPDATE_INTERVALL = Math.max(1, Number(process.env.ELWIS_UPDATE_MIN || 5)) * 60 * 1000;
 
 const MIME = {
   ".html": "text/html; charset=utf-8", ".css": "text/css; charset=utf-8",
@@ -173,7 +183,99 @@ function standAntwort(){
   }
   return { einsatzId: stand.einsatzId, einsatzStart: stand.einsatzStart,
     seq: stand.seq, singletons: stand.singletons, collections,
-    clients: aktiveGeraete() };
+    clients: aktiveGeraete(), ...updateInfo() };
+}
+
+/* ================================================================
+   Auto-Mirror: App-Updates von GitHub Pages holen
+   ----------------------------------------------------------------
+   - Prüft (nur wenn Internet da ist) die manifest.json der Quelle.
+   - Neue Version → wird VOLLSTÄNDIG in dist.neu/ geladen (atomar),
+     der laufende Betrieb bleibt unangetastet.
+   - Aktiviert wird eine geladene Version NUR beim Serverstart
+     (aktiviereBereitgestellte) – so kackt mitten im Einsatz nichts ab.
+   - Beim allerersten Start ohne App wird sofort scharf geschaltet
+     (da läuft ja noch kein Betrieb).
+   ================================================================ */
+let updateStatus = null;   // {version, erstellt} sobald eine neue Version bereitliegt
+let updateLaeuft = false;
+
+function manifestVon(dir){
+  try{ return JSON.parse(fs.readFileSync(path.join(dir, "manifest.json"), "utf8")); }
+  catch(e){ return null; }
+}
+function versionVon(dir){ const m = manifestVon(dir); return (m && m.version) || null; }
+function appVorhanden(){ return fs.existsSync(path.join(DIST, "index.html")); }
+function updateInfo(){ return { version: versionVon(DIST), update: updateStatus }; }
+
+// Bereitgestellte Version (dist.neu/) scharf schalten – nur beim Start aufrufen.
+function aktiviereBereitgestellte(){
+  const sm = manifestVon(STAGING);
+  if(!sm || !sm.version) return false;
+  if(sm.version === versionVon(DIST)){ fs.rmSync(STAGING, { recursive:true, force:true }); return false; }
+  try{
+    fs.rmSync(ALT, { recursive:true, force:true });
+    if(fs.existsSync(DIST)) fs.renameSync(DIST, ALT);   // alte Version als Rückfall behalten
+    fs.renameSync(STAGING, DIST);
+    console.log(`App-Version aktiviert: ${sm.version} (Stand ${sm.erstellt || "?"}).`);
+    return true;
+  }catch(e){ console.error("Aktivierung fehlgeschlagen:", e.message); return false; }
+}
+
+// Komplette neue Version in dist.neu/ laden – erst .tmp füllen, dann atomar umbenennen.
+async function ladeInBereitstellung(remote){
+  const tmp = STAGING + ".tmp";
+  fs.rmSync(tmp, { recursive:true, force:true });
+  fs.mkdirSync(tmp, { recursive:true });
+  for(const f of remote.dateien){
+    const rel = String(f.pfad || "");
+    if(!rel || rel.includes("..") || path.isAbsolute(rel)) throw new Error("Ungültiger Pfad im Manifest: " + rel);
+    const r = await fetch(GH_BASIS + rel, { cache:"no-store" });
+    if(!r.ok) throw new Error(`Download fehlgeschlagen: ${rel} (HTTP ${r.status})`);
+    const buf = Buffer.from(await r.arrayBuffer());
+    if(f.sha256){
+      const h = crypto.createHash("sha256").update(buf).digest("hex");
+      if(h !== f.sha256) throw new Error("Prüfsumme falsch: " + rel);
+    }
+    const ziel = path.join(tmp, rel);
+    if(!path.normalize(ziel).startsWith(tmp)) throw new Error("Pfad-Ausbruch: " + rel);
+    fs.mkdirSync(path.dirname(ziel), { recursive:true });
+    fs.writeFileSync(ziel, buf);
+  }
+  fs.writeFileSync(path.join(tmp, "manifest.json"), JSON.stringify(remote));
+  fs.rmSync(STAGING, { recursive:true, force:true });
+  fs.renameSync(tmp, STAGING);
+  console.log(`Neue Version ${remote.version} geladen (${remote.dateien.length} Dateien) – aktiv beim nächsten Neustart.`);
+}
+
+async function pruefeAufUpdate(){
+  if(updateLaeuft) return;
+  updateLaeuft = true;
+  try{
+    const r = await fetch(GH_BASIS + "manifest.json", { cache:"no-store" });
+    if(!r.ok) throw new Error("HTTP " + r.status);
+    const remote = await r.json();
+    if(!remote || !remote.version || !Array.isArray(remote.dateien)) throw new Error("Ungültiges Manifest");
+
+    const liveV = versionVon(DIST);
+    if(remote.version === liveV){                      // schon aktuell
+      if(fs.existsSync(STAGING)) fs.rmSync(STAGING, { recursive:true, force:true });
+      updateStatus = null;
+      return;
+    }
+    if(remote.version !== versionVon(STAGING)){        // noch nicht geladen → jetzt holen
+      await ladeInBereitstellung(remote);
+    }
+    if(!appVorhanden()){                               // Erststart ohne App → sofort scharf
+      if(aktiviereBereitgestellte()) updateStatus = null;
+    }else{                                             // nur Hinweis – Aktivierung beim Neustart
+      updateStatus = { version: remote.version, erstellt: remote.erstellt || null };
+    }
+  }catch(e){
+    // kein Internet / Pages nicht erreichbar → still bleiben, nächster Versuch später
+  }finally{
+    updateLaeuft = false;
+  }
 }
 
 /* ---------------- HTTP ---------------- */
@@ -194,7 +296,7 @@ const server = http.createServer((req, res) => {
   if(u.pathname === "/api/info"){
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ elwis: true, seq: stand.seq, einsatzId: stand.einsatzId,
-      clients: aktiveGeraete(), urls: lanUrls() }));
+      clients: aktiveGeraete(), urls: lanUrls(), ...updateInfo() }));
     return;
   }
   if(u.pathname === "/api/sync" && req.method === "POST"){
@@ -209,7 +311,7 @@ const server = http.createServer((req, res) => {
         mergeSync(d);
         res.writeHead(200, { "Content-Type": "application/json" });
         if(!hatteAenderungen && d.seq === stand.seq){
-          res.end(JSON.stringify({ unchanged: true, seq: stand.seq, clients: aktiveGeraete() }));
+          res.end(JSON.stringify({ unchanged: true, seq: stand.seq, clients: aktiveGeraete(), ...updateInfo() }));
         }else{
           res.end(JSON.stringify(standAntwort()));
         }
@@ -266,9 +368,9 @@ const server = http.createServer((req, res) => {
   }
 
   /* --- Statische App (dist/) --- */
-  if(!DIST){
+  if(!appVorhanden()){
     res.writeHead(503, { "Content-Type": "text/plain; charset=utf-8" });
-    res.end("ELWIS: dist/ fehlt – bitte zuerst `npm run build` ausführen.");
+    res.end("ELWIS: App noch nicht geladen. Der Server holt sie beim ersten Internet-Kontakt automatisch von GitHub – bitte gleich neu laden.");
     return;
   }
   let rel = decodeURIComponent(u.pathname);
@@ -290,6 +392,9 @@ const server = http.createServer((req, res) => {
   });
 });
 
+// Beim Start eine ggf. vorab geladene Version scharf schalten (nie im Betrieb).
+aktiviereBereitgestellte();
+
 server.listen(PORT, () => {
   console.log("");
   console.log("  ┌─────────────────────────────────────────────┐");
@@ -298,6 +403,12 @@ server.listen(PORT, () => {
   console.log(`  Lokal:      http://localhost:${PORT}/`);
   for(const url of lanUrls()) console.log(`  Im WLAN:    ${url}   ← Tablets hiermit verbinden`);
   console.log(`  Daten:      ${DATEI}`);
-  console.log(`  App-Build:  ${DIST || "FEHLT – erst `npm run build`!"}`);
+  console.log(`  App-Build:  ${appVorhanden() ? `${DIST} (Version ${versionVon(DIST) || "?"})` : "wird beim ersten Internet-Kontakt von GitHub geladen"}`);
+  console.log(`  Auto-Mirror: ${GH_BASIS}  (Prüfung alle ${Math.round(UPDATE_INTERVALL/60000)} Min)`);
   console.log("");
+
+  // Auto-Mirror: gleich prüfen, dann im Takt. Neue Versionen werden geladen,
+  // aber erst beim nächsten Neustart aktiv (Hinweis erscheint in der App).
+  pruefeAufUpdate();
+  setInterval(pruefeAufUpdate, UPDATE_INTERVALL);
 });

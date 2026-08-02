@@ -5878,6 +5878,7 @@ async function syncTick(){
     SYNC.verbunden = true;
     SYNC.clients = d.clients || 1;
     SYNC.seq = d.seq;
+    zeigeUpdateHinweis(d.update);
     if(!d.unchanged){
       syncApply(d);
       SYNC.pending = 0;
@@ -5916,6 +5917,43 @@ function syncPill(){
 const _origRenderHeader = renderHeader;
 renderHeader = function(){ _origRenderHeader(); syncPill(); };
 
+/* Hinweis-Banner: der ELW-Server hat eine neue App-Version geladen, die beim
+   nächsten Neustart aktiv wird. Keine automatische Aktualisierung im Betrieb.
+   "update" kommt aus den Server-Antworten (/api/info und /api/sync). */
+function zeigeUpdateHinweis(update){
+  let bar = document.getElementById("updateBar");
+  const version = update && update.version;
+  // Kein Update, oder für genau diese Version schon ausgeblendet → Banner weg.
+  if(!version || localStorage.getItem("elwis-update-versteckt") === version){
+    if(bar) bar.remove();
+    return;
+  }
+  if(!bar){
+    bar = document.createElement("div");
+    bar.id = "updateBar";
+    bar.className = "update-bar";
+    const header = document.querySelector("#app header.topbar");
+    if(header && header.parentNode) header.parentNode.insertBefore(bar, header.nextSibling);
+    else document.body.insertBefore(bar, document.body.firstChild);
+  }
+  let stand = "";
+  try{
+    if(update.erstellt) stand = new Date(update.erstellt).toLocaleString("de-DE",
+      { day:"2-digit", month:"2-digit", year:"numeric", hour:"2-digit", minute:"2-digit" });
+  }catch(e){ /* Datum egal, dann eben ohne */ }
+  bar.textContent = "";
+  const txt = document.createElement("span");
+  txt.className = "update-bar-txt";
+  txt.textContent = "Neue Version liegt am ELW bereit" + (stand ? " (Stand " + stand + ")" : "")
+    + " – wird beim nächsten Neustart des ELW-Servers aktiv.";
+  const zu = document.createElement("button");
+  zu.type = "button";
+  zu.className = "update-bar-zu";
+  zu.textContent = "Ausblenden";
+  zu.addEventListener("click", () => { localStorage.setItem("elwis-update-versteckt", version); bar.remove(); });
+  bar.append(txt, zu);
+}
+
 async function syncInit(){
   try{
     const res = await fetch("./api/info", { cache: "no-store" });
@@ -5924,6 +5962,7 @@ async function syncInit(){
     if(!d || !d.elwis) return;
     SYNC.aktiv = true;
     SYNC.urls = d.urls || [];
+    zeigeUpdateHinweis(d.update);
     syncTick();
     setInterval(syncTick, 3000);
     render();
