@@ -489,9 +489,10 @@
   .ab-card .mon-tablewrap{overflow:visible}
   .ab-table{table-layout:fixed}
   .ab-table th{padding:3px 6px}
-  .ab-table td{padding:3px 6px;font-size:.82rem;white-space:nowrap}
-  .ab-table .chip{font-size:.64rem;padding:1px 6px}
-  .ab-table th:nth-child(1),.ab-table td:nth-child(1){width:34px}
+  .ab-table td{padding:3px 6px;font-size:.82rem;white-space:nowrap;vertical-align:top}
+  .ab-table td:nth-child(1){text-align:center}
+  .ab-table .chip{font-size:.64rem;padding:0 5px;line-height:1.5}
+  .ab-table th:nth-child(1),.ab-table td:nth-child(1){width:42px}
   .ab-table th:nth-child(3),.ab-table td:nth-child(3){width:76px}
   .ab-table th:nth-child(4),.ab-table td:nth-child(4){width:40px}
   .ab-table td.name{white-space:normal;overflow-wrap:anywhere;word-break:break-word;line-height:1.15}
@@ -824,8 +825,12 @@
   @media (min-width:1500px){.fsm{font-size:.95rem}}
 
   /* ---------- Komm-Skizze (Kommunikationsskizze) ---------- */
-  .fk-skizze{display:flex;flex-direction:column;align-items:center;padding:10px 0 4px;overflow-x:auto}
-  .fkbox{border:2.5px solid var(--fw);border-radius:10px;background:var(--surface);
+  .fk-skizze{position:relative;display:flex;flex-direction:column;align-items:center;padding:10px 0 4px;overflow-x:auto}
+  /* Zentrale Stammlinie: verbindet die Sammellinien aller Reihen durchgehend, liegt hinter
+     den Boxen (nur in den Lücken sichtbar → verläuft zwischen zwei Abschnitten hindurch). */
+  .fk-trunk{position:absolute;left:50%;top:8px;bottom:70px;width:2.5px;transform:translateX(-50%);
+    background:var(--ink3);z-index:0}
+  .fkbox{position:relative;z-index:1;border:2.5px solid var(--fw);border-radius:10px;background:var(--surface);
     padding:10px 18px;text-align:center;min-width:170px;box-shadow:var(--shadow)}
   .fkbox strong{font-size:.95rem}
   .fkbox small{display:block;color:var(--ink2);font-size:.75rem;margin-top:2px}
@@ -873,6 +878,9 @@
     #printArea h2{font-size:11pt;letter-spacing:.08em;text-transform:uppercase;
       border-bottom:1px solid #000;padding-bottom:3px;margin:18px 0 8px}
     #printArea table{width:100%;border-collapse:collapse;font-size:10pt}
+    /* Bei vielen Zeilen (z. B. viele Einsatzabschnitte/Einheiten) über mehrere Seiten:
+       Kopfzeile auf jeder Seite wiederholen, Zeilen nie zerschneiden. */
+    #printArea thead{display:table-header-group}
     #printArea th{text-align:left;font-size:8pt;letter-spacing:.06em;text-transform:uppercase;
       border-bottom:1.5px solid #000;padding:4px 6px}
     #printArea td{border-bottom:.5px solid #999;padding:5px 6px;vertical-align:top}
@@ -908,20 +916,35 @@
     #printArea .p-run-src{string-set:rptHead content(text);height:0;line-height:0;font-size:0;color:transparent;overflow:hidden}
     #printArea .p-print-ts{margin-top:16px;font-size:8pt;color:#666}
     /* Komm-Skizze im Druck: ohne Schatten, klare S/W-Linien */
-    #printArea .p-skizze{break-inside:avoid;margin:6px 0 12px;print-color-adjust:exact;-webkit-print-color-adjust:exact}
+    #printArea .p-skizze{margin:6px 0 12px;print-color-adjust:exact;-webkit-print-color-adjust:exact}
+    /* Viele Abschnitte: Skizze nicht abschneiden – Branch-Reihe umbrechen, Seite darf brechen */
+    #printArea .p-skizze .fk-skizze{overflow:visible}
+    #printArea .p-skizze .fk-hwrap{flex-wrap:wrap;row-gap:18px}
+    #printArea .p-skizze .fk-branch{break-inside:avoid}
     #printArea .p-skizze .fkbox{box-shadow:none;background:#fff;border-color:#000}
     #printArea .p-skizze .fkbox.ils{border-color:#555}
     #printArea .p-skizze .fk-vline,#printArea .p-skizze .fk-hline{background:#666}
     #printArea .p-skizze .fk-grp{background:#eee;color:#000}
     #printArea .p-skizze .fk-legende{color:#333}
+    /* Lagekarte, Komm-Skizze und jedes Lagebild quer auf je eine eigene Seite –
+       hochkant sind sie zu klein/abgeschnitten. Named Page + Umbruch je Block. */
+    @page quer{ size:A4 landscape }
+    #printArea .p-land{ page:quer; break-before:page }
+    #printArea .p-land:first-child{ break-before:avoid }
+    #printArea .p-land > h2{ break-after:avoid; margin-top:0 }
+    #printArea .p-land .p-map{ max-height:145mm; margin-inline:auto }
+    #printArea .p-land .p-skizze{ margin-top:10px }
   }
 
 /* ---------- Druck-Auswahl (welche Bereiche in den Bericht) ---------- */
-.print-picks{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.print-picks{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:8px}
 .print-pick{display:flex;align-items:center;gap:10px;padding:11px 12px;border:1px solid var(--line);
   border-radius:10px;background:var(--surface);cursor:pointer;font-weight:600}
+.print-pick span{flex:1;min-width:0}
+.print-pick svg{width:22px;height:22px;flex:none;stroke:var(--ink2);fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.print-pick:has(input:checked) svg{stroke:var(--fw)}
+.print-pick:has(input:checked){border-color:var(--fw)}
 .print-pick input{width:20px;height:20px;flex:none;accent-color:var(--fw)}
-@media (max-width:560px){.print-picks{grid-template-columns:1fr}}
 
 /* ---------- Dialoge (ersetzen Browser-alert/confirm) ---------- */
 .modal-backdrop{position:fixed;inset:0;z-index:60;background:rgba(20,16,14,.5)}

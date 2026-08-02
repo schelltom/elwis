@@ -379,9 +379,11 @@ function zustandAufbauen(stored){
     const b = state.einsatz && state.einsatz.beginn ? new Date(state.einsatz.beginn) : null;
     state.einsatzStart = (b && !isNaN(b)) ? b.toISOString() : new Date().toISOString();
   }
-  // Bestehende Fahrzeug-Symbole ohne Nummer nachnummerieren
+  // Bestehende Fahrzeug- und Gefahr-Symbole ohne Nummer nachnummerieren (fortlaufend)
   let maxCar = state.lage.items.reduce((m,i) => i.type==="car" ? Math.max(m, i.num||0) : m, 0);
   state.lage.items.forEach(i => { if(i.type === "car" && !i.num) i.num = ++maxCar; });
+  let maxGef = state.lage.items.reduce((m,i) => i.type==="gefahr" ? Math.max(m, i.num||0) : m, 0);
+  state.lage.items.forEach(i => { if(i.type === "gefahr" && !i.num) i.num = ++maxGef; });
 }
 let syncing = false;
 let editing = null;   // { unit, isNew } – Einheit
@@ -914,14 +916,19 @@ function renderSettingsSheet(){
     fetch("./api/backups", { cache:"no-store" }).then(r => r.json()).then(d => {
       const liste = (d.backups || []);
       if(!liste.length){ bHost.innerHTML = `<p class="hint" style="margin:6px 4px">Noch keine Sicherungen vorhanden.</p>`; return; }
-      bHost.innerHTML = liste.map(b => `
-        <div class="kat-row">
-          <span>${fmtDatum(b.zeit)} ${fmtZeit(b.zeit)} Uhr <span style="color:var(--ink3)">· ${fmtGroesse(b.groesse)}</span></span>
-          <button class="btn btn-ghost" data-restore="${esc(b.datei)}" style="min-height:34px;padding:4px 12px">Wiederherstellen</button>
-        </div>`).join("");
-      bHost.querySelectorAll("[data-restore]").forEach(btn => btn.addEventListener("click", async () => {
-        const datei = btn.dataset.restore;
-        if(!(await modalConfirm(`Diese Sicherung wiederherstellen?\n${datei}\n\nAlle verbundenen Geräte übernehmen diesen Stand.`, "Wiederherstellen", "Abbrechen"))) return;
+      bHost.innerHTML = `
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <select id="cfg-backup-sel" style="flex:1;min-width:180px">
+            ${liste.map(b => `<option value="${esc(b.datei)}">${fmtDatum(b.zeit)} ${fmtZeit(b.zeit)} Uhr · ${fmtGroesse(b.groesse)}</option>`).join("")}
+          </select>
+          <button class="btn btn-ghost" id="cfg-backup-restore" style="min-height:48px;flex:none">Wiederherstellen</button>
+        </div>
+        <p class="hint" style="margin:6px 4px">${liste.length} Sicherung${liste.length===1?"":"en"} · neueste zuerst. Vor dem Wiederherstellen kommt eine Rückfrage.</p>`;
+      $("#cfg-backup-restore").addEventListener("click", async () => {
+        const datei = $("#cfg-backup-sel").value;
+        const b = liste.find(x => x.datei === datei);
+        const wann = b ? `${fmtDatum(b.zeit)} ${fmtZeit(b.zeit)} Uhr` : datei;
+        if(!(await modalConfirm(`Sicherung vom ${wann} wiederherstellen?\n\nDer aktuelle Einsatzstand wird überschrieben – alle verbundenen Geräte übernehmen diesen (älteren) Stand.`, "Wiederherstellen", "Abbrechen"))) return;
         try{
           const res = await fetch("./api/restore", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ datei }) });
           if(!res.ok) throw new Error("HTTP " + res.status);
@@ -930,7 +937,7 @@ function renderSettingsSheet(){
           render();
           modalInfo("Sicherung wiederhergestellt. Verbundene Tablets übernehmen den Stand automatisch.");
         }catch(e){ modalInfo("Wiederherstellen fehlgeschlagen: " + (e.message||e)); }
-      }));
+      });
     }).catch(() => { bHost.innerHTML = `<p class="hint" style="margin:6px 4px">Sicherungen nicht abrufbar.</p>`; });
   }
 }
@@ -1470,7 +1477,7 @@ function loadDemo(){
     { id:uid(), type:"car",     num:2, unitId:tlf.id, x:66, y:56 },
     { id:uid(), type:"el",      label:"ELW 1",       x:16, y:82 },
     { id:uid(), type:"wasser",  label:"Hydrant",     x:82, y:22 },
-    { id:uid(), type:"gefahr",  label:"Gasflaschen", x:60, y:24 },
+    { id:uid(), type:"gefahr",  num:1, text:"Gasflaschen", x:60, y:24 },
     { id:uid(), type:"num", num:1, text:"Faltbehälter 10.000 Liter",        x:24, y:30 },
     { id:uid(), type:"num", num:2, text:"Bereitstellungsraum Parkplatz Süd", x:78, y:78 },
   ]};
@@ -2272,9 +2279,11 @@ function openAfEditor(id){
     if(a.status === "eingetroffen"){
       // Nach dem Eintreffen anbieten, die Besatzung dieser Einheit zu erfassen (Name vorbefüllt)
       closeEditor();
-      modalConfirm(`„${a.was}" ist eingetroffen. Kräfte dieser Einheit jetzt erfassen?`, "Erfassen", "Später").then(ok => {
-        if(ok) openEditor(null, { name: a.was, abschnitt: a.abschnitt || "" });
-        else render();
+      modalConfirm(`„${a.was}" ist eingetroffen. Jetzt in die Kräfteerfassung wechseln und diese Einheit erfassen?`, "Zur Kräfteerfassung", "Später").then(ok => {
+        if(ok){
+          state.view = "kraefte"; state.ksub = "einheiten";   // aktiv in die Kräfteerfassung wechseln
+          openEditor(null, { name: a.was, abschnitt: a.abschnitt || "" });
+        }else render();
       });
     }else{
       openAfEditor(a.id); // Sheet mit neuem Status neu aufbauen
@@ -4618,7 +4627,7 @@ function renderFunkskizze(src){
   const elBox = `
     <div class="fkbox el">
       <strong>Einsatzleitung</strong>
-      <small>${esc(c.ugName)} · ELW${einsatz.leiter ? " · EL: " + esc(einsatz.leiter) : ""}</small>
+      <small>${esc(c.ugName)}${einsatz.leiter ? " · EL: " + esc(einsatz.leiter) : ""}</small>
     </div>`;
   const ilsTeil = `
     <div class="fkbox ils"><strong>${esc(c.ilsName || "Leitstelle")}</strong><small>Leitstelle</small></div>
@@ -4635,7 +4644,7 @@ function renderFunkskizze(src){
   // Gemeinsame Führungsrufgruppe: haben alle Abschnitte dieselbe → einmal an der Sammellinie darstellen
   const fgS = abschnitte.map(a => gruppeStr(a.fuehrung));
   const commonFg = (n > 1 && fgS.every(s => s && s === fgS[0])) ? abschnitte[0].fuehrung : null;
-  const branches = abschnitte.map(a => {
+  const branchEls = abschnitte.map(a => {
     const units = act.filter(u => u.abschnitt === a.id);
     const via = a.arbeit && a.arbeit.via;
     return `
@@ -4651,14 +4660,35 @@ function renderFunkskizze(src){
         </div>
       </div>
     </div>`;
+  });
+  // Abschnitte auf mehrere Reihen verteilen, wenn sie in der Breite nicht passen –
+  // jede Reihe mittig, per Sammellinie verbunden (analog Führungs-/Kommunikationsskizze).
+  // Gilt für Bildschirm-Ansicht und Druck (dieselbe Funktion).
+  const MAX_PRO_REIHE = 4;
+  const reihenAnzahl = Math.ceil(n / MAX_PRO_REIHE);
+  const proReihe = Math.ceil(n / reihenAnzahl);
+  const chunks = [];
+  for(let i = 0; i < branchEls.length; i += proReihe) chunks.push(branchEls.slice(i, i + proReihe));
+  // Sammellinie je Reihe: reicht von Boxmitte links bis Boxmitte rechts (also bis zu den
+  // äußeren Abschnitten). Breite = Gesamtbreite minus eine Boxbreite (bei Lücken 14px je Spalt).
+  const busBreite = c => `calc(100% - (100% - ${(c.length - 1) * 14}px) / ${c.length})`;
+  const reihenHtml = chunks.map((c, idx) => {
+    const abstand = idx > 0 ? "margin-top:24px" : "";
+    const hline = c.length > 1
+      ? `<div class="fk-hline" style="width:${busBreite(c)};${abstand}"></div>`
+      : (idx > 0 ? `<div style="height:24px"></div>` : "");
+    return `${hline}<div class="fk-hwrap">${c.join("")}</div>`;
   }).join("");
+  // Durchgehende zentrale Stammlinie verbindet alle Reihen-Sammellinien (liegt hinter den
+  // Boxen, sichtbar nur in den Lücken → Verbindung läuft zwischen zwei Abschnitten hindurch).
+  const stamm = chunks.length > 1 ? `<div class="fk-trunk"></div>` : "";
   return `
   <div class="fk-skizze">
+    ${stamm}
     ${ilsTeil}
     ${elBox}
-    ${n > 1 ? `<div class="fk-vline" style="height:26px">${commonFg ? fkGrpHtml(commonFg) : ""}</div>
-    <div class="fk-hline" style="width:calc(100% - 100%/${n} - 14px)"></div>` : ""}
-    <div class="fk-hwrap">${branches}</div>
+    ${n > 1 ? `<div class="fk-vline" style="height:26px">${commonFg ? fkGrpHtml(commonFg) : ""}</div>` : ""}
+    ${reihenHtml}
   </div>
   ${legende}`;
 }
@@ -5419,9 +5449,13 @@ function openLgEdit(id){
   if(it.type === "line" || it.type === "area") return openLgShapeEdit(id);   // Linie/Fläche: Farbe + Beschriftung
   const isNum = it.type === "num", isCar = it.type === "car", isGef = it.type === "gefahr";
   const numbered = isNum || isGef;
+  const numField = isGef
+    ? `<div class="field" style="max-width:220px"><label>Gefahr-Nummer</label>
+        <div class="ruf-preview mono">${esc(it.num)}<span class="hint" style="margin:0 0 0 10px">automatisch fortlaufend</span></div></div>`
+    : `<div class="field" style="max-width:140px"><label for="lg-num">Nummer</label>
+        <input id="lg-num" class="mono" type="number" min="1" max="99" value="${esc(it.num)}"></div>`;
   const fields = numbered ? `
-      <div class="field" style="max-width:140px"><label for="lg-num">Nummer</label>
-        <input id="lg-num" class="mono" type="number" min="1" max="99" value="${esc(it.num)}"></div>
+      ${numField}
       <div class="field"><label for="lg-label">Beschreibung (steht in der Legende)</label>
         <input id="lg-label" value="${esc(it.text||"")}" placeholder="${isGef ? "z. B. Gasaustritt, Stromleitung" : "z. B. Faltbehälter 10.000 Liter"}" autocomplete="off"></div>`
     : isCar ? `
@@ -5459,7 +5493,8 @@ function openLgEdit(id){
     // durch neue Objekte ersetzt haben (sonst ginge die Zuordnung beim 1. Speichern verloren).
     const cur = state.lage.items.find(i => i.id === it.id) || it;
     if(numbered){
-      cur.num = Math.max(1, Math.min(99, parseInt($("#lg-num").value, 10) || cur.num));
+      const numInp = $("#lg-num");   // nur Marker hat ein Nummernfeld; Gefahr-Nummer bleibt automatisch
+      if(numInp) cur.num = Math.max(1, Math.min(99, parseInt(numInp.value, 10) || cur.num));
       cur.text = inp.value.trim();
     }else if(isCar){
       cur.unitId = $("#lg-unit").value;
@@ -5507,17 +5542,19 @@ function printLegendHtml(items, units){
 function doPrintLagekarte(){
   const e = state.einsatz;
   $("#printArea").innerHTML = `
-    <div class="p-head">
-      <div>
-        <div class="p-sub">${esc(state.config.ugName)} · Lagekarte</div>
-        <h1>${esc(e.stichwort) || "Ohne Stichwort"}</h1>
-        <div>${esc(e.ort)}${e.beginn ? " · Alarm " + fmtDatum(e.beginn) + " " + fmtZeit(e.beginn) + " Uhr" : ""}</div>
+    <section class="p-land">
+      <div class="p-head">
+        <div>
+          <div class="p-sub">${esc(state.config.ugName)} · Lagekarte</div>
+          <h1>${esc(e.stichwort) || "Ohne Stichwort"}</h1>
+          <div>${esc(e.ort)}${e.beginn ? " · Alarm " + fmtDatum(e.beginn) + " " + fmtZeit(e.beginn) + " Uhr" : ""}</div>
+        </div>
+        <div class="p-mark">ELWIS</div>
       </div>
-      <div class="p-mark">ELWIS</div>
-    </div>
-    ${printMapHtml(state.lage)}
-    ${printLegendHtml(state.lage.items, state.einheiten)}
-    <p style="font-size:8pt;color:#666;margin-top:16px">Gedruckt am ${new Date().toLocaleString("de-DE")} · ELWIS – Lagekarte · ${esc(state.config.ugName)}</p>`;
+      ${printMapHtml(state.lage)}
+      ${printLegendHtml(state.lage.items, state.einheiten)}
+      <p style="font-size:8pt;color:#666;margin-top:16px">Gedruckt am ${new Date().toLocaleString("de-DE")} · ELWIS – Lagekarte · ${esc(state.config.ugName)}</p>
+    </section>`;
   window.print();
 }
 function doPrint(data, sel){
@@ -5567,13 +5604,24 @@ function doPrint(data, sel){
       <tr><td>Einsatzleiter</td><td>${esc(e.leiter) || "–"}</td></tr>
       ${(!pEnde && e.lagebespr) ? `<tr><td>Nächste Lagebesprechung</td><td>${esc(e.lagebespr)} Uhr</td></tr>` : ""}
       ${gruppeStr(e.ilsGruppe) ? `<tr><td>Leitstelle</td><td>${esc(state.config.ilsName||"Leitstelle")} · ${esc(gruppeStr(e.ilsGruppe))}</td></tr>` : ""}
-      ${showAb ? `<tr><td>Abschnitte</td><td>${abs.map(a=>{
-        const funk=[abAnsprech(a)?`AP ${abAnsprech(a)}`:"",
-          gruppeStr(a.fuehrung), gruppeStr(a.arbeit)].filter(Boolean).join(", ");
-        return esc(a.name)+(funk?` (${esc(funk)})`:"");
-      }).join(" · ")}</td></tr>` : ""}
+      ${abs.length ? `<tr><td>Einsatzabschnitte</td><td>${abs.length} gebildet – siehe eigener Abschnitt unten</td></tr>` : ""}
       ${e.bemerkung ? `<tr><td>Bemerkungen</td><td>${esc(e.bemerkung)}</td></tr>` : ""}
     </table>` : "";
+  const secAbschnitte = (on("einsatz") && abs.length) ? `
+    <h2>Einsatzabschnitte (${abs.length})</h2>
+    <table><thead><tr><th>Abschnitt</th><th>Abschnittsleiter</th><th>Telefon</th><th>Führungsrufgruppe</th><th>Arbeitsrufgruppe</th><th style="text-align:right">Einheiten</th></tr></thead><tbody>
+      ${abs.map(a => {
+        const n = data.einheiten.filter(u => u.abschnitt === a.id).length;
+        return `<tr>
+          <td>${esc(a.name)}</td>
+          <td>${esc(a.ansprechpartner||"–")}</td>
+          <td class="p-mono">${esc(a.telefon||"–")}</td>
+          <td class="p-mono">${esc(gruppeStr(a.fuehrung)||"–")}</td>
+          <td class="p-mono">${esc(gruppeStr(a.arbeit)||"–")}</td>
+          <td class="p-mono" style="text-align:right">${n}</td>
+        </tr>`;
+      }).join("")}
+    </tbody></table>` : "";
   const secKraefte = on("kraefte") ? `
     <h2>Führungskräfte (${data.fuehrung.length})</h2>
     ${fkRows ? `<table><thead><tr><th>Name</th><th>Funktion</th><th>Funkrufname</th><th>Organisation</th><th>Einheit / Abschnitt</th></tr></thead><tbody>${fkRows}</tbody></table>` : "<p>Keine erfasst.</p>"}
@@ -5606,8 +5654,10 @@ function doPrint(data, sel){
       </tr>`).join("")}
     </tbody></table>`;})() : "<p>Keine erfasst.</p>"}` : "";
   const secSkizze = on("skizze") ? `
-    <h2>Komm-Skizze</h2>
-    <div class="p-skizze">${renderFunkskizze(data)}</div>` : "";
+    <section class="p-land">
+      <h2>Komm-Skizze</h2>
+      <div class="p-skizze">${renderFunkskizze(data)}</div>
+    </section>` : "";
   const secBespr = on("bespr") ? `
     <h2>Lagebesprechungen (${(data.besprechungen||[]).length})</h2>
     ${(data.besprechungen||[]).length ? `<table><thead><tr><th style="width:110px">Zeit</th><th style="width:180px">Teilnehmer</th><th>Protokoll</th></tr></thead><tbody>
@@ -5667,15 +5717,19 @@ function doPrint(data, sel){
     </tbody></table>` : "";
   const secLage = on("lagekarte") ? `
     ${(data.lage && data.lage.items && data.lage.items.length) ? `
-    <h2>Lagekarte${data.ende ? " (Stand Einsatzende)" : " (aktueller Stand)"}</h2>
-    ${printMapHtml(data.lage)}
-    ${printLegendHtml(data.lage.items, data.einheiten)}` : ""}
+    <section class="p-land">
+      <h2>Lagekarte${data.ende ? " (Stand Einsatzende)" : " (aktueller Stand)"}</h2>
+      ${printMapHtml(data.lage)}
+      ${printLegendHtml(data.lage.items, data.einheiten)}
+    </section>` : ""}
     ${(data.lage && (data.lage.snapshots||[]).length) ? [...data.lage.snapshots]
       .sort((a,b) => (a.zeit||"").localeCompare(b.zeit||""))
       .map(s => `
-      <h2>Lagebild ${fmtZeit(s.zeit)} Uhr (${fmtDatum(s.zeit)})</h2>
-      ${printMapHtml(s)}
-      ${printLegendHtml(s.items, data.einheiten)}`).join("") : ""}` : "";
+      <section class="p-land">
+        <h2>Lagebild ${fmtZeit(s.zeit)} Uhr (${fmtDatum(s.zeit)})</h2>
+        ${printMapHtml(s)}
+        ${printLegendHtml(s.items, data.einheiten)}
+      </section>`).join("") : ""}` : "";
   $("#printArea").innerHTML = `
     ${runSrc}
     <div class="p-head">
@@ -5686,7 +5740,7 @@ function doPrint(data, sel){
       </div>
       <div class="p-mark">ELWIS</div>
     </div>
-    ${secEinsatz}${secKraefte}${secFunk}${secSkizze}${secBespr}${secFotos}${secListen}${secAtem}${secLage}
+    ${secEinsatz}${secAbschnitte}${secKraefte}${secFunk}${secSkizze}${secBespr}${secFotos}${secListen}${secAtem}${secLage}
     <p class="p-sum">
       Gesamtstärke über den Einsatz: <span class="p-mono">${sAll.f+(data.fuehrung||[]).length}/${sAll.u}/${sAll.m}/${sAll.f+sAll.u+sAll.m+(data.fuehrung||[]).length}</span> · AGT: ${sAll.agt} · CSA: ${sAll.csa}
       ${data.ende ? "" : ` &nbsp;|&nbsp; aktuell vor Ort: <span class="p-mono">${s.f+(data.fuehrung||[]).length}/${s.u}/${s.m}/${s.f+s.u+s.m+(data.fuehrung||[]).length}</span>`}
@@ -5705,6 +5759,7 @@ function openPrintDialog(data){
   const rows = bereiche.map(t => `
     <label class="print-pick">
       <input type="checkbox" data-psec="${t.id}" checked>
+      <svg class="pp-ico" width="22" height="22" viewBox="0 0 24 24" aria-hidden="true">${t.icon}</svg>
       <span>${esc(t.label)}</span>
     </label>`).join("");
   $("#sheetHost").innerHTML = `
