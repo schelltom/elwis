@@ -277,7 +277,7 @@ const TABS = [
     icon:'<path d="M2.5 15V9.5A1.5 1.5 0 0 1 4 8h9.5v7"/><path d="M13.5 9.5H18l3.5 3.5v2h-8"/><circle cx="6.5" cy="17" r="2"/><circle cx="17" cy="17" r="2"/><path d="M8.5 17h6.5M2.5 15v2h2"/>' },
   { id:"funk",     label:"Funk",
     icon:'<circle cx="12" cy="7" r="2.2"/><path d="M12 9.2V21M8.5 21h7"/><path d="M7.2 2.6a7.4 7.4 0 0 0 0 8.8M16.8 2.6a7.4 7.4 0 0 1 0 8.8"/>' },
-  { id:"skizze",   label:"Funkskizze", nurGross:true,
+  { id:"skizze",   label:"Komm-Skizze", nurGross:true,
     icon:'<rect x="8.5" y="3" width="7" height="5" rx="1"/><rect x="2.5" y="16" width="7" height="5" rx="1"/><rect x="14.5" y="16" width="7" height="5" rx="1"/><path d="M12 8v4M6 16v-4h12v4"/>' },
   { id:"bespr",    label:"Besprechung",
     icon:'<path d="M4 4.5h16a1 1 0 0 1 1 1V15a1 1 0 0 1-1 1h-9l-5 4v-4H4a1 1 0 0 1-1-1V5.5a1 1 0 0 1 1-1z"/><path d="M7.5 8.5h9M7.5 12h6"/>' },
@@ -293,7 +293,7 @@ const TABS = [
     icon:'<rect x="3" y="4.5" width="18" height="12.5" rx="1.5"/><path d="M9 21h6M12 17v4"/>' },
 ];
 // Auf kleinen Geräten (Handy) geht es nur um die Kräfteerfassung – Monitor, Lagekarte
-// und Funkskizze brauchen mindestens ein 10-Zoll-Gerät.
+// und Komm-Skizze brauchen mindestens ein 10-Zoll-Gerät.
 function istGrossesGeraet(){ return window.matchMedia("(min-width:900px)").matches; }
 function sichtbareTabs(){ return istGrossesGeraet() ? TABS : TABS.filter(t => !t.nurGross); }
 
@@ -491,7 +491,20 @@ function qrDataUrl(text){
 function gesamt(u){ return (u.f|0)+(u.u|0)+(u.m|0); }
 function staerkeStr(u){ return `${u.f}/${u.u}/${u.m}/${gesamt(u)}`; }
 function fullName(u){ return [u.name, u.kennung].map(s => (s||"").trim()).filter(Boolean).join(" "); }
+/* Virtuelle „Einsatzleitung": kein echter Abschnitt, aber als Zuordnungsziel
+   überall wählbar und in den Abschnittslisten sichtbar (feste ID "EL"). */
+const AB_EL_ID = "EL";
+const AB_EL = { id:AB_EL_ID, name:"Einsatzleitung", el:true };
+/* Abschnitte für Auswahl-Listen: Einsatzleitung immer vorne, dann echte Abschnitte. */
+function abschnitteWahl(){ return [AB_EL, ...state.abschnitte]; }
+/* Ansprechpartner + optionale Telefonnummer des Abschnittsleiters als eine Zeile. */
+function abAnsprech(a){
+  const ap = (a.ansprechpartner || "").trim();
+  const tel = (a.telefon || "").trim();
+  return [ap, tel ? `☎ ${tel}` : ""].filter(Boolean).join(" · ");
+}
 function abNameOf(id, list){
+  if(id === AB_EL_ID) return AB_EL.name;
   if(id === "BR") return "Bereitstellungsraum";
   const a = (list || state.abschnitte).find(x => x.id === id);
   return a ? a.name : "";
@@ -760,7 +773,7 @@ function renderSettingsSheet(){
         <input id="cfg-w3w" class="mono" value="${esc(c.w3wKey||"")}" placeholder="kostenlos bei what3words registrieren" autocomplete="off">
         <p class="hint">Ermöglicht in den Einsatzstammdaten die Umwandlung von <em>3 Wörtern</em> in eine echte Adresse (nur online). Ohne Key bleibt die Funktion inaktiv.</p>
       </div>
-      <div class="field"><label style="margin-bottom:10px">Funkskizze / Leitstelle</label>
+      <div class="field"><label style="margin-bottom:10px">Komm-Skizze / Leitstelle</label>
         <div class="form-grid">
           <div class="field"><label for="cfg-ils">Leitstelle</label>
             <input id="cfg-ils" value="${esc(c.ilsName||"")}" placeholder="z. B. ILS Nordoberpfalz" autocomplete="off"></div>
@@ -925,9 +938,17 @@ function renderSettingsSheet(){
 /* ---------------- Ansicht: Einsatz ---------------- */
 function renderEinsatz(){
   const e = state.einsatz;
+  const elN = state.einheiten.filter(u => u.abschnitt === AB_EL_ID).length;
+  const elRow = `
+    <div class="arch">
+      <div class="a-main">
+        <div class="a-t">${esc(AB_EL.name)} <span class="badge-schaetz" style="vertical-align:middle">fest</span></div>
+        <div class="a-s">${elN} Einheit${elN===1?"":"en"} · kein echter Abschnitt – für Kräfte direkt bei der Einsatzleitung</div>
+      </div>
+    </div>`;
   const abRows = state.abschnitte.map(a => {
     const n = state.einheiten.filter(u => u.abschnitt === a.id).length;
-    const funk = [a.ansprechpartner ? `AP ${a.ansprechpartner}` : "",
+    const funk = [abAnsprech(a) ? `AP ${abAnsprech(a)}` : "",
       gruppeStr(a.fuehrung), gruppeStr(a.arbeit)].filter(Boolean).join(" · ");
     return `
     <div class="arch">
@@ -999,8 +1020,9 @@ function renderEinsatz(){
           <option value="DMO" ${(e.ilsGruppe||{}).mode==="DMO"?"selected":""}>DMO</option>
         </select>
         <input id="f-ils-grp" class="mono" value="${esc((e.ilsGruppe||{}).gruppe||"")}" placeholder="z. B. 2772"></div></div>
-    ${abRows || `<p class="hint" style="margin:0 0 12px">Noch keine Abschnitte – Einheiten lassen sich bei der Erfassung einem Abschnitt zuordnen.</p>`}
-    <button class="btn btn-ghost btn-block" id="abAdd" style="margin-top:${abRows?"12px":"0"}">＋&nbsp; Abschnitt anlegen</button>
+    ${elRow}
+    ${abRows || `<p class="hint" style="margin:12px 0">Noch keine echten Abschnitte – Einheiten lassen sich bei der Erfassung einem Abschnitt oder direkt der Einsatzleitung zuordnen.</p>`}
+    <button class="btn btn-ghost btn-block" id="abAdd" style="margin-top:12px">＋&nbsp; Abschnitt anlegen</button>
   </div>
   <div class="card">
     <h2>Einsatzende</h2>
@@ -1404,12 +1426,12 @@ function loadDemo(){
     lagebespr: `${String(lbT.getHours()).padStart(2,"0")}:${String(lbT.getMinutes()).padStart(2,"0")}`,
   };
   state.abschnitte = [
-    { id:a1, name:"Abschnitt 1 – Brandbekämpfung",  ansprechpartner:"Florian Weiden 3/1",      fuehrung:{mode:"TMO",gruppe:"2901"}, arbeit:{mode:"DMO",gruppe:"307_F"} },
-    { id:a2, name:"Abschnitt 2 – Wasserversorgung", ansprechpartner:"Florian Rothenstadt 10/1", fuehrung:{mode:"TMO",gruppe:"2902"}, arbeit:{mode:"DMO",gruppe:"308_F"} },
+    { id:a1, name:"Abschnitt 1 – Brandbekämpfung",  ansprechpartner:"Florian Weiden 3/1",      telefon:"0961 12345", fuehrung:{mode:"TMO",gruppe:"2901"}, arbeit:{mode:"DMO",gruppe:"307_F"} },
+    { id:a2, name:"Abschnitt 2 – Wasserversorgung", ansprechpartner:"Florian Rothenstadt 10/1", telefon:"", fuehrung:{mode:"TMO",gruppe:"2902"}, arbeit:{mode:"DMO",gruppe:"308_F"} },
   ];
   state.einheiten = [
     { id:uid(), org:"FW",  name:"Florian Weiden",      kennung:"40/1", f:0,u:1,m:8, agt:4, ankunft:t(42), abgerueckt:false, abschnitt:a1 },
-    { id:uid(), org:"FW",  name:"Florian Weiden",      kennung:"30/1", f:1,u:0,m:2, agt:0, ankunft:t(40), abgerueckt:false, abschnitt:"" },
+    { id:uid(), org:"FW",  name:"Florian Weiden",      kennung:"30/1", f:1,u:0,m:2, agt:0, ankunft:t(40), abgerueckt:false, abschnitt:"EL" },
     { id:uid(), org:"FW",  name:"Florian Rothenstadt", kennung:"42/1", f:0,u:1,m:5, agt:2, ankunft:t(31), abgerueckt:false, abschnitt:a2 },
     { id:uid(), org:"BRK", name:"RK Weiden",           kennung:"71/1", f:0,u:1,m:1, agt:0, ankunft:t(28), abgerueckt:false, abschnitt:"" },
     { id:uid(), org:"POL", name:"Donau",               kennung:"23/1", f:0,u:0,m:2, agt:0, ankunft:t(25), abgerueckt:false, abschnitt:"" },
@@ -1484,7 +1506,7 @@ function renderKraefte(){
       (a.status==="eingetroffen"?1:0)-(b.status==="eingetroffen"?1:0) ||
       (b.angefordert||"").localeCompare(a.angefordert||""));
     const items = list.length ? `<div class="fs-list">${list.map(a => {
-      const abN = (state.abschnitte.find(x => x.id === a.abschnitt) || {}).name;
+      const abN = abNameOf(a.abschnitt);
       return `
       <button class="fs-item ${a.status!=="eingetroffen"?"imp":""}" data-editaf="${esc(a.id)}" ${a.status==="eingetroffen"?'style="opacity:.55"':""}>
         <div class="fs-head">
@@ -1518,11 +1540,13 @@ function renderKraefte(){
       <p>Noch keine Kräfte erfasst.<br>Mit dem Tablet von Fahrzeug zu Fahrzeug – auch komplett offline.</p>
       <button class="btn btn-ghost" id="btnDemo2">Beispieldaten laden</button>
     </div>`;
-  }else if(state.abschnitte.length || sorted.some(u => u.abschnitt === "BR")){
+  }else if(state.abschnitte.length || sorted.some(u => u.abschnitt === "BR" || u.abschnitt === AB_EL_ID)){
     // Legacy-„BR" nur, wenn kein echter Bereitstellungs-Abschnitt existiert (sonst doppelt)
     const legacyBR = (!state.abschnitte.some(a => a.br) && sorted.some(u => u.abschnitt === "BR"))
       ? [{ id:"BR", name:"Bereitstellungsraum" }] : [];
-    const groups = [...state.abschnitte, ...legacyBR, { id:"", name:"Ohne Abschnitt" }];
+    // Einsatzleitung nur einblenden, wenn ihr Einheiten zugeordnet sind (leere Gruppen fallen ohnehin raus)
+    const elGrp = sorted.some(u => u.abschnitt === AB_EL_ID) ? [AB_EL] : [];
+    const groups = [...elGrp, ...state.abschnitte, ...legacyBR, { id:"", name:"Ohne Abschnitt" }];
     list = groups.map(g => {
       const us = sorted.filter(u => (u.abschnitt||"") === g.id);
       if(!us.length) return "";
@@ -2031,7 +2055,7 @@ function renderSheet(){
     <div class="field"><label>Einsatzabschnitt</label>
       <div class="abpick">
         <button data-ab="" aria-pressed="${!u.abschnitt}">Kein Abschnitt</button>
-        ${state.abschnitte.map(a => `
+        ${abschnitteWahl().map(a => `
           <button data-ab="${esc(a.id)}" aria-pressed="${u.abschnitt===a.id}">${esc(a.name)}</button>`).join("")}
       </div>
     </div>`;
@@ -2216,13 +2240,12 @@ function openAfEditor(id){
     <div class="sheet-body">
       <div class="field"><label for="af-was">Was wird angefordert?</label>
         <input id="af-was" value="${esc(a.was)}" placeholder="z. B. Löschzug FF Nachbarort, DLK 23/12, 2 RTW" autocomplete="off"></div>
-      ${state.abschnitte.length ? `
       <div class="field"><label for="af-ab">Vorgesehener Einsatzabschnitt</label>
         <select id="af-ab">
           <option value="">– kein / offen –</option>
-          ${state.abschnitte.map(ab => `<option value="${esc(ab.id)}" ${a.abschnitt===ab.id?"selected":""}>${esc(ab.name)}</option>`).join("")}
+          ${abschnitteWahl().map(ab => `<option value="${esc(ab.id)}" ${a.abschnitt===ab.id?"selected":""}>${esc(ab.name)}</option>`).join("")}
         </select>
-        <p class="hint">Schon beim Anfordern wählbar – beim Eintreffen noch änderbar.</p></div>` : ""}
+        <p class="hint">Schon beim Anfordern wählbar – beim Eintreffen noch änderbar.</p></div>
       <div class="field"><label>Status</label>
         <div style="margin-bottom:10px"><span class="chip chip-st-${esc(a.status)}">${esc(a.status)}</span></div>
         ${nextBtn}
@@ -2282,7 +2305,7 @@ function openAbEditor(id){
     if(!a) return;
     editingAb = { ab: {...a, fuehrung:{...(a.fuehrung||{mode:"TMO",gruppe:""})}, arbeit:{...(a.arbeit||{mode:"DMO",gruppe:""})}}, isNew:false };
   }else{
-    editingAb = { ab: { id:uid(), name:"", ansprechpartner:"", fuehrung:{mode:"TMO",gruppe:""}, arbeit:{mode:"DMO",gruppe:""} }, isNew:true };
+    editingAb = { ab: { id:uid(), name:"", ansprechpartner:"", telefon:"", fuehrung:{mode:"TMO",gruppe:""}, arbeit:{mode:"DMO",gruppe:""} }, isNew:true };
   }
   renderAbSheet();
 }
@@ -2302,6 +2325,9 @@ function renderAbSheet(){
       <div class="field"><label for="ab-ap">Ansprechpartner</label>
         <input id="ab-ap" class="mono" value="${esc(a.ansprechpartner||"")}" placeholder="z. B. Florian Weiden 3/1" autocomplete="off">
         <p class="hint">Funkrufname oder Name des Abschnittsleiters / Ansprechpartners.</p></div>
+      <div class="field"><label for="ab-tel">Telefon Abschnittsleiter <span style="text-transform:none;font-weight:500">(optional)</span></label>
+        <input id="ab-tel" class="mono" type="tel" value="${esc(a.telefon||"")}" placeholder="z. B. 0961 12345" autocomplete="off" inputmode="tel">
+        <p class="hint">Direkte Erreichbarkeit des Abschnittsleiters – erscheint in der Übersicht und im Bericht.</p></div>
       <div class="field"><label for="ab-fg-mode">Führungsrufgruppe <span style="text-transform:none;font-weight:500">(zur Einsatzleitung)</span></label>
         <div style="display:flex;gap:8px">
           <select id="ab-fg-mode" style="width:110px;flex:none">
@@ -2347,6 +2373,7 @@ function renderAbSheet(){
     a.name = $("#ab-name").value.trim();
     if(!a.name){ $("#ab-name").focus(); return; }
     a.ansprechpartner = $("#ab-ap").value.trim();
+    a.telefon = $("#ab-tel").value.trim();
     a.fuehrung = { mode: $("#ab-fg-mode").value, gruppe: $("#ab-fg-grp").value.trim() };
     a.arbeit   = { mode: $("#ab-ag-mode").value, gruppe: $("#ab-ag-grp").value.trim(), via: $("#ab-ag-via").value };
     delete a.tmo; delete a.dmo;
@@ -2393,13 +2420,13 @@ function renderFkSheet(){
         <datalist id="fk-funktionen">${FUNKTIONEN.map(x=>`<option value="${esc(x)}">`).join("")}</datalist></div>
       <div class="field"><label for="fk-funkruf">Funkrufname</label>
         <input id="fk-funkruf" class="mono" value="${esc(f.funkrufname||"")}" placeholder="z. B. Florian Weiden 1" autocomplete="off"></div>
-      ${state.abschnitte.length ? `
       <div class="field"><label for="fk-abschnitt">Einsatzabschnitt <span style="text-transform:none;font-weight:500">(optional)</span></label>
         <select id="fk-abschnitt">
           <option value="">– keinem Abschnitt zugeordnet –</option>
+          <option value="${esc(AB_EL.name)}" ${f.einheit===AB_EL.name?"selected":""}>${esc(AB_EL.name)}</option>
           ${state.abschnitte.map(a => `<option value="${esc(a.name)}" ${f.einheit===a.name?"selected":""}>${esc(a.name)}</option>`).join("")}
         </select>
-        <p class="hint" style="margin:.4rem 0 0">Vorhandenen Abschnitt wählen – oder unten frei eintragen.</p></div>` : ""}
+        <p class="hint" style="margin:.4rem 0 0">Einsatzleitung oder vorhandenen Abschnitt wählen – oder unten frei eintragen.</p></div>
       <div class="field"><label for="fk-einheit">Einheit / Abschnitt <span style="text-transform:none;font-weight:500">(optional)</span></label>
         <input id="fk-einheit" value="${esc(f.einheit||"")}" placeholder="z. B. Abschnitt 1, ${esc(pfx("FW"))} Weiden 1/40/1" autocomplete="off"></div>
       <div class="field">
@@ -2653,7 +2680,7 @@ const CHECK_VORLAGEN = [
     "Atemschutzüberwachung sicherstellen",
     "Abschnittsleiter / Führungsstruktur benennen",
     "# Kommunikation & Doku",
-    "Rufgruppen / Funkskizze festlegen",
+    "Rufgruppen / Komm-Skizze festlegen",
     "Lagekarte anlegen und fortführen",
     "Einsatztagebuch & Kräfteübersicht führen",
     "Presse / Behörden / Angehörige berücksichtigen",
@@ -3845,7 +3872,7 @@ function renderMonitor(){
   const pg = (!specialKey && abPageList[monAbPage]) ? abPageList[monAbPage] : { start:0, count:0 };
   const visible = specialKey ? [] : cardsData.slice(pg.start, pg.start + pg.count);
   const abCards = visible.map(c => abCard(c.title, c.units, c.opts)).join("");
-  const pagerLabel = isLagePage ? "Lagekarte" : isSkizzePage ? "Funkskizze"
+  const pagerLabel = isLagePage ? "Lagekarte" : isSkizzePage ? "Komm-Skizze"
     : isFunkPage ? "Funk & Checklisten" : isAsPage ? "Atemschutz-Trupps"
     : `${pg.start+1}–${pg.start+pg.count} von ${cardsData.length}`;
   const abPager = totalPages > 1 ? `
@@ -3954,7 +3981,7 @@ function renderMonitor(){
       })() : isSkizzePage ? `
       <div class="mon-grid" style="grid-template-columns:1fr">
         <div class="panel">
-          <div class="panel-head"><h3>Funkskizze</h3>
+          <div class="panel-head"><h3>Komm-Skizze</h3>
             <button class="ab-jump" id="monSkEdit" style="margin-left:10px">Öffnen</button></div>
           ${renderFunkskizze()}
         </div>
@@ -4037,22 +4064,25 @@ function monCardsData(){
   const hid = state.monHide.ab;
   const cards = [];
   const brUnits = act.filter(u => u.abschnitt === "BR");
+  const elUnits = act.filter(u => u.abschnitt === AB_EL_ID);
+  if(elUnits.length && !hid[AB_EL_ID]) cards.push({ key:AB_EL_ID, title:AB_EL.name, units:elUnits, opts:{ none:true } });
   if(state.abschnitte.length){
     state.abschnitte.forEach(a => { if(!hid[a.id]) cards.push({
       key:a.id, title:a.name, units:act.filter(u => u.abschnitt === a.id),
-      opts:{ fuehrung:a.fuehrung, arbeit:a.arbeit, ansprechpartner:a.ansprechpartner } }); });
-    const rest = act.filter(u => u.abschnitt !== "BR" &&
+      opts:{ fuehrung:a.fuehrung, arbeit:a.arbeit, ansprechpartner:abAnsprech(a) } }); });
+    const rest = act.filter(u => u.abschnitt !== "BR" && u.abschnitt !== AB_EL_ID &&
       (!u.abschnitt || !state.abschnitte.some(a => a.id === u.abschnitt)));
     if(rest.length && !hid.rest) cards.push({ key:"rest", title:"Ohne Abschnitt", units:rest, opts:{ none:true } });
   }else{
-    cards.push({ key:"all", title:"Alle Einheiten an der Einsatzstelle",
-      units:act.filter(u => u.abschnitt !== "BR"), opts:{ none:true } });
+    const allRest = act.filter(u => u.abschnitt !== "BR" && u.abschnitt !== AB_EL_ID);
+    if(allRest.length || !elUnits.length) cards.push({ key:"all", title:"Alle Einheiten an der Einsatzstelle",
+      units:allRest, opts:{ none:true } });
   }
   // Legacy-BR-Kachel nur, wenn kein echter Bereitstellungs-Abschnitt existiert (sonst doppelt)
   if(brUnits.length && !hid.BR && !state.abschnitte.some(a => a.br)) cards.push({ key:"BR", title:"Bereitstellungsraum", units:brUnits, opts:{ br:true, sub: state.einsatz.bereitstellungsraum } });
   return cards;
 }
-/* Sonderseiten des Monitors (Lagekarte, Funkskizze, Funk & Checklisten, Atemschutz)
+/* Sonderseiten des Monitors (Lagekarte, Komm-Skizze, Funk & Checklisten, Atemschutz)
    – als eigene durchschaltbare Seiten in der Rotation, über den Kacheln-Dialog abschaltbar */
 function monSpecialPages(){
   const hp = state.monHide.panels;
@@ -4076,7 +4106,8 @@ function openMonHideSheet(){
     </button>`;
   const act = aktive();
   const hatBR = act.some(u => u.abschnitt === "BR");
-  const hatRest = state.abschnitte.length > 0 && act.some(u => u.abschnitt !== "BR" &&
+  const hatEL = act.some(u => u.abschnitt === AB_EL_ID);
+  const hatRest = state.abschnitte.length > 0 && act.some(u => u.abschnitt !== "BR" && u.abschnitt !== AB_EL_ID &&
     (!u.abschnitt || !state.abschnitte.some(a => a.id === u.abschnitt)));
   $("#sheetHost").innerHTML = `
   <div class="sheet-backdrop" data-close="1"></div>
@@ -4092,15 +4123,16 @@ function openMonHideSheet(){
       </div>
       <div class="field"><label>Rotierende Seiten</label>
         ${row("Lagekarte", hp.karte, "p:karte")}
-        ${row("Funkskizze", hp.skizze, "p:skizze")}
+        ${row("Komm-Skizze", hp.skizze, "p:skizze")}
         ${row("Funk & Checklisten", hp.funkchecks, "p:funkchecks")}
         ${row("Atemschutz-Trupps", hp.as, "p:as")}
       </div>
       <div class="field"><label>Einsatzabschnitte</label>
+        ${hatEL ? row(AB_EL.name, ha[AB_EL_ID], "a:" + AB_EL_ID) : ""}
         ${state.abschnitte.map(a => row(a.name, ha[a.id], "a:" + a.id)).join("")}
         ${hatBR ? row("Bereitstellungsraum", ha.BR, "a:BR") : ""}
         ${hatRest ? row("Ohne Abschnitt", ha.rest, "a:rest") : ""}
-        ${!state.abschnitte.length && !hatBR ? `<p class="hint">Noch keine Abschnitte angelegt.</p>` : ""}
+        ${!state.abschnitte.length && !hatBR && !hatEL ? `<p class="hint">Noch keine Abschnitte angelegt.</p>` : ""}
       </div>
       <p class="hint">Ausgeblendete Abschnitte laufen auch nicht in der Rotation mit. Die Einstellung gilt nur für die Anzeige – erfasst bleibt alles.</p>
     </div>
@@ -4559,11 +4591,11 @@ function lgFreeze(){
   markChange();
   return s;
 }
-/* ---------------- Ansicht: Funkskizze (Kommunikationsskizze) ---------------- */
+/* ---------------- Ansicht: Komm-Skizze (Kommunikationsskizze) ---------------- */
 function renderSkizzeView(){
   return `
   <div class="card">
-    <h2>Funkskizze / Kommunikationsskizze</h2>
+    <h2>Komm-Skizze</h2>
     ${renderFunkskizze()}
     <p class="hint">Wird automatisch aus den Einsatzabschnitten und deren TMO-/DMO-Rufgruppen erzeugt
     (Abschnitte pflegen im Tab „Einsatz“). Leitstelle und Rufgruppe stehen in den Einstellungen (Zahnrad).</p>
@@ -4614,7 +4646,7 @@ function renderFunkskizze(src){
       <div class="fk-vline">${commonFg ? "" : (fkGrpHtml(a.fuehrung) || `<span class="fk-grp">—</span>`)}</div>
       <div class="fkbox">
         <strong>${esc(a.name)}</strong>
-        ${a.ansprechpartner ? `<small class="mono">${esc(a.ansprechpartner)}</small>` : ""}
+        ${abAnsprech(a) ? `<small class="mono">${esc(abAnsprech(a))}</small>` : ""}
         <small>${units.length} Einheit${units.length===1?"":"en"}</small>
         <div class="fk-badges">
           ${gruppeStr(a.arbeit) ? `<span class="funk-badge mode-${(a.arbeit.mode)||"DMO"}"><small>Arbeit</small>${esc(gruppeStr(a.arbeit))}</span>` : `<span class="hint" style="margin:0">keine Arbeitsrufgruppe</span>`}
@@ -5496,7 +5528,7 @@ function doPrint(data, sel){
   const e = data.einsatz;
   const pEnde = e.ende || data.ende;   // Einsatzende: Stammdatenfeld, sonst Archiv-Zeitstempel
   const abs = data.abschnitte || [];
-  const showAb = abs.length > 0;
+  const showAb = abs.length > 0 || (data.einheiten||[]).some(u => u.abschnitt === AB_EL_ID);
   const s = summen(data.einheiten.filter(u => !u.abgerueckt));
   const sAll = summen(data.einheiten);
   const fkN = (data.fuehrung||[]).length;
@@ -5539,7 +5571,7 @@ function doPrint(data, sel){
       ${(!pEnde && e.lagebespr) ? `<tr><td>Nächste Lagebesprechung</td><td>${esc(e.lagebespr)} Uhr</td></tr>` : ""}
       ${gruppeStr(e.ilsGruppe) ? `<tr><td>Leitstelle</td><td>${esc(state.config.ilsName||"Leitstelle")} · ${esc(gruppeStr(e.ilsGruppe))}</td></tr>` : ""}
       ${showAb ? `<tr><td>Abschnitte</td><td>${abs.map(a=>{
-        const funk=[a.ansprechpartner?`AP ${a.ansprechpartner}`:"",
+        const funk=[abAnsprech(a)?`AP ${abAnsprech(a)}`:"",
           gruppeStr(a.fuehrung), gruppeStr(a.arbeit)].filter(Boolean).join(", ");
         return esc(a.name)+(funk?` (${esc(funk)})`:"");
       }).join(" · ")}</td></tr>` : ""}
@@ -5577,7 +5609,7 @@ function doPrint(data, sel){
       </tr>`).join("")}
     </tbody></table>`;})() : "<p>Keine erfasst.</p>"}` : "";
   const secSkizze = on("skizze") ? `
-    <h2>Funkskizze / Kommunikationsskizze</h2>
+    <h2>Komm-Skizze</h2>
     <div class="p-skizze">${renderFunkskizze(data)}</div>` : "";
   const secBespr = on("bespr") ? `
     <h2>Lagebesprechungen (${(data.besprechungen||[]).length})</h2>
@@ -5711,7 +5743,7 @@ function openPrintDialog(data){
 /* ---------------- Render-Hauptschleife ---------------- */
 function render(){
   lgMapTeardown();  // Leaflet-Karte vor dem Neuaufbau des DOM sauber entfernen
-  // Auf kleinen Geräten sind Monitor/Lagekarte/Funkskizze nicht verfügbar
+  // Auf kleinen Geräten sind Monitor/Lagekarte/Komm-Skizze nicht verfügbar
   if(!istGrossesGeraet() && (TABS.find(t => t.id === state.view) || {}).nurGross){
     state.view = "kraefte";
   }
