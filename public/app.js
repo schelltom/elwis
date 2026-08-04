@@ -739,13 +739,13 @@ function renderSettingsSheet(){
         <div class="cfg-qr">
           <img src="${qrDataUrl(SYNC.urls[0])}" alt="QR-Code zum Verbinden" width="176" height="176">
           <div>
-            <p class="hint" style="margin:0 0 8px">Mit der Tablet-Kamera scannen – EDDi öffnet sich im ELW-WLAN und verbindet sich automatisch mit dem Einsatz.</p>
+            <p class="hint" style="margin:0 0 8px">Mit der Tablet-Kamera scannen – ELWIS öffnet sich im ELW-WLAN und verbindet sich automatisch mit dem Einsatz.</p>
             ${SYNC.urls.map(u => `<div class="mono" style="font-size:.82rem">${esc(u)}</div>`).join("")}
           </div>
         </div>
       </div>` : `
       <div class="field"><label style="margin-bottom:6px">Tablet verbinden</label>
-        <p class="hint" style="margin:0">Der QR-Code zum Verbinden erscheint hier, sobald EDDi über den ELW-Server läuft (<span class="mono">npm run server</span>) – die Tablets landen dann im gleichen WLAN und synchronisieren automatisch.</p>
+        <p class="hint" style="margin:0">Der QR-Code zum Verbinden erscheint hier, sobald ELWIS über den ELW-Server läuft (<span class="mono">npm run server</span>) – die Tablets landen dann im gleichen WLAN und synchronisieren automatisch.</p>
       </div>`}
       ${SYNC.aktiv ? `
       <div class="field"><label style="margin-bottom:6px">Datensicherung / Wiederherstellung</label>
@@ -1173,7 +1173,7 @@ function exportEinsatz(){
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
   const stw = (state.einsatz.stichwort || "einsatz").replace(/[^\wäöüÄÖÜß-]+/g, "_").slice(0, 40);
-  a.download = `EDDi_${stw}_${fmtDateInput(new Date().toISOString())}.json`;
+  a.download = `ELWIS_${stw}_${fmtDateInput(new Date().toISOString())}.json`;
   document.body.appendChild(a); a.click(); a.remove();
   URL.revokeObjectURL(a.href);
 }
@@ -1182,7 +1182,7 @@ function importEinsatz(file){
   rd.onload = async () => {
     try{
       const d = JSON.parse(rd.result);
-      if(!d || d.elwis !== 1 || !d.einsatz) throw new Error("kein EDDi-Export");
+      if(!d || d.elwis !== 1 || !d.einsatz) throw new Error("kein ELWIS-Export");
       const wer = [d.einsatz.stichwort || "ohne Stichwort", d.ugName ? `(${d.ugName})` : "",
         d.exportiert ? `– exportiert ${fmtDatum(d.exportiert)} ${fmtZeit(d.exportiert)} Uhr` : ""].join(" ");
       if(!(await modalConfirm(`Einsatz „${wer}“ importieren?\nDer aktuell erfasste Einsatz wird ersetzt (Archiv und Einstellungen bleiben).`))) return;
@@ -1220,7 +1220,7 @@ function importEinsatz(file){
       }
       render();
     }catch(err){
-      modalInfo("Datei konnte nicht gelesen werden – ist das ein EDDi-Export (.json)?");
+      modalInfo("Datei konnte nicht gelesen werden – ist das ein ELWIS-Export (.json)?");
     }
   };
   rd.readAsText(file);
@@ -2546,7 +2546,7 @@ function doPrintFunk(){
         <h1>${esc(e.stichwort) || "Ohne Stichwort"}</h1>
         <div>${esc(e.ort)}${e.beginn ? " · Alarm " + fmtDatum(e.beginn) + " " + fmtZeit(e.beginn) + " Uhr" : ""}</div>
       </div>
-      <div class="p-mark">EDDi</div>
+      <div class="p-mark">ELWIS</div>
     </div>
     <table><thead><tr><th>Nr.</th><th>Zeit</th><th>Von</th><th>An</th><th>Inhalt</th></tr></thead><tbody>
       ${sorted.map((f,idx) => `
@@ -2562,7 +2562,7 @@ function doPrintFunk(){
       <div class="p-sign">Ort, Datum</div>
       <div class="p-sign">Unterschrift</div>
     </div>
-    <p style="font-size:8pt;color:#666;margin-top:16px">Gedruckt am ${new Date().toLocaleString("de-DE")} · EDDi – Kräfteerfassung (Prototyp) · ${esc(state.config.ugName)}</p>`;
+    <p style="font-size:8pt;color:#666;margin-top:16px">Gedruckt am ${new Date().toLocaleString("de-DE")} · ELWIS – Kräfteerfassung (Prototyp) · ${esc(state.config.ugName)}</p>`;
   window.print();
 }
 function openFsEditor(id){
@@ -3609,7 +3609,7 @@ function doPrintAtemschutz(){
         <h1>${esc(e.stichwort) || "Ohne Stichwort"}</h1>
         <div>${esc(e.ort)}${e.beginn ? " · Alarm " + fmtDatum(e.beginn) + " " + fmtZeit(e.beginn) + " Uhr" : ""}</div>
       </div>
-      <div class="p-mark">EDDi</div>
+      <div class="p-mark">ELWIS</div>
     </div>
     <table class="meta">
       <tr><td>Gerätetyp</td><td>${esc(AS_GERAETETYP)} (Pressluftatmer)</td></tr>
@@ -3627,7 +3627,7 @@ function doPrintAtemschutz(){
       <div class="p-sign">Ort, Datum</div>
       <div class="p-sign">Atemschutzüberwachung</div>
     </div>
-    <p style="font-size:8pt;color:#666;margin-top:16px">Gedruckt am ${new Date().toLocaleString("de-DE")} · EDDi – Kräfteerfassung (Prototyp) · ${esc(state.config.ugName)}</p>`;
+    <p style="font-size:8pt;color:#666;margin-top:16px">Gedruckt am ${new Date().toLocaleString("de-DE")} · ELWIS – Kräfteerfassung (Prototyp) · ${esc(state.config.ugName)}</p>`;
   window.print();
 }
 
@@ -5549,11 +5549,11 @@ function doPrintLagekarte(){
           <h1>${esc(e.stichwort) || "Ohne Stichwort"}</h1>
           <div>${esc(e.ort)}${e.beginn ? " · Alarm " + fmtDatum(e.beginn) + " " + fmtZeit(e.beginn) + " Uhr" : ""}</div>
         </div>
-        <div class="p-mark">EDDi</div>
+        <div class="p-mark">ELWIS</div>
       </div>
       ${printMapHtml(state.lage)}
       ${printLegendHtml(state.lage.items, state.einheiten)}
-      <p style="font-size:8pt;color:#666;margin-top:16px">Gedruckt am ${new Date().toLocaleString("de-DE")} · EDDi – Lagekarte · ${esc(state.config.ugName)}</p>
+      <p style="font-size:8pt;color:#666;margin-top:16px">Gedruckt am ${new Date().toLocaleString("de-DE")} · ELWIS – Lagekarte · ${esc(state.config.ugName)}</p>
     </section>`;
   window.print();
 }
@@ -5738,7 +5738,7 @@ function doPrint(data, sel){
         <h1>${esc(e.stichwort) || "Ohne Stichwort"}</h1>
         <div>${esc(e.ort)}${e.objekt ? " · " + esc(e.objekt) : ""}</div>
       </div>
-      <div class="p-mark">EDDi</div>
+      <div class="p-mark">ELWIS</div>
     </div>
     ${secEinsatz}${secAbschnitte}${secKraefte}${secFunk}${secSkizze}${secBespr}${secFotos}${secListen}${secAtem}${secLage}
     <p class="p-sum">
@@ -5749,7 +5749,7 @@ function doPrint(data, sel){
       <div class="p-sign">Ort, Datum</div>
       <div class="p-sign">Unterschrift Einsatzleiter</div>
     </div>
-    <p class="p-print-ts">Gedruckt am ${new Date().toLocaleString("de-DE")} · EDDi – Kräfteerfassung (Prototyp) · ${esc(state.config.ugName)}</p>`;
+    <p class="p-print-ts">Gedruckt am ${new Date().toLocaleString("de-DE")} · ELWIS – Kräfteerfassung (Prototyp) · ${esc(state.config.ugName)}</p>`;
   window.print();
 }
 /* Druck-Auswahl: vor dem Drucken wählen, welche Bereiche (= Navigationspunkte ohne Monitor)
@@ -5995,7 +5995,7 @@ function syncPill(){
   }
   const fn = $("#footNote");
   if(fn && SYNC.urls.length){
-    fn.textContent = "EDDi-Sync aktiv · Tablets im gleichen WLAN verbinden über: " + SYNC.urls.join("  ·  ");
+    fn.textContent = "ELWIS-Sync aktiv · Tablets im gleichen WLAN verbinden über: " + SYNC.urls.join("  ·  ");
   }
 }
 const _origRenderHeader = renderHeader;
