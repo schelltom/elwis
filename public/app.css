@@ -908,7 +908,7 @@
       margin:20mm 13mm 16mm;
       @top-right{content:string(rptHead);
         font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;font-size:8pt;color:#777}
-      @bottom-left{content:"ELWIS – Einsatzbericht";
+      @bottom-left{content:"EDDi – Einsatzbericht";
         font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;font-size:8pt;color:#888}
       @bottom-right{content:"Seite " counter(page) " von " counter(pages);
         font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;font-size:8pt;color:#777}
