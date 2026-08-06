@@ -6038,6 +6038,31 @@ function zeigeUpdateHinweis(update){
   bar.append(txt, zu);
 }
 
+/* Hat dieses Gerät selbst schon Einsatzdaten erfasst? (sonst: frisch verbunden) */
+function einsatzHatDaten(){
+  for(const name of SYNC_COLS){
+    const arr = syncColOf(name);
+    if(Array.isArray(arr) && arr.length) return true;
+  }
+  const e = state.einsatz || {};
+  return !!(e.stichwort || e.ort || e.objekt || e.leiter || e.bereitstellungsraum || e.bemerkung);
+}
+/* Reiner Pull: leerer Body → der Server ändert nichts und liefert nur seinen
+   aktuellen Stand zurück. So übernimmt ein frisches Gerät den laufenden Einsatz,
+   ohne ihn zu überschreiben. */
+async function syncPullOnly(){
+  const res = await fetch("./api/sync", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ clientId: syncClientId() }),
+  });
+  if(!res.ok) return;
+  const d = await res.json();
+  SYNC.verbunden = true;
+  SYNC.clients = d.clients || 1;
+  if(d.seq != null) SYNC.seq = d.seq;
+  if(!d.unchanged) syncApply(d);
+}
+
 async function syncInit(){
   try{
     const res = await fetch("./api/info", { cache: "no-store" });
@@ -6047,6 +6072,12 @@ async function syncInit(){
     SYNC.aktiv = true;
     SYNC.urls = d.urls || [];
     zeigeUpdateHinweis(d.update);
+    // Läuft auf dem Server bereits ein anderer Einsatz und dieses Gerät hat selbst
+    // noch keine Daten? → laufenden Einsatz ÜBERNEHMEN statt ihn zu ersetzen.
+    // (Bewusstes Ersetzen bleibt dem Knopf "Neuer Einsatz" vorbehalten.)
+    if(d.einsatzId && d.einsatzId !== state.einsatzId && !einsatzHatDaten()){
+      try{ await syncPullOnly(); }catch(e){ /* Pull fehlgeschlagen → normaler Tick greift */ }
+    }
     syncTick();
     setInterval(syncTick, 3000);
     render();
