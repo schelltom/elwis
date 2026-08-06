@@ -845,10 +845,12 @@ function renderSettingsSheet(){
         <p class="hint">Name + Funkrufnummer. Neue Fahrzeuge werden bei der Erfassung automatisch aufgenommen. Mit ✕ entfernen.</p>
       </div>
     </div>
-    <div class="sheet-foot">
+    <div class="sheet-foot" style="flex-wrap:wrap">
       <button class="btn btn-primary btn-block" id="cfg-save" style="flex:1">Speichern</button>
+      <div id="cfgVer" class="mono" style="width:100%;text-align:center;opacity:.55;font-size:.72rem;margin-top:8px"></div>
     </div>
   </div>`;
+  zeigeAppVersion();
   const leseSettings = () => {
     state.config.ugName = $("#cfg-ug").value.trim();
     state.config.elwFunk = $("#cfg-elw").value.trim();
@@ -6139,6 +6141,32 @@ async function syncInit(){
   }catch(e){ /* kein ELW-Server erreichbar → App läuft eigenständig weiter */ }
 }
 
+/* App-Version aus der manifest.json – im Splash und in den Einstellungen sichtbar.
+   "erstellt" ist der Build-Zeitpunkt (die sprechende Info), "version" das Git-Kürzel. */
+let appVersionInfo = null;
+async function ladeAppVersion(){
+  try{
+    const r = await fetch("./manifest.json", { cache: "no-store" });
+    if(!r.ok) return;
+    appVersionInfo = await r.json();
+    zeigeAppVersion();
+  }catch(e){ /* offline / kein Manifest → dann eben ohne Versionsanzeige */ }
+}
+function versionText(){
+  if(!appVersionInfo) return "";
+  let datum = "";
+  try{
+    datum = new Date(appVersionInfo.erstellt).toLocaleString("de-DE",
+      { day:"2-digit", month:"2-digit", year:"numeric", hour:"2-digit", minute:"2-digit" });
+  }catch(e){}
+  return "Version " + (appVersionInfo.version || "?") + (datum ? " · " + datum : "");
+}
+function zeigeAppVersion(){
+  const t = versionText();
+  const s = document.getElementById("splashVer"); if(s) s.textContent = t;
+  const c = document.getElementById("cfgVer"); if(c) c.textContent = t;
+}
+
 /* ---------------- Start: Zustand laden, dann rendern ---------------- */
 async function boot(){
   const stored = await ladeZustand();
@@ -6159,5 +6187,6 @@ async function boot(){
   if(!TABS.some(t => t.id === state.view)) state.view = "einsatz";
   render();
   syncInit();
+  ladeAppVersion();
 }
 boot();
