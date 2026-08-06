@@ -192,8 +192,10 @@ function standAntwort(){
    - Prüft (nur wenn Internet da ist) die manifest.json der Quelle.
    - Neue Version → wird VOLLSTÄNDIG in dist.neu/ geladen (atomar),
      der laufende Betrieb bleibt unangetastet.
-   - Aktiviert wird eine geladene Version NUR beim Serverstart
-     (aktiviereBereitgestellte) – so kackt mitten im Einsatz nichts ab.
+   - Aktiviert wird eine geladene Version beim Serverstart
+     (aktiviereBereitgestellte) ODER im laufenden Betrieb, sobald kein Gerät
+     mehr verbunden ist (versucheLeerlaufAktivierung) – so ändert sich nie
+     etwas mitten im Einsatz, aber das 24/7-NAS bekommt Updates trotzdem live.
    - Beim allerersten Start ohne App wird sofort scharf geschaltet
      (da läuft ja noch kein Betrieb).
    ================================================================ */
@@ -220,6 +222,20 @@ function aktiviereBereitgestellte(){
     console.log(`App-Version aktiviert: ${sm.version} (Stand ${sm.erstellt || "?"}).`);
     return true;
   }catch(e){ console.error("Aktivierung fehlgeschlagen:", e.message); return false; }
+}
+
+// Leerlauf-Aktivierung: das NAS läuft 24/7 und startet nie neu. Damit eine
+// bereitliegende Version trotzdem live geht, wird sie aktiviert, sobald KEIN
+// Gerät mehr verbunden ist – so ändert sich nie etwas mitten in der Erfassung.
+function versucheLeerlaufAktivierung(){
+  if(updateLaeuft) return;                     // gerade wird geladen
+  const sv = versionVon(STAGING);
+  if(!sv || sv === versionVon(DIST)) return;   // nichts Neues bereitgestellt
+  if(aktiveGeraete() > 0) return;              // jemand arbeitet gerade → warten
+  if(aktiviereBereitgestellte()){
+    updateStatus = null;
+    console.log("Leerlauf-Aktivierung: neue Version ist jetzt live (kein Gerät verbunden).");
+  }
 }
 
 // Komplette neue Version in dist.neu/ laden – erst .tmp füllen, dann atomar umbenennen.
@@ -268,8 +284,9 @@ async function pruefeAufUpdate(){
     }
     if(!appVorhanden()){                               // Erststart ohne App → sofort scharf
       if(aktiviereBereitgestellte()) updateStatus = null;
-    }else{                                             // nur Hinweis – Aktivierung beim Neustart
+    }else{                                             // App läuft → Hinweis setzen ...
       updateStatus = { version: remote.version, erstellt: remote.erstellt || null };
+      versucheLeerlaufAktivierung();                   // ... und sofort live, wenn niemand verbunden ist
     }
   }catch(e){
     // kein Internet / Pages nicht erreichbar → still bleiben, nächster Versuch später
@@ -411,4 +428,6 @@ server.listen(PORT, () => {
   // aber erst beim nächsten Neustart aktiv (Hinweis erscheint in der App).
   pruefeAufUpdate();
   setInterval(pruefeAufUpdate, UPDATE_INTERVALL);
+  // Bereitliegende Version zeitnah scharf schalten, sobald kein Gerät mehr verbunden ist.
+  setInterval(versucheLeerlaufAktivierung, 20000);
 });
