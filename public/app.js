@@ -6068,20 +6068,16 @@ function einsatzHatDaten(){
   const e = state.einsatz || {};
   return !!(e.stichwort || e.ort || e.objekt || e.leiter || e.bereitstellungsraum || e.bemerkung);
 }
-/* Reiner Pull: leerer Body → der Server ändert nichts und liefert nur seinen
-   aktuellen Stand zurück. So übernimmt ein frisches Gerät den laufenden Einsatz,
-   ohne ihn zu überschreiben. */
-async function syncPullOnly(){
+/* Server-Stand holen (leerer Body → Server ändert nichts, liefert nur seinen
+   aktuellen Stand). Wird NICHT automatisch übernommen – der Aufrufer entscheidet. */
+async function holeServerStand(){
   const res = await fetch("./api/sync", {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ clientId: syncClientId() }),
   });
-  if(!res.ok) return;
+  if(!res.ok) return null;
   const d = await res.json();
-  SYNC.verbunden = true;
-  SYNC.clients = d.clients || 1;
-  if(d.seq != null) SYNC.seq = d.seq;
-  if(!d.unchanged) syncApply(d);
+  return (d && !d.unchanged) ? d : null;
 }
 
 /* Konflikt-Dialog: dieses Gerät hat eigene Daten UND der Server führt einen
@@ -6120,19 +6116,19 @@ async function syncInit(){
     zeigeUpdateHinweis(d.update);
     // Server führt bereits einen ANDEREN Einsatz als dieses Gerät?
     if(d.einsatzId && d.einsatzId !== state.einsatzId){
-      if(!einsatzHatDaten()){
-        // Gerät hat selbst noch nichts erfasst → laufenden Einsatz still übernehmen.
-        try{ await syncPullOnly(); }catch(e){ /* Pull fehlgeschlagen → normaler Tick greift */ }
+      let srv = null;
+      try{ srv = await holeServerStand(); }catch(e){}
+      const serverNeuer = !!srv && (srv.einsatzStart || "") > (state.einsatzStart || "");
+      if(!einsatzHatDaten() || serverNeuer){
+        // Gerät hat selbst nichts erfasst ODER der ELW hat einen NEUEREN Einsatz
+        // gestartet → automatisch übernehmen. So landen (auch wieder geöffnete)
+        // Tablets immer im aktuellen Einsatz, statt am alten zu kleben.
+        if(srv) syncApply(srv);
       }else{
-        // Konflikt: beide haben Daten → Nutzer bewusst entscheiden lassen.
+        // Gerät hat eigene, nicht-ältere Daten → bewusst entscheiden lassen.
         const wahl = await frageEinsatzKonflikt();
-        if(wahl === "server"){
-          try{ await syncPullOnly(); }catch(e){}
-        }else{
-          state.einsatzStart = new Date().toISOString();  // meiner ist damit der neueste → gewinnt
-          _syncSnap = null;                                // erzwingt vollständigen Push aller Daten
-          save();
-        }
+        if(wahl === "server"){ if(srv) syncApply(srv); }
+        else{ einsatzErsetzenErzwingen(); state.einsatzStart = new Date().toISOString(); save(); }
       }
     }
     syncTick();
