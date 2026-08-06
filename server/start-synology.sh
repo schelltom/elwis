@@ -12,10 +12,10 @@
 #  Daten + Backups landen neben diesem Skript (server/).
 # ================================================================
 
-# --- Wo liegt der Server?  (bei Bedarf anpassen) ---
-BASIS=/volume1/elwis
-SERVER="$BASIS/server/elwis-server.mjs"
-LOG="$BASIS/server/elwis-server.log"
+# --- Wo liegt der Server?  (findet sich selbst, egal wo das Skript liegt) ---
+HIER=$(cd "$(dirname "$0")" && pwd)   # .../server
+SERVER="$HIER/elwis-server.mjs"
+LOG="$HIER/elwis-server.log"
 
 # --- Node aus dem installierten Node.js-Paket finden (Version egal) ---
 NODE=$(ls -d /var/packages/Node.js*/target/usr/local/bin/node 2>/dev/null | sort -V | tail -1)
