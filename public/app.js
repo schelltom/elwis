@@ -1060,11 +1060,15 @@ function renderEinsatz(){
 }
 function wireEinsatz(){
   document.querySelectorAll("[data-ez]").forEach(inp => {
-    inp.addEventListener("change", () => {
+    const commit = () => {
       state.einsatz[inp.dataset.ez] = inp.value;
       if(inp.dataset.ez === "leiter") syncEinsatzleiterFk();
       markChange(); renderHeader();
-    });
+    };
+    inp.addEventListener("change", commit);   // beim Verlassen sofort
+    // ... und schon beim Tippen (leicht verzögert), damit andere Geräte es zeitnah sehen
+    let t = null;
+    inp.addEventListener("input", () => { clearTimeout(t); t = setTimeout(commit, 700); });
   });
   const ilsMode = $("#f-ils-mode"), ilsGrp = $("#f-ils-grp");
   const saveIls = () => { state.einsatz.ilsGruppe = { mode: ilsMode.value, gruppe: ilsGrp.value.trim() }; markChange(); };
@@ -5951,9 +5955,14 @@ function syncApply(server){
   syncSnapSave(syncSnapshotVomZustand());
   save();
 }
+let letzterTastendruck = 0;
+document.addEventListener("input", () => { letzterTastendruck = Date.now(); }, true);
+document.addEventListener("keydown", () => { letzterTastendruck = Date.now(); }, true);
 function syncTipptGerade(){
   const a = document.activeElement;
-  return a && (a.tagName === "INPUT" || a.tagName === "TEXTAREA" || a.tagName === "SELECT");
+  const fokus = a && (a.tagName === "INPUT" || a.tagName === "TEXTAREA" || a.tagName === "SELECT");
+  // Nur bremsen, solange WIRKLICH getippt wird; nach kurzer Pause fremde Änderungen zeigen.
+  return fokus && (Date.now() - letzterTastendruck < 3000);
 }
 async function syncTick(){
   if(SYNC.busy) return;
