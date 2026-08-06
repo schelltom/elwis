@@ -117,9 +117,11 @@ function aktiveGeraete(){
 function mergeSync(body){
   let geaendert = false;
 
-  // Einsatz-Identität: neuerer Einsatz ersetzt den alten komplett
+  // Einsatz-Identität: neuerer Einsatz ersetzt den alten komplett.
+  // body.ersetzen = bewusste Aktion am Client (Verwerfen / Neuer Einsatz / Beenden /
+  // Import) → erzwingt das Ersetzen unabhängig vom Zeitstempel.
   if(body.einsatzId && body.einsatzId !== stand.einsatzId){
-    const neuer = !stand.einsatzId ||
+    const neuer = body.ersetzen || !stand.einsatzId ||
       (body.einsatzStart || "") > (stand.einsatzStart || "");
     if(neuer){
       console.log(`Neuer Einsatz übernommen (${body.einsatzId}).`);

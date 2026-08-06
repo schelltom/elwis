@@ -1090,6 +1090,7 @@ function wireEinsatz(){
       const keepArchiv = state.archiv, keepCfg = state.config;
       state = defaultState(); state.archiv = keepArchiv; state.config = keepCfg;
       state.einsatz.beginn = nowLocalInput();
+      einsatzErsetzenErzwingen();   // leeren Stand erzwungen an den Server (löscht auch dort alles)
       save(); render();
     });
   });
@@ -1213,6 +1214,7 @@ function importEinsatz(file){
         }
       }
       state.einsatzId = uid(); state.einsatzStart = new Date().toISOString();
+      einsatzErsetzenErzwingen();   // importierten Einsatz erzwungen zur Server-Wahrheit machen
       try{ markChange(); }catch(err){
         state.fotos = []; state.lage.bg = "";
         markChange();
@@ -1397,6 +1399,7 @@ async function aktiviereArchiv(id){
   // Neue Sync-Identität: der reaktivierte Einsatz wird zum aktuellen (auch am Server)
   state.einsatzId = uid();
   state.einsatzStart = new Date().toISOString();
+  einsatzErsetzenErzwingen();   // reaktivierter Einsatz wird erzwungen zur Server-Wahrheit
   markChange(); render();
 }
 async function endeEinsatz(){
@@ -1408,6 +1411,7 @@ async function endeEinsatz(){
   const entry = baueArchivEintrag();
   state.archiv.push(entry);
   state.einsatzId = uid(); state.einsatzStart = new Date().toISOString();
+  einsatzErsetzenErzwingen();   // geleerten Stand erzwungen an den Server (Archiv bleibt lokal)
   state.einsatz = { stichwort:"", ort:"", objekt:"", beginn:nowLocalInput(), ende:"", leiter:"", bereitstellungsraum:"", bereitstellung:false, bemerkung:"", ilsGruppe:{mode:"TMO",gruppe:"2772"} };
   state.einheiten = []; state.fuehrung = []; state.abschnitte = [];
   state.lage = { items: [], bg: "", snapshots: [], mode: "raster", mapView: null, mapLayer: "luftbild" };
@@ -5861,6 +5865,10 @@ if("serviceWorker" in navigator && (location.protocol === "https:" || location.h
    Einsatz; gerätelokal bleiben: Einstellungen, Monitor-Kacheln, Archiv.
    ================================================================ */
 const SYNC = { aktiv:false, verbunden:false, seq:0, urls:[], clients:1, pending:0, busy:false };
+// Nächster Push soll den Server-Einsatz ERZWUNGEN ersetzen (bewusstes Verwerfen /
+// Neuer Einsatz / Beenden / Import) – unabhängig vom einsatzStart-Zeitstempel.
+let syncErsetzen = false;
+function einsatzErsetzenErzwingen(){ syncErsetzen = true; _syncSnap = null; }
 const SYNC_COLS = ["einheiten","fuehrung","abschnitte","funk","besprechungen",
   "anforderungen","checks","fotos","asTraeger","asTrupps","lageItems","lageSnapshots"];
 
@@ -5925,6 +5933,7 @@ function syncDiff(){
     if(Object.keys(tomb).length) out.tombstones[name] = tomb;
     pending += changed.length;
   }
+  if(syncErsetzen) out.ersetzen = true;   // bewusstes Ersetzen erzwingen
   return { out, pending };
 }
 /* Zusammengeführten Serverstand übernehmen (eigene Änderungen waren im Push enthalten) */
@@ -5959,6 +5968,7 @@ async function syncTick(){
     });
     if(!res.ok) throw new Error("HTTP " + res.status);
     const d = await res.json();
+    syncErsetzen = false;   // Push kam an → Ersetzen-Wunsch ist erledigt
     SYNC.verbunden = true;
     SYNC.clients = d.clients || 1;
     SYNC.seq = d.seq;
@@ -6063,6 +6073,31 @@ async function syncPullOnly(){
   if(!d.unchanged) syncApply(d);
 }
 
+/* Konflikt-Dialog: dieses Gerät hat eigene Daten UND der Server führt einen
+   anderen Einsatz. Zusammenführen geht nicht – der Nutzer wählt bewusst.
+   Kein "Abbrechen"/Backdrop-Klick, damit nichts versehentlich passiert. */
+function frageEinsatzKonflikt(){
+  return new Promise(resolve => {
+    const host = $("#modalHost");
+    host.innerHTML = `
+    <div class="modal-backdrop"></div>
+    <div class="modal" role="alertdialog" aria-modal="true">
+      <h2>Am ELW läuft bereits ein Einsatz</h2>
+      <p>Dieses Gerät hat eigene Einsatzdaten, am ELW-Server läuft aber schon ein
+         anderer Einsatz. Ein Zusammenführen ist nicht möglich – bitte wählen:</p>
+      <div class="modal-btns" style="flex-direction:column;gap:10px;align-items:stretch">
+        <button class="btn btn-primary" data-wahl="server">Diesen (ELW-)Einsatz übernehmen<br>
+          <small style="font-weight:400;opacity:.85">Meine lokalen Daten werden verworfen</small></button>
+        <button class="btn btn-ghost" data-wahl="meins">Meinen Einsatz verwenden<br>
+          <small style="font-weight:400;opacity:.85">Ersetzt den Stand am ELW für alle Geräte</small></button>
+      </div>
+    </div>`;
+    host.querySelectorAll("[data-wahl]").forEach(b =>
+      b.addEventListener("click", () => { const w = b.dataset.wahl; host.innerHTML = ""; resolve(w); }));
+    const def = host.querySelector('[data-wahl="server"]'); if(def) def.focus();
+  });
+}
+
 async function syncInit(){
   try{
     const res = await fetch("./api/info", { cache: "no-store" });
@@ -6072,11 +6107,22 @@ async function syncInit(){
     SYNC.aktiv = true;
     SYNC.urls = d.urls || [];
     zeigeUpdateHinweis(d.update);
-    // Läuft auf dem Server bereits ein anderer Einsatz und dieses Gerät hat selbst
-    // noch keine Daten? → laufenden Einsatz ÜBERNEHMEN statt ihn zu ersetzen.
-    // (Bewusstes Ersetzen bleibt dem Knopf "Neuer Einsatz" vorbehalten.)
-    if(d.einsatzId && d.einsatzId !== state.einsatzId && !einsatzHatDaten()){
-      try{ await syncPullOnly(); }catch(e){ /* Pull fehlgeschlagen → normaler Tick greift */ }
+    // Server führt bereits einen ANDEREN Einsatz als dieses Gerät?
+    if(d.einsatzId && d.einsatzId !== state.einsatzId){
+      if(!einsatzHatDaten()){
+        // Gerät hat selbst noch nichts erfasst → laufenden Einsatz still übernehmen.
+        try{ await syncPullOnly(); }catch(e){ /* Pull fehlgeschlagen → normaler Tick greift */ }
+      }else{
+        // Konflikt: beide haben Daten → Nutzer bewusst entscheiden lassen.
+        const wahl = await frageEinsatzKonflikt();
+        if(wahl === "server"){
+          try{ await syncPullOnly(); }catch(e){}
+        }else{
+          state.einsatzStart = new Date().toISOString();  // meiner ist damit der neueste → gewinnt
+          _syncSnap = null;                                // erzwingt vollständigen Push aller Daten
+          save();
+        }
+      }
     }
     syncTick();
     setInterval(syncTick, 3000);
