@@ -544,6 +544,24 @@ function flaecheStr(m2){
   if(m2 >= 1e4) return (m2 / 1e4).toFixed(2).replace(".", ",") + " ha";
   return Math.round(m2) + " m²";
 }
+// Länge einer Geo-Linie (nur Kartenmodus, echte lat/lng) in Metern – Haversine über alle Segmente
+function geoLineM(llpoints){
+  if(!Array.isArray(llpoints) || llpoints.length < 2) return 0;
+  const R = 6378137, rad = d => d * Math.PI / 180;
+  let m = 0;
+  for(let i = 1; i < llpoints.length; i++){
+    const a = llpoints[i - 1], b = llpoints[i];
+    const dLat = rad(b.lat - a.lat), dLng = rad(b.lng - a.lng);
+    const h = Math.sin(dLat / 2) ** 2 + Math.cos(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.sin(dLng / 2) ** 2;
+    m += 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
+  }
+  return m;
+}
+function laengeStr(m){
+  if(!(m > 0)) return "";
+  if(m >= 1000) return (m / 1000).toFixed(2).replace(".", ",") + " km";
+  return Math.round(m) + " m";
+}
 function fmtZeit(iso){
   if(!iso) return "–";
   const d = new Date(iso);
@@ -3960,17 +3978,18 @@ function renderMonitor(){
         const lines = state.lage.items.filter(i => i.type === "line");
         const cars = state.lage.items.filter(i => i.type === "car").sort((a,b) => (a.num||0)-(b.num||0));
         const sc = i => `var(--${LG_SHAPE_COLORS.includes(i.color) ? i.color : "fw"})`;
-        // Legende wie im Präsentationsmodus (read-only): Marker/Gefahren links, Fahrzeuge rechts
+        // Legende wie im Präsentationsmodus: Badge antippen → Symbol wackelt/blinkt auf der Karte
+        const legText = (haupt, sub) => `<span class="lg-leg-text">${haupt}${sub ? `${haupt ? " " : ""}<span class="lg-leg-qm">${esc(sub)}</span>` : ""}</span>`;
         const markerItems = [
-          ...nums.map(i => `<div class="lg-leg-item"><span class="lg-leg-num">${esc(i.num)}</span><span class="lg-leg-text">${esc(i.text||"")}</span></div>`),
-          ...forms.map(f => `<div class="lg-leg-item"><span class="lg-leg-badge"><span class="lg-mini-form ${f.shape||"rect"}" style="--sc:${sc(f)}"></span></span><span class="lg-leg-text">${esc(f.text||"")}</span></div>`),
-          ...lines.map(l => `<div class="lg-leg-item"><span class="lg-leg-badge"><span class="lg-mini-line" style="--sc:${sc(l)}"></span></span><span class="lg-leg-text">${esc(l.text||"")}</span></div>`),
+          ...nums.map(i => `<div class="lg-leg-item"><button class="lg-leg-badge" data-lgfind="${esc(i.id)}" aria-label="Auf der Karte zeigen"><span class="lg-leg-num">${esc(i.num)}</span></button>${legText(esc(i.text||""))}</div>`),
+          ...forms.map(f => `<div class="lg-leg-item"><button class="lg-leg-badge" data-lgfind="${esc(f.id)}" aria-label="Auf der Karte zeigen"><span class="lg-mini-form ${f.shape||"rect"}" style="--sc:${sc(f)}"></span></button>${legText(esc(f.text||""))}</div>`),
+          ...lines.map(l => `<div class="lg-leg-item"><button class="lg-leg-badge" data-lgfind="${esc(l.id)}" aria-label="Auf der Karte zeigen"><span class="lg-mini-line" style="--sc:${sc(l)}"></span></button>${legText(esc(l.text||""), laengeStr(geoLineM(l.llpoints)))}</div>`),
         ].join("");
-        const gefItems = gefahren.map(i => `<div class="lg-leg-item"><span class="lg-leg-num tri">${esc(i.num)}</span><span class="lg-leg-text">${esc(i.text||"")}</span></div>`).join("");
+        const gefItems = gefahren.map(i => `<div class="lg-leg-item"><button class="lg-leg-badge" data-lgfind="${esc(i.id)}" aria-label="Auf der Karte zeigen"><span class="lg-leg-num tri">${esc(i.num)}</span></button>${legText(esc(i.text||""))}</div>`).join("");
         const carItems = cars.map(i => {
           const u = state.einheiten.find(x => x.id === i.unitId);
           const color = u ? `var(${(ORGS[u.org]||ORGS.SON).cssVar})` : "var(--ink3)";
-          return `<div class="lg-leg-car"><span class="lg-car" style="color:${color}">${LG_CAR_SVG}<b class="car-num">${esc(i.num||"?")}</b></span><span class="lg-leg-carname">${u ? esc(fullName(u)) : "nicht zugeordnet"}</span></div>`;
+          return `<div class="lg-leg-car"><button class="lg-car lg-find" style="color:${color}" data-lgfind="${esc(i.id)}" aria-label="Fahrzeug ${esc(i.num||"")} auf der Karte zeigen">${LG_CAR_SVG}<b class="car-num">${esc(i.num||"?")}</b></button><span class="lg-leg-carname">${u ? esc(fullName(u)) : "nicht zugeordnet"}</span></div>`;
         }).join("");
         const legendLeft = `<div class="lg-legend"><div class="lg-leg-body">
           <div class="lg-leg-sec"><h3>Marker</h3>${markerItems || `<p class="hint" style="margin:0">Noch keine Marker.</p>`}</div>
@@ -4196,6 +4215,17 @@ function wireMonitor(){
   const lgEdit = $("#monLgEdit");
   if(lgEdit) lgEdit.addEventListener("click", () => { state.view = "lagekarte"; save(); render(); });
   if(document.getElementById("lgMonMap")) lgMonMapSetup();   // Online-Karte auf dem Monitor
+  // Legenden-Badge antippen → Symbol wackelt (Punkt) bzw. blinkt (Linie/Fläche) auf der Karte
+  document.querySelectorAll(".mon-lg-panel [data-lgfind]").forEach(b => b.addEventListener("click", () => {
+    const id = b.dataset.lgfind;
+    const pt = document.querySelector(`.lg-item[data-id="${id}"], .lg-mk[data-id="${id}"]`);
+    const el = pt || document.querySelector(`[data-shape="${id}"]`);   // Linie/Fläche (SVG bzw. Karte)
+    if(!el) return;
+    const cls = pt ? "wackel" : "flash";
+    el.classList.remove(cls); void el.getBoundingClientRect();   // Reflow → Animation startet neu
+    el.classList.add(cls);
+    setTimeout(() => el.classList.remove(cls), 900);
+  }));
   const skEdit = $("#monSkEdit");
   if(skEdit) skEdit.addEventListener("click", () => { state.view = "skizze"; save(); render(); });
   // Vollbild: nur der graue Monitor (App-Menü/Topbar aus) + Browser-Vollbild.
@@ -4473,7 +4503,8 @@ function renderLagekarte(){
     }).join("");
   const numItems  = nums.map(i => legRow(numBadge("", esc(i.num)), i, "Beschreibung antippen …")).join("");
   const formItems = forms.map(f => legRow(`<span class="lg-mini-form ${f.shape||"rect"}" style="--sc:${shpCol(f)}"></span>`, f, "Form beschriften …")).join("");
-  const lineItems = lines.map(l => legRow(`<span class="lg-mini-line" style="--sc:${shpCol(l)}"></span>`, l, "Linie beschriften …")).join("");
+  const lineItems = lines.map(l => legRow(`<span class="lg-mini-line" style="--sc:${shpCol(l)}"></span>`,
+    { id:l.id, text:(l.text||"").trim(), sub: laengeStr(geoLineM(l.llpoints)) }, "Linie beschriften …")).join("");
   const secMarker = `
         <div class="lg-leg-sec"><h3>Marker</h3>
           ${(eaItems || areaItems || nums.length || forms.length || lines.length) ? eaItems + areaItems + numItems + formItems + lineItems
@@ -4873,7 +4904,9 @@ function lgDrawbar(){
   if(!(lgDraw && lgDraw.geo)){ if(bar) bar.remove(); return; }
   const need = lgDraw.type === "area" ? 3 : 2;
   if(!bar){ bar = document.createElement("div"); bar.className = "lg-drawbar"; el.appendChild(bar); }
-  bar.innerHTML = `<span>${lgDraw.type === "area" ? "Fläche" : "Linie"}: ${lgDraw.points.length} Punkt${lgDraw.points.length===1?"":"e"}${lgDraw.points.length<need?` (mind. ${need})`:""}</span>
+  // Live-Maß während des Zeichnens: Linie → Länge, Fläche → Flächeninhalt
+  const mass = lgDraw.type === "area" ? flaecheStr(geoFlaecheM2(lgDraw.points)) : laengeStr(geoLineM(lgDraw.points));
+  bar.innerHTML = `<span>${lgDraw.type === "area" ? "Fläche" : "Linie"}: ${lgDraw.points.length} Punkt${lgDraw.points.length===1?"":"e"}${lgDraw.points.length<need?` (mind. ${need})`:mass?` · ${mass}`:""}</span>
     ${lgDraw.points.length>=need?`<button data-dr="ok">Fertig</button>`:""}
     <button data-dr="x">Abbrechen</button>`;
   bar.querySelectorAll("[data-dr]").forEach(b => b.addEventListener("click", ev => {
@@ -5367,6 +5400,9 @@ function openLgShapeEdit(id){
       ${it.type === "area" && geoFlaecheM2(it.llpoints) > 0 ? `
       <div class="field"><label>Flächeninhalt</label>
         <div class="mono" style="font-size:1.1rem;font-weight:800">${flaecheStr(geoFlaecheM2(it.llpoints))}</div></div>` : ""}
+      ${it.type === "line" && geoLineM(it.llpoints) > 0 ? `
+      <div class="field"><label>Länge</label>
+        <div class="mono" style="font-size:1.1rem;font-weight:800">${laengeStr(geoLineM(it.llpoints))}</div></div>` : ""}
       ${it.type === "area" ? `
       <div class="field"><label for="sh-abschnitt">Einsatzabschnitt</label>
         <select id="sh-abschnitt">
