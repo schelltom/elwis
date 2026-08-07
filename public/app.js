@@ -681,6 +681,27 @@ function lgFoerderPumps(profile, params, startD){
   }
   return pumps;
 }
+// Materialübersicht einer berechneten Wasserförderungs-Strecke
+function lgFoerderUebersichtHtml(line){
+  const p = lgFoerderParams(line);
+  const len = geoLineM(line.llpoints);
+  const schlaeuche = Math.ceil(len / p.schlauchLen);
+  const reserve = Math.max(2, Math.ceil(schlaeuche * 0.1));
+  const verst = (line.pumps || []).length;
+  const pumpen = verst + 1;
+  const dh = line.elev ? line.elev.dhEnd : null;
+  const rows = [
+    ["Wegstrecke", laengeStr(len) + (dh != null ? ` · Höhe Δ ${dh>=0?"+":""}${Math.round(dh)} m` : "")],
+    ["Förderstrom", `${p.q} l/min`],
+    ["Pumpen gesamt", `${pumpen}  (1 Förderpumpe + ${verst} Verstärkerpumpe${verst===1?"":"n"})`],
+    ["B-Schläuche", `${schlaeuche} × ${p.schlauchLen} m  +  ${reserve} Reserve  =  ${schlaeuche+reserve}`],
+    ["Verteiler", "1 (an der Brandstelle)"],
+    ["Saugstelle", "1 Satz Saugschläuche + Saugkorb + Halteleine"],
+    ["Maschinisten", `${pumpen} (je Pumpe eine/r)`],
+  ];
+  if(line.elev && line.elev.loss > 30) rows.push(["Achtung Gefälle", "Druckbegrenzungsventil an der/den Pumpe(n) vorsehen"]);
+  return `<table class="lg-ueber"><tbody>${rows.map(([k,v]) => `<tr><th>${esc(k)}</th><td>${esc(v)}</td></tr>`).join("")}</tbody></table>`;
+}
 // Nächster Punkt auf dem Weg zu pt → Distanz d (m), planar cos-korrigiert
 function lgProjectOnPolyline(llpoints, pt){
   const kx = 111320 * Math.cos(pt.lat * Math.PI / 180), ky = 110540;
@@ -5798,6 +5819,7 @@ function openLgShapeEdit(id){
         </div>
         <div id="sh-pumps" class="mono" style="font-size:.9rem;font-weight:700;margin-top:8px">${Array.isArray(it.pumps) ? it.pumps.length + " Verstärkerpumpe" + (it.pumps.length===1?"":"n") : ""}</div>
         <button class="btn btn-primary btn-block" id="sh-pumps-btn" style="margin-top:8px"${it.elev && it.elev.profile ? "" : " disabled"}>Verstärkerpumpen berechnen</button>
+        <div id="sh-uebersicht">${Array.isArray(it.pumps) && it.pumps.length ? lgFoerderUebersichtHtml(it) : ""}</div>
         <p class="hint">Erst „Höhe & Profil ermitteln", dann berechnen. Pumpen (P1, P2 …) lassen sich auf dem Weg verschieben – die Folgepumpen rücken automatisch nach. Anhalt nach Faustformel (${p.reibSchlauch} bar/B-Schlauch bei ${p.q} l/min, 1 bar = 10 m Höhe).</p>
       </div>`; })()}` : ""}
       ${it.type === "circle" && it.radiusM > 0 ? `
@@ -5876,6 +5898,7 @@ function openLgShapeEdit(id){
     c.pumps = lgFoerderPumps(c.elev.profile, lgFoerderParams(c), 0);
     markChange();
     const disp = $("#sh-pumps"); if(disp) disp.textContent = c.pumps.length + " Verstärkerpumpe" + (c.pumps.length===1?"":"n");
+    const ueber = $("#sh-uebersicht"); if(ueber) ueber.innerHTML = lgFoerderUebersichtHtml(c);
     lgMapRenderLayers();
   });
   const abSel = $("#sh-abschnitt");

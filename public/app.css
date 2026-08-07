@@ -709,6 +709,12 @@
   /* Wasserförderung-Parameterfelder im Dialog */
   .lg-fparam{display:flex;flex-direction:column;gap:3px;font-size:.72rem;font-weight:700;color:var(--ink2)}
   .lg-fparam input{font-size:.95rem;font-weight:600;padding:6px 8px;width:100%}
+  /* Materialübersicht Wasserförderung */
+  .lg-ueber{width:100%;border-collapse:collapse;margin-top:10px;font-size:.86rem}
+  .lg-ueber th{text-align:left;font-weight:700;color:var(--ink2);padding:5px 8px 5px 0;white-space:nowrap;vertical-align:top}
+  .lg-ueber td{padding:5px 0;font-weight:600}
+  .lg-ueber tr{border-top:1px solid var(--line)}
+  .lg-ueber tr:first-child{border-top:none}
   .lg-leg-ea{display:inline-grid;place-items:center;min-width:32px;height:24px;padding:0 5px;
     border:2px solid var(--sc);color:var(--sc);border-radius:6px;font-size:.68rem;font-weight:800;white-space:nowrap}
   .lg-mini-area{width:26px;height:20px;border:2px solid var(--sc);border-radius:3px;
