@@ -619,6 +619,7 @@ function lgSamplePolyline(llpoints, n){
 async function lgLineElevFetch(llpoints){
   if(navigator.onLine === false) return { err:"Gerät ist offline." };
   if(!Array.isArray(llpoints) || llpoints.length < 2) return { err:"Keine Linie mit Koordinaten." };
+  const total = geoLineM(llpoints);
   const pts = lgSamplePolyline(llpoints, 100);
   const lat = pts.map(p => p.lat.toFixed(5)).join(",");
   const lng = pts.map(p => p.lng.toFixed(5)).join(",");
@@ -629,13 +630,71 @@ async function lgLineElevFetch(llpoints){
     if(!Array.isArray(el) || !el.length) return { err:"Keine Höhendaten erhalten." };
     let gain = 0, loss = 0;
     for(let i = 1; i < el.length; i++){ const dd = el[i] - el[i-1]; if(dd > 0) gain += dd; else loss += -dd; }
-    return { start:el[0], end:el[el.length-1], min:Math.min(...el), max:Math.max(...el), gain, loss, dhEnd: el[el.length-1] - el[0] };
+    const profile = el.map((e, i) => ({ lat:pts[i].lat, lng:pts[i].lng, d: total * i / (el.length - 1), elev:e }));
+    return { start:el[0], end:el[el.length-1], min:Math.min(...el), max:Math.max(...el), gain, loss, dhEnd: el[el.length-1] - el[0], profile };
   }catch(e){ return { err: e.message || "Abfrage fehlgeschlagen." }; }
 }
 function lgElevStr(e){
   if(!e) return "–";
   const s = v => (v >= 0 ? "+" : "") + Math.round(v);
   return `Δ ${s(e.dhEnd)} m  ·  Start ${Math.round(e.start)} m → Ziel ${Math.round(e.end)} m  ·  Anstieg ${Math.round(e.gain)} m / Gefälle ${Math.round(e.loss)} m`;
+}
+/* ---- Wasserförderung über lange Wegstrecke (Faustformel) ---- */
+// Standardwerte (Feuerwehr-Lernbar): 800 l/min, 0,2 bar je B-Schlauch (20 m), 1 bar = 10 m Höhe
+const LG_FOERDER = { pOut:8, pIn:1.5, reibSchlauch:0.2, schlauchLen:20, hoehe:0.1, q:800 };
+function lgFoerderParams(line){ return Object.assign({}, LG_FOERDER, (line && line.foerder) || {}); }
+// Punkt (lat/lng/elev) an einer Weg-Distanz d im Höhenprofil
+function lgProfileAt(profile, d){
+  if(!profile.length) return null;
+  if(d <= profile[0].d) return profile[0];
+  const last = profile[profile.length - 1];
+  if(d >= last.d) return last;
+  for(let j = 1; j < profile.length; j++){
+    if(profile[j].d >= d){
+      const a = profile[j-1], b = profile[j], f = (d - a.d) / ((b.d - a.d) || 1);
+      return { lat:a.lat+(b.lat-a.lat)*f, lng:a.lng+(b.lng-a.lng)*f, d, elev:a.elev+(b.elev-a.elev)*f };
+    }
+  }
+  return last;
+}
+// Positionen der Verstärkerpumpen ab startD: Reibung + Höhe bis nutzbare Druckdifferenz erschöpft
+function lgFoerderPumps(profile, params, startD){
+  startD = startD || 0;
+  const nutzbar = params.pOut - params.pIn;
+  const reibPerM = params.reibSchlauch / params.schlauchLen;
+  const pumps = [];
+  let prev = lgProfileAt(profile, startD), acc = 0, guard = 0;
+  for(let j = 0; j < profile.length; j++){
+    const s = profile[j];
+    if(s.d <= prev.d) continue;
+    const seg = s.d - prev.d, dEl = s.elev - prev.elev;
+    const dP = reibPerM * seg + params.hoehe * dEl;   // Reibung (+) + Höhe (bergauf +, bergab −)
+    if(acc + dP >= nutzbar && dP > 0 && guard < 200){
+      const frac = (nutzbar - acc) / dP;
+      const pd = prev.d + seg * frac, at = lgProfileAt(profile, pd);
+      pumps.push({ d:pd, lat:at.lat, lng:at.lng });
+      acc = (1 - frac) * dP; guard++;
+    }else{
+      acc += dP;
+    }
+    prev = s;
+  }
+  return pumps;
+}
+// Nächster Punkt auf dem Weg zu pt → Distanz d (m), planar cos-korrigiert
+function lgProjectOnPolyline(llpoints, pt){
+  const kx = 111320 * Math.cos(pt.lat * Math.PI / 180), ky = 110540;
+  const P = { x:pt.lng*kx, y:pt.lat*ky };
+  let best = { d:0, dist:Infinity }, cum = 0;
+  for(let i = 1; i < llpoints.length; i++){
+    const a = llpoints[i-1], b = llpoints[i];
+    const Ax = a.lng*kx, Ay = a.lat*ky, vx = b.lng*kx - Ax, vy = b.lat*ky - Ay, len2 = vx*vx + vy*vy;
+    let t = len2 ? ((P.x-Ax)*vx + (P.y-Ay)*vy) / len2 : 0; t = Math.max(0, Math.min(1, t));
+    const dist = Math.hypot(P.x - (Ax+vx*t), P.y - (Ay+vy*t)), segLen = Math.sqrt(len2);
+    if(dist < best.dist) best = { d: cum + segLen*t, dist };
+    cum += segLen;
+  }
+  return best.d;
 }
 function fmtZeit(iso){
   if(!iso) return "–";
@@ -5014,6 +5073,20 @@ function lgAddItems(layer, interactive, items){
           hm.addTo(layer);
         });
       }
+      if(i.type === "line" && Array.isArray(i.pumps) && i.pumps.length){   // Verstärkerpumpen der Wasserförderung
+        i.pumps.forEach((p, idx) => {
+          const pm = L.marker([p.lat, p.lng], { draggable:interactive, zIndexOffset:1500,
+            icon: L.divIcon({ className:"lg-divicon", iconSize:[0,0], html:`<div class="lg-mk"><span class="lg-pump">P${idx+1}</span></div>` }) });
+          if(interactive) pm.on("dragend", () => {   // verschieben → auf den Weg projizieren, Folgepumpen neu
+            const q = pm.getLatLng(), nd = lgProjectOnPolyline(i.llpoints, { lat:q.lat, lng:q.lng });
+            const at = (i.elev && i.elev.profile) ? lgProfileAt(i.elev.profile, nd) : { lat:q.lat, lng:q.lng };
+            i.pumps[idx] = { d:nd, lat:at.lat, lng:at.lng, manual:true };
+            if(i.elev && i.elev.profile) i.pumps = i.pumps.slice(0, idx+1).concat(lgFoerderPumps(i.elev.profile, lgFoerderParams(i), nd));
+            markChange(); lgMapRenderLayers();
+          });
+          pm.addTo(layer);
+        });
+      }
       if(i.type === "area" && i.abschnittId){
         const a = state.abschnitte.find(x => x.id === i.abschnittId);
         if(a){
@@ -5714,7 +5787,19 @@ function openLgShapeEdit(id){
       ${it.type === "line" && Array.isArray(it.llpoints) ? `
       <div class="field"><label>Höhenprofil</label>
         <div id="sh-elev" class="mono" style="font-size:.92rem;font-weight:700;line-height:1.5">${it.elev ? lgElevStr(it.elev) : "– noch nicht ermittelt –"}</div>
-        <button class="btn btn-ghost btn-block" id="sh-elev-btn" style="margin-top:8px">Höhe &amp; Profil ermitteln (online)</button></div>` : ""}
+        <button class="btn btn-ghost btn-block" id="sh-elev-btn" style="margin-top:8px">Höhe &amp; Profil ermitteln (online)</button></div>
+      ${(() => { const p = lgFoerderParams(it); return `
+      <div class="field"><label>Wasserförderung über lange Wegstrecke</label>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+          <label class="lg-fparam">Ausgangsdruck <input id="f-pout" type="number" step="0.5" value="${p.pOut}"> bar</label>
+          <label class="lg-fparam">Min. Eingangsdruck <input id="f-pin" type="number" step="0.5" value="${p.pIn}"> bar</label>
+          <label class="lg-fparam">Reibung je B-Schlauch <input id="f-reib" type="number" step="0.05" value="${p.reibSchlauch}"> bar</label>
+          <label class="lg-fparam">Förderstrom <input id="f-q" type="number" step="100" value="${p.q}"> l/min</label>
+        </div>
+        <div id="sh-pumps" class="mono" style="font-size:.9rem;font-weight:700;margin-top:8px">${Array.isArray(it.pumps) ? it.pumps.length + " Verstärkerpumpe" + (it.pumps.length===1?"":"n") : ""}</div>
+        <button class="btn btn-primary btn-block" id="sh-pumps-btn" style="margin-top:8px"${it.elev && it.elev.profile ? "" : " disabled"}>Verstärkerpumpen berechnen</button>
+        <p class="hint">Erst „Höhe & Profil ermitteln", dann berechnen. Pumpen (P1, P2 …) lassen sich auf dem Weg verschieben – die Folgepumpen rücken automatisch nach. Anhalt nach Faustformel (${p.reibSchlauch} bar/B-Schlauch bei ${p.q} l/min, 1 bar = 10 m Höhe).</p>
+      </div>`; })()}` : ""}
       ${it.type === "circle" && it.radiusM > 0 ? `
       <div class="field"><label>Radius · Durchmesser · Fläche</label>
         <div class="mono" style="font-size:1.1rem;font-weight:800">r ${laengeStr(it.radiusM)} · ⌀ ${laengeStr(it.radiusM*2)} · ${flaecheStr(Math.PI*it.radiusM*it.radiusM)}</div></div>` : ""}
@@ -5776,6 +5861,22 @@ function openLgShapeEdit(id){
     if(r.err){ modalInfo("Höhe: " + r.err); return; }
     cur().elev = r; markChange();
     const disp = $("#sh-elev"); if(disp) disp.textContent = lgElevStr(r);
+    const pb = $("#sh-pumps-btn"); if(pb) pb.disabled = false;
+  });
+  const pumpsBtn = $("#sh-pumps-btn");
+  if(pumpsBtn) pumpsBtn.addEventListener("click", () => {   // Verstärkerpumpen berechnen
+    const c = cur();
+    if(!(c.elev && c.elev.profile)){ modalInfo("Bitte zuerst „Höhe & Profil ermitteln“ ausführen."); return; }
+    c.foerder = {
+      pOut: Number($("#f-pout").value) || LG_FOERDER.pOut,
+      pIn:  Number($("#f-pin").value)  || LG_FOERDER.pIn,
+      reibSchlauch: Number($("#f-reib").value) || LG_FOERDER.reibSchlauch,
+      q:    Number($("#f-q").value)    || LG_FOERDER.q,
+    };
+    c.pumps = lgFoerderPumps(c.elev.profile, lgFoerderParams(c), 0);
+    markChange();
+    const disp = $("#sh-pumps"); if(disp) disp.textContent = c.pumps.length + " Verstärkerpumpe" + (c.pumps.length===1?"":"n");
+    lgMapRenderLayers();
   });
   const abSel = $("#sh-abschnitt");
   if(abSel) abSel.addEventListener("change", () => {

@@ -702,6 +702,13 @@
   .lg-windbadge .lg-wind-txt b{font-size:.9rem;font-weight:800}
   .lg-windbadge .lg-wind-txt span{font-size:.72rem;color:var(--ink2);font-weight:600}
   .lg-windbadge .lg-wind-add{font-size:.85rem;font-weight:700;color:var(--ink2)}
+  /* Verstärkerpumpe der Wasserförderung */
+  .lg-pump{display:grid;place-items:center;min-width:27px;height:27px;padding:0 5px;border-radius:50%;
+    background:var(--thw);color:#fff;font-weight:800;font-size:.78rem;border:2.5px solid #fff;
+    box-shadow:0 1px 5px rgba(0,0,0,.55);cursor:move;white-space:nowrap}
+  /* Wasserförderung-Parameterfelder im Dialog */
+  .lg-fparam{display:flex;flex-direction:column;gap:3px;font-size:.72rem;font-weight:700;color:var(--ink2)}
+  .lg-fparam input{font-size:.95rem;font-weight:600;padding:6px 8px;width:100%}
   .lg-leg-ea{display:inline-grid;place-items:center;min-width:32px;height:24px;padding:0 5px;
     border:2px solid var(--sc);color:var(--sc);border-radius:6px;font-size:.68rem;font-weight:800;white-space:nowrap}
   .lg-mini-area{width:26px;height:20px;border:2px solid var(--sc);border-radius:3px;
