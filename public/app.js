@@ -681,26 +681,62 @@ function lgFoerderPumps(profile, params, startD){
   }
   return pumps;
 }
+// Restdruck (bar) am Ende einer Stufe: von fromD bis zum Streckenende
+function lgFoerderRest(profile, params, fromD){
+  const reibPerM = params.reibSchlauch / params.schlauchLen;
+  const a = lgProfileAt(profile, fromD || 0), b = profile[profile.length - 1];
+  return params.pOut - (reibPerM * (b.d - a.d) + params.hoehe * (b.elev - a.elev));
+}
 // Materialübersicht einer berechneten Wasserförderungs-Strecke
 function lgFoerderUebersichtHtml(line){
   const p = lgFoerderParams(line);
   const len = geoLineM(line.llpoints);
   const schlaeuche = Math.ceil(len / p.schlauchLen);
   const reserve = Math.max(2, Math.ceil(schlaeuche * 0.1));
-  const verst = (line.pumps || []).length;
-  const pumpen = verst + 1;
+  const pumps = line.pumps || [];
+  const verst = pumps.length, pumpen = verst + 1;
   const dh = line.elev ? line.elev.dhEnd : null;
+  const lastD = pumps.length ? pumps[pumps.length - 1].d : 0;
+  const rest = (line.elev && line.elev.profile) ? lgFoerderRest(line.elev.profile, p, lastD) : null;
+  const trupps = Math.max(1, Math.ceil(len / 350));
+  const pumpList = pumps.length
+    ? pumps.map((pu, i) => `P${i+1} bei ${laengeStr(pu.d)} · Eingang ~${p.pIn} bar → auf ${p.pOut} bar`).join("<br>")
+    : "keine Verstärkerpumpe nötig";
+  const restStr = rest != null ? `${rest.toFixed(1)} bar${rest < 3 ? " ⚠ knapp – Strecke/Förderstrom prüfen" : ""}` : "–";
   const rows = [
-    ["Wegstrecke", laengeStr(len) + (dh != null ? ` · Höhe Δ ${dh>=0?"+":""}${Math.round(dh)} m` : "")],
-    ["Förderstrom", `${p.q} l/min`],
-    ["Pumpen gesamt", `${pumpen}  (1 Förderpumpe + ${verst} Verstärkerpumpe${verst===1?"":"n"})`],
-    ["B-Schläuche", `${schlaeuche} × ${p.schlauchLen} m  +  ${reserve} Reserve  =  ${schlaeuche+reserve}`],
+    ["Wegstrecke", esc(laengeStr(len) + (dh != null ? ` · Höhe Δ ${dh>=0?"+":""}${Math.round(dh)} m` : ""))],
+    ["Förderstrom", esc(`${p.q} l/min`)],
+    ["Pumpen gesamt", esc(`${pumpen}  (1 Förderpumpe + ${verst} Verstärkerpumpe${verst===1?"":"n"})`)],
+    ["Pumpen-Standorte", pumpList],
+    ["Restdruck am Verteiler", esc(restStr)],
+    ["B-Schläuche", esc(`${schlaeuche} × ${p.schlauchLen} m  +  ${reserve} Reserve  =  ${schlaeuche+reserve}`)],
     ["Verteiler", "1 (an der Brandstelle)"],
-    ["Saugstelle", "1 Satz Saugschläuche + Saugkorb + Halteleine"],
-    ["Maschinisten", `${pumpen} (je Pumpe eine/r)`],
+    ["Sammelstück", "1 (A-B, an der Förderpumpe)"],
+    ["Saugstelle", "1 Satz A-Saugschläuche + Saugkorb + Halte-/Ventilleine"],
+    ["Schlauchbrücken", "je Straßenquerung 1 (nach Erkundung)"],
+    ["Kupplungsschlüssel", esc(`mind. ${pumpen*2} (2 je Pumpe)`)],
+    ["Personal (Faustwert)", esc(`${pumpen} Maschinist${pumpen===1?"":"en"} + ${trupps} Schlauchtrupp${trupps===1?"":"s"} zum Verlegen`)],
   ];
   if(line.elev && line.elev.loss > 30) rows.push(["Achtung Gefälle", "Druckbegrenzungsventil an der/den Pumpe(n) vorsehen"]);
-  return `<table class="lg-ueber"><tbody>${rows.map(([k,v]) => `<tr><th>${esc(k)}</th><td>${esc(v)}</td></tr>`).join("")}</tbody></table>`;
+  return `<table class="lg-ueber"><tbody>${rows.map(([k,v]) => `<tr><th>${esc(k)}</th><td>${v}</td></tr>`).join("")}</tbody></table>`;
+}
+// Materialübersicht drucken (fürs Klemmbrett)
+function lgPrintFoerder(line){
+  const e = state.einsatz;
+  $("#printArea").innerHTML = `
+    <section class="p-doc">
+      <div class="p-head">
+        <div>
+          <div class="p-sub">${esc(state.config.ugName)} · Wasserförderung über lange Wegstrecke</div>
+          <h1>${esc(e.stichwort) || "Wasserförderung"}</h1>
+          <div>${esc(e.ort)}${line.text ? " · " + esc(line.text) : ""}</div>
+        </div>
+        <div class="p-mark">ELWIS</div>
+      </div>
+      ${lgFoerderUebersichtHtml(line)}
+      <p style="font-size:8pt;color:#666;margin-top:16px">Anhalt nach Faustformel – keine hydraulische Berechnung. Gedruckt am ${new Date().toLocaleString("de-DE")} · ELWIS · ${esc(state.config.ugName)}</p>
+    </section>`;
+  window.print();
 }
 // Nächster Punkt auf dem Weg zu pt → Distanz d (m), planar cos-korrigiert
 function lgProjectOnPolyline(llpoints, pt){
@@ -4141,7 +4177,7 @@ function renderMonitor(){
         const markerItems = [
           ...nums.map(i => `<div class="lg-leg-item"><button class="lg-leg-badge" data-lgfind="${esc(i.id)}" aria-label="Auf der Karte zeigen"><span class="lg-leg-num">${esc(i.num)}</span></button>${legText(esc(i.text||""))}</div>`),
           ...forms.map(f => `<div class="lg-leg-item"><button class="lg-leg-badge" data-lgfind="${esc(f.id)}" aria-label="Auf der Karte zeigen"><span class="lg-mini-form ${f.shape||"rect"}" style="--sc:${sc(f)}"></span></button>${legText(esc(f.text||""))}</div>`),
-          ...lines.map(l => `<div class="lg-leg-item"><button class="lg-leg-badge" data-lgfind="${esc(l.id)}" aria-label="Auf der Karte zeigen"><span class="lg-mini-line" style="--sc:${sc(l)}"></span></button>${legText(esc(l.text||""), laengeStr(geoLineM(l.llpoints)))}</div>`),
+          ...lines.map(l => `<div class="lg-leg-item"><button class="lg-leg-badge" data-lgfind="${esc(l.id)}" aria-label="Auf der Karte zeigen"><span class="lg-mini-line" style="--sc:${sc(l)}"></span></button>${legText(esc(l.text||""), laengeStr(geoLineM(l.llpoints)) + (l.pumps && l.pumps.length ? " · " + (l.pumps.length+1) + " Pumpen" : ""))}</div>`),
           ...arrows.map(a => `<div class="lg-leg-item"><button class="lg-leg-badge" data-lgfind="${esc(a.id)}" aria-label="Auf der Karte zeigen">${lgArrowBadge(sc(a))}</button>${legText(esc(a.text||""), laengeStr(geoLineM(a.llpoints)))}</div>`),
           ...circles.map(c => `<div class="lg-leg-item"><button class="lg-leg-badge" data-lgfind="${esc(c.id)}" aria-label="Auf der Karte zeigen">${lgCircleBadge(sc(c))}</button>${legText(esc(c.text||""), c.radiusM > 0 ? "r " + laengeStr(c.radiusM) : "")}</div>`),
           ...sectors.map(s => `<div class="lg-leg-item"><button class="lg-leg-badge" data-lgfind="${esc(s.id)}" aria-label="Auf der Karte zeigen">${lgSectorBadge(sc(s))}</button>${legText(esc(s.text||""), s.reachM > 0 ? laengeStr(s.reachM) + " · " + windHimmel(s.bearingDeg) : "")}</div>`),
@@ -4377,16 +4413,7 @@ function wireMonitor(){
   if(lgEdit) lgEdit.addEventListener("click", () => { state.view = "lagekarte"; save(); render(); });
   if(document.getElementById("lgMonMap")) lgMonMapSetup();   // Online-Karte auf dem Monitor
   // Legenden-Badge antippen → Symbol wackelt (Punkt) bzw. blinkt (Linie/Fläche) auf der Karte
-  document.querySelectorAll(".mon-lg-panel [data-lgfind]").forEach(b => b.addEventListener("click", () => {
-    const id = b.dataset.lgfind;
-    const pt = document.querySelector(`.lg-item[data-id="${id}"], .lg-mk[data-id="${id}"]`);
-    const el = pt || document.querySelector(`[data-shape="${id}"]`);   // Linie/Fläche (SVG bzw. Karte)
-    if(!el) return;
-    const cls = pt ? "wackel" : "flash";
-    el.classList.remove(cls); void el.getBoundingClientRect();   // Reflow → Animation startet neu
-    el.classList.add(cls);
-    setTimeout(() => el.classList.remove(cls), 900);
-  }));
+  document.querySelectorAll(".mon-lg-panel [data-lgfind]").forEach(b => b.addEventListener("click", () => lgRevealWackel(b.dataset.lgfind, lgMonObj)));
   const skEdit = $("#monSkEdit");
   if(skEdit) skEdit.addEventListener("click", () => { state.view = "skizze"; save(); render(); });
   // Vollbild: nur der graue Monitor (App-Menü/Topbar aus) + Browser-Vollbild.
@@ -4679,7 +4706,7 @@ function renderLagekarte(){
   const numItems  = nums.map(i => legRow(numBadge("", esc(i.num)), i, "Beschreibung antippen …")).join("");
   const formItems = forms.map(f => legRow(`<span class="lg-mini-form ${f.shape||"rect"}" style="--sc:${shpCol(f)}"></span>`, f, "Form beschriften …")).join("");
   const lineItems = lines.map(l => legRow(`<span class="lg-mini-line" style="--sc:${shpCol(l)}"></span>`,
-    { id:l.id, text:(l.text||"").trim(), sub: laengeStr(geoLineM(l.llpoints)) }, "Linie beschriften …")).join("");
+    { id:l.id, text:(l.text||"").trim(), sub: laengeStr(geoLineM(l.llpoints)) + (l.pumps && l.pumps.length ? " · " + (l.pumps.length+1) + " Pumpen" : "") }, "Linie beschriften …")).join("");
   const arrows  = state.lage.items.filter(i => i.type === "arrow");
   const circles = state.lage.items.filter(i => i.type === "circle");
   const arrowItems = arrows.map(a => legRow(lgArrowBadge(shpCol(a)),
@@ -4962,6 +4989,32 @@ function lgSetLegLabel(id, text){
     btn.textContent = (text || "").trim();
     if(qm){ btn.append(" "); btn.append(qm); }
   });
+}
+/* Repräsentative Geo-Position eines Items (Marker/Kreis/Sektor: ll; Linie/Fläche/Pfeil: Mittel) */
+function lgItemLatLng(i){
+  if(Array.isArray(i.ll)) return i.ll;
+  if(Array.isArray(i.llpoints) && i.llpoints.length){
+    const n = i.llpoints.length;
+    return [ i.llpoints.reduce((s,p) => s+p.lat, 0)/n, i.llpoints.reduce((s,p) => s+p.lng, 0)/n ];
+  }
+  return null;
+}
+/* Legenden-Klick: Karte zum Symbol schwenken (falls außerhalb) und es wackeln/blinken lassen */
+function lgRevealWackel(id, map){
+  const i = state.lage.items.find(x => x.id === id);
+  const ll = i ? lgItemLatLng(i) : null;
+  let panned = false;
+  if(map && ll && !map.getBounds().contains(ll)){ map.panTo(ll); panned = true; }
+  const doWackel = () => {
+    const pt = document.querySelector(`.lg-item[data-id="${id}"], .lg-mk[data-id="${id}"]`);
+    const el = pt || document.querySelector(`[data-shape="${id}"]`);
+    if(!el) return;
+    if(!map) el.scrollIntoView({ block:"center", inline:"center", behavior:"smooth" });   // Raster/Bild: ins Sichtfeld scrollen
+    const cls = pt ? "wackel" : "flash";
+    el.classList.remove(cls); void el.getBoundingClientRect(); el.classList.add(cls);
+    setTimeout(() => el.classList.remove(cls), 900);
+  };
+  panned ? setTimeout(doWackel, 320) : doWackel();
 }
 /* Adresse → Koordinaten (OpenStreetMap/Nominatim, nur online) */
 function lgGeocode(q, cb){
@@ -5433,17 +5486,7 @@ function wireLagekarte(){
   });
   document.querySelectorAll("[data-lgedit]").forEach(b =>
     b.addEventListener("click", () => openLgEdit(b.dataset.lgedit)));
-  document.querySelectorAll("[data-lgfind]").forEach(b => b.addEventListener("click", () => {
-    const id = b.dataset.lgfind;
-    const pt = document.querySelector(`.lg-item[data-id="${id}"], .lg-mk[data-id="${id}"]`);
-    const sh = pt ? null : document.querySelector(`[data-shape="${id}"]`);   // Linie/Fläche (SVG bzw. Karte)
-    const el = pt || sh;
-    if(!el) return;
-    const cls = pt ? "wackel" : "flash";   // Punkt-Marker wackeln, Linien blinken
-    el.classList.remove(cls); void el.getBoundingClientRect();   // Reflow → Animation startet neu
-    el.classList.add(cls);
-    setTimeout(() => el.classList.remove(cls), 900);
-  }));
+  document.querySelectorAll("[data-lgfind]").forEach(b => b.addEventListener("click", () => lgRevealWackel(b.dataset.lgfind, lgMapObj)));
   const lgPr = $("#lgPrint"); if(lgPr) lgPr.addEventListener("click", doPrintLagekarte);
   document.querySelectorAll("select[data-lgcar]").forEach(sel =>
     sel.addEventListener("change", () => {
@@ -5820,6 +5863,7 @@ function openLgShapeEdit(id){
         <div id="sh-pumps" class="mono" style="font-size:.9rem;font-weight:700;margin-top:8px">${Array.isArray(it.pumps) ? it.pumps.length + " Verstärkerpumpe" + (it.pumps.length===1?"":"n") : ""}</div>
         <button class="btn btn-primary btn-block" id="sh-pumps-btn" style="margin-top:8px"${it.elev && it.elev.profile ? "" : " disabled"}>Verstärkerpumpen berechnen</button>
         <div id="sh-uebersicht">${Array.isArray(it.pumps) && it.pumps.length ? lgFoerderUebersichtHtml(it) : ""}</div>
+        <button class="btn btn-ghost btn-block" id="sh-print-btn" style="margin-top:8px${Array.isArray(it.pumps) && it.pumps.length ? "" : ";display:none"}">Übersicht drucken</button>
         <p class="hint">Erst „Höhe & Profil ermitteln", dann berechnen. Pumpen (P1, P2 …) lassen sich auf dem Weg verschieben – die Folgepumpen rücken automatisch nach. Anhalt nach Faustformel (${p.reibSchlauch} bar/B-Schlauch bei ${p.q} l/min, 1 bar = 10 m Höhe).</p>
       </div>`; })()}` : ""}
       ${it.type === "circle" && it.radiusM > 0 ? `
@@ -5899,8 +5943,11 @@ function openLgShapeEdit(id){
     markChange();
     const disp = $("#sh-pumps"); if(disp) disp.textContent = c.pumps.length + " Verstärkerpumpe" + (c.pumps.length===1?"":"n");
     const ueber = $("#sh-uebersicht"); if(ueber) ueber.innerHTML = lgFoerderUebersichtHtml(c);
+    const pbtn = $("#sh-print-btn"); if(pbtn) pbtn.style.display = "";
     lgMapRenderLayers();
   });
+  const printBtn = $("#sh-print-btn");
+  if(printBtn) printBtn.addEventListener("click", () => lgPrintFoerder(cur()));
   const abSel = $("#sh-abschnitt");
   if(abSel) abSel.addEventListener("change", () => {
     cur().abschnittId = abSel.value || "";
