@@ -562,6 +562,43 @@ function laengeStr(m){
   if(m >= 1000) return (m / 1000).toFixed(2).replace(".", ",") + " km";
   return Math.round(m) + " m";
 }
+/* ---- Wind & Gefahrenbereich (Keil) ---- */
+// Beaufort aus km/h (untere Grenzen Bft 1..12)
+function windBft(kmh){
+  const g = [1,6,12,20,29,39,50,62,75,89,103,118];
+  let b = 0; for(const x of g){ if(kmh >= x) b++; else break; } return b;
+}
+// 16-teilige Windrose, deg = Richtung, AUS der der Wind weht
+function windHimmel(deg){
+  const r = ["N","NNO","NO","ONO","O","OSO","SO","SSO","S","SSW","SW","WSW","W","WNW","NW","NNW"];
+  return r[Math.round((((deg % 360) + 360) % 360) / 22.5) % 16];
+}
+// Zielpunkt: geographischer Kurs (0=N, im Uhrzeigersinn), Distanz m (Flach-Näherung, Einsatzstellen-Maßstab)
+function geoDestPoint(lat, lng, bearingDeg, distM){
+  const br = bearingDeg * Math.PI / 180;
+  return [ lat + (distM * Math.cos(br)) / 111320,
+           lng + (distM * Math.sin(br)) / (111320 * Math.cos(lat * Math.PI / 180)) ];
+}
+// Geographischer Kurs von a nach b (0=N, im Uhrzeigersinn)
+function geoBearing(a, b){
+  const dLat = b.lat - a.lat;
+  const dLng = (b.lng - a.lng) * Math.cos((a.lat + b.lat) / 2 * Math.PI / 180);
+  return (Math.atan2(dLng, dLat) * 180 / Math.PI + 360) % 360;
+}
+// Polygon eines Gefahrenbereich-Keils: Apex + Bogen nach Lee
+function lgSectorLatLngs(ll, bearingDeg, reachM, halfAngleDeg){
+  const pts = [[ll[0], ll[1]]];
+  const steps = 16;
+  for(let k = 0; k <= steps; k++){
+    const b = bearingDeg - halfAngleDeg + (2 * halfAngleDeg) * k / steps;
+    pts.push(geoDestPoint(ll[0], ll[1], b, reachM));
+  }
+  return pts;
+}
+// Windpfeil (zeigt nach Norden/oben, wird per Rotation in die Zugrichtung gedreht)
+const LG_WIND_ARROW_SVG = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2 L18.5 20 L12 15.5 L5.5 20 Z" fill="currentColor"/></svg>`;
+// Kleines Keil-Symbol für die Legende
+function lgSectorBadge(c){ return `<svg viewBox="0 0 26 20" style="width:26px;height:20px" aria-hidden="true"><path d="M3 10 L25 2 L25 18 Z" fill="${c}" fill-opacity="0.3" stroke="${c}" stroke-width="2" stroke-linejoin="round"/></svg>`; }
 function fmtZeit(iso){
   if(!iso) return "–";
   const d = new Date(iso);
@@ -3978,8 +4015,9 @@ function renderMonitor(){
         const lines = state.lage.items.filter(i => i.type === "line");
         const arrows = state.lage.items.filter(i => i.type === "arrow");
         const circles = state.lage.items.filter(i => i.type === "circle");
+        const sectors = state.lage.items.filter(i => i.type === "sector");
         const cars = state.lage.items.filter(i => i.type === "car").sort((a,b) => (a.num||0)-(b.num||0));
-        const sc = i => `var(--${LG_SHAPE_COLORS.includes(i.color) ? i.color : "fw"})`;
+        const sc = i => lgColorCss(i.color);
         // Legende wie im Präsentationsmodus: Badge antippen → Symbol wackelt/blinkt auf der Karte
         const legText = (haupt, sub) => `<span class="lg-leg-text">${haupt}${sub ? `${haupt ? " " : ""}<span class="lg-leg-qm">${esc(sub)}</span>` : ""}</span>`;
         const markerItems = [
@@ -3988,6 +4026,7 @@ function renderMonitor(){
           ...lines.map(l => `<div class="lg-leg-item"><button class="lg-leg-badge" data-lgfind="${esc(l.id)}" aria-label="Auf der Karte zeigen"><span class="lg-mini-line" style="--sc:${sc(l)}"></span></button>${legText(esc(l.text||""), laengeStr(geoLineM(l.llpoints)))}</div>`),
           ...arrows.map(a => `<div class="lg-leg-item"><button class="lg-leg-badge" data-lgfind="${esc(a.id)}" aria-label="Auf der Karte zeigen">${lgArrowBadge(sc(a))}</button>${legText(esc(a.text||""), laengeStr(geoLineM(a.llpoints)))}</div>`),
           ...circles.map(c => `<div class="lg-leg-item"><button class="lg-leg-badge" data-lgfind="${esc(c.id)}" aria-label="Auf der Karte zeigen">${lgCircleBadge(sc(c))}</button>${legText(esc(c.text||""), c.radiusM > 0 ? "r " + laengeStr(c.radiusM) : "")}</div>`),
+          ...sectors.map(s => `<div class="lg-leg-item"><button class="lg-leg-badge" data-lgfind="${esc(s.id)}" aria-label="Auf der Karte zeigen">${lgSectorBadge(sc(s))}</button>${legText(esc(s.text||""), s.reachM > 0 ? laengeStr(s.reachM) + " · " + windHimmel(s.bearingDeg) : "")}</div>`),
         ].join("");
         const gefItems = gefahren.map(i => `<div class="lg-leg-item"><button class="lg-leg-badge" data-lgfind="${esc(i.id)}" aria-label="Auf der Karte zeigen"><span class="lg-leg-num tri">${esc(i.num)}</span></button>${legText(esc(i.text||""))}</div>`).join("");
         const carItems = cars.map(i => {
@@ -4304,6 +4343,7 @@ const LG_TOOLS = [
   { t:"area",    n:"Fläche",          preview:'<svg viewBox="0 0 40 30" style="width:38px;height:28px"><polygon points="5,25 12,6 33,8 36,22 20,27" style="fill:var(--brk);fill-opacity:.3;stroke:var(--brk);stroke-width:2.5;stroke-linejoin:round"/></svg>' },
   { t:"arrow",   n:"Pfeil",           preview:'<svg viewBox="0 0 40 30" style="width:38px;height:28px"><line x1="5" y1="15" x2="27" y2="15" stroke="var(--thw)" stroke-width="3" stroke-linecap="round"/><path d="M25 8 L37 15 L25 22 Z" fill="var(--thw)"/></svg>' },
   { t:"circle",  n:"Radius-Kreis",    preview:'<svg viewBox="0 0 40 30" style="width:34px;height:26px"><circle cx="20" cy="15" r="11" fill="none" stroke="var(--fw)" stroke-width="3"/><circle cx="20" cy="15" r="2" fill="var(--fw)"/></svg>' },
+  { t:"sector",  n:"Gefahrenbereich", preview:'<svg viewBox="0 0 40 30" style="width:38px;height:28px"><path d="M6 15 L36 5 L36 25 Z" fill="var(--fw)" fill-opacity="0.3" stroke="var(--fw)" stroke-width="2.5" stroke-linejoin="round"/></svg>' },
   { t:"symsearch", n:"Taktische Zeichen", preview:'<svg viewBox="0 0 24 24" style="width:30px;height:30px;stroke:var(--ink2);fill:none;stroke-width:2;stroke-linecap:round"><circle cx="10.5" cy="10.5" r="6"/><path d="M15 15l5.5 5.5"/></svg>' },
 ];
 const LG_SHAPE_COLORS = ["fw","thw","brk","pol","orange","violett","tuerkis"];
@@ -4356,7 +4396,7 @@ function lgShapesSvg(items, draw){
   const shape = i => {
     if(!Array.isArray(i.points)) return "";   // Geo-Flächen (Kartenmodus) hier überspringen
     const pts = i.points.map(p => `${p.x},${p.y}`).join(" ");
-    const col = `var(--${LG_SHAPE_COLORS.includes(i.color) ? i.color : "fw"})`;
+    const col = lgColorCss(i.color);
     return i.type === "area"
       ? `<polygon data-shape="${esc(i.id)}" points="${pts}" style="fill:${col};fill-opacity:.22;stroke:${col}"></polygon>`
       : `<polyline data-shape="${esc(i.id)}" points="${pts}" style="stroke:${col}"></polyline>`;
@@ -4376,8 +4416,7 @@ function lgShapesSvg(items, draw){
     if(!a) return "";
     const cx = i.labelPos ? i.labelPos.x : i.points.reduce((s,p) => s + p.x, 0) / i.points.length;
     const cy = i.labelPos ? i.labelPos.y : i.points.reduce((s,p) => s + p.y, 0) / i.points.length;
-    const col = LG_SHAPE_COLORS.includes(i.color) ? i.color : "fw";
-    return `<span class="lg-ealbl" data-ealbl="${esc(i.id)}" style="left:${cx}%;top:${cy}%;color:var(--${col})">${esc(abKuerzel(i.abschnittId))}</span>`;
+    return `<span class="lg-ealbl" data-ealbl="${esc(i.id)}" style="left:${cx}%;top:${cy}%;color:${lgColorCss(i.color)}">${esc(abKuerzel(i.abschnittId))}</span>`;
   }).join("");
   return svg + labels;
 }
@@ -4414,7 +4453,7 @@ function lgMarkerInner(i){
   else if(i.type === "patient"){ sym = `<span class="lg-cross">+</span>`; }
   else if(i.type === "num"){ sym = `<span class="lg-num">${esc(i.num)}</span>`; }
   else if(i.type === "form"){
-    const col = `var(--${LG_SHAPE_COLORS.includes(i.color) ? i.color : "fw"})`;
+    const col = lgColorCss(i.color);
     sym = `<span class="lg-form ${i.shape || "rect"}" style="--sc:${col}">${esc(i.text || "")}</span>`;
   }
   else if(i.type === "sym"){
@@ -4446,7 +4485,7 @@ function lgCarOptions(currentUnitId){
 }
 function renderLagekarte(){
   // Pfeil + Radius-Kreis nur im Karten-Modus (Richtung/Radius sind nur georeferenziert sinnvoll)
-  const tools = LG_TOOLS.filter(t => state.lage.mode === "karte" || (t.t !== "arrow" && t.t !== "circle")).map(t => `
+  const tools = LG_TOOLS.filter(t => state.lage.mode === "karte" || (t.t !== "arrow" && t.t !== "circle" && t.t !== "sector")).map(t => `
     <button class="lg-tool" data-lgtool="${t.t}" aria-pressed="${lgTool===t.t || lgSubmenu===t.t}">
       ${t.preview}<span>${t.n}</span>
     </button>`).join("");
@@ -4466,6 +4505,7 @@ function renderLagekarte(){
       ? `${t.n}: Punkte nacheinander auf die Karte tippen`
       : lgTool === "arrow"  ? "Pfeil: Start antippen, dann Ziel"
       : lgTool === "circle" ? "Radius-Kreis: Mittelpunkt antippen, dann einen Randpunkt"
+      : lgTool === "sector" ? "Gefahrenbereich: auf Unfallstelle/Quelle tippen – Keil richtet sich nach Lee aus"
       : `Auf die Karte tippen, um „${t.n}“ zu platzieren`;
   }
   const nums = state.lage.items.filter(i => i.type === "num").sort((a,b) => a.num - b.num);
@@ -4473,7 +4513,7 @@ function renderLagekarte(){
   const forms = state.lage.items.filter(i => i.type === "form");
   const lines = state.lage.items.filter(i => i.type === "line");
   const cars = state.lage.items.filter(i => i.type === "car").sort((a,b) => (a.num||0)-(b.num||0));
-  const shpCol = i => `var(--${LG_SHAPE_COLORS.includes(i.color) ? i.color : "fw"})`;
+  const shpCol = i => lgColorCss(i.color);
   const carRows = cars.map(i => {
     const u = state.einheiten.find(x => x.id === i.unitId);
     const color = u ? `var(${(ORGS[u.org]||ORGS.SON).cssVar})` : "var(--ink3)";
@@ -4528,9 +4568,12 @@ function renderLagekarte(){
     { id:a.id, text:(a.text||"").trim(), sub: laengeStr(geoLineM(a.llpoints)) }, "Pfeil beschriften …")).join("");
   const circleItems = circles.map(c => legRow(lgCircleBadge(shpCol(c)),
     { id:c.id, text:(c.text||"").trim(), sub: c.radiusM > 0 ? "r " + laengeStr(c.radiusM) : "" }, "Kreis beschriften …")).join("");
+  const sectors = state.lage.items.filter(i => i.type === "sector");
+  const sectorItems = sectors.map(s => legRow(lgSectorBadge(shpCol(s)),
+    { id:s.id, text:(s.text||"").trim(), sub: s.reachM > 0 ? laengeStr(s.reachM) + " · " + windHimmel(s.bearingDeg) : "" }, "Gefahrenbereich beschriften …")).join("");
   const secMarker = `
         <div class="lg-leg-sec"><h3>Marker</h3>
-          ${(eaItems || areaItems || nums.length || forms.length || lines.length || arrows.length || circles.length) ? eaItems + areaItems + numItems + formItems + lineItems + arrowItems + circleItems
+          ${(eaItems || areaItems || nums.length || forms.length || lines.length || arrows.length || circles.length || sectors.length) ? eaItems + areaItems + numItems + formItems + lineItems + arrowItems + circleItems + sectorItems
           : `<p class="hint" style="margin:0">Noch keine Marker. Werkzeug wählen und auf die Karte tippen.</p>`}
         </div>`;
   const secGefahr = gefahren.length ? `
@@ -4765,8 +4808,13 @@ function lgMapTeardown(){
   lgMapObj = null; lgMapLayer = null; lgMonObj = null;
 }
 function lgAccentHex(name){
+  if(typeof name === "string" && name[0] === "#") return name;   // freie Farbe (Hex) direkt
   const v = getComputedStyle(document.documentElement).getPropertyValue("--" + (LG_SHAPE_COLORS.includes(name)?name:"fw")).trim();
   return v || "#C4232B";
+}
+// Farbe einer Form als CSS-Wert: bekannter Key → var(--key), freie Farbe → Hex direkt
+function lgColorCss(c){
+  return LG_SHAPE_COLORS.includes(c) ? `var(--${c})` : (typeof c === "string" && c[0] === "#" ? c : "var(--fw)");
 }
 /* Kartengrundlage (OpenData) je Schlüssel als frische Leaflet-Ebene */
 function lgBaseLayer(key){
@@ -4875,6 +4923,31 @@ function lgAddItems(layer, interactive, items){
       }
       continue;
     }
+    if(i.type === "sector" && Array.isArray(i.ll) && i.reachM > 0){
+      const col = lgAccentHex(i.color);
+      const shp = L.polygon(lgSectorLatLngs(i.ll, i.bearingDeg, i.reachM, i.halfAngleDeg),
+        { color:col, weight:2.5, fillOpacity:0.18, dashArray:"6 5", interactive });
+      if(interactive) shp.on("click", ev => { L.DomEvent.stop(ev); openLgShapeEdit(i.id); });
+      shp.addTo(layer);
+      const pe = shp.getElement && shp.getElement();
+      if(pe){ pe.setAttribute("data-shape", i.id); pe.style.pointerEvents = "stroke"; }
+      if(interactive){
+        // Apex-Griff → Gefahrenbereich verschieben
+        const apex = L.marker(i.ll, { draggable:true, icon:lgDragHandleIcon(), zIndexOffset:1000 });
+        apex.on("drag", () => { const p = apex.getLatLng(); shp.setLatLngs(lgSectorLatLngs([p.lat, p.lng], i.bearingDeg, i.reachM, i.halfAngleDeg)); });
+        apex.on("dragend", () => { const p = apex.getLatLng(); i.ll = [p.lat, p.lng]; markChange(); lgMapRenderLayers(); });
+        apex.addTo(layer);
+        // Fern-Griff → Richtung + Reichweite, mit Live-Maß
+        const far = L.marker(geoDestPoint(i.ll[0], i.ll[1], i.bearingDeg, i.reachM), { draggable:true, icon:lgDragHandleIcon(), zIndexOffset:1000 });
+        const calc = () => { const f = far.getLatLng(), a = { lat:i.ll[0], lng:i.ll[1] }; return { br:geoBearing(a, { lat:f.lat, lng:f.lng }), r:geoLineM([a, { lat:f.lat, lng:f.lng }]) }; };
+        far.bindTooltip("", { direction:"top", offset:[0,-8], className:"lg-measure" });
+        far.on("dragstart", () => far.setTooltipContent(laengeStr(calc().r)).openTooltip());
+        far.on("drag", () => { const c = calc(); shp.setLatLngs(lgSectorLatLngs(i.ll, c.br, c.r, i.halfAngleDeg)); far.setTooltipContent(laengeStr(c.r)); });
+        far.on("dragend", () => { const c = calc(); i.bearingDeg = c.br; i.reachM = c.r; far.closeTooltip(); markChange(); lgSetLegMeasure(i.id, laengeStr(c.r)); lgMapRenderLayers(); });
+        far.addTo(layer);
+      }
+      continue;
+    }
     if((i.type === "line" || i.type === "area" || i.type === "arrow") && Array.isArray(i.llpoints)){
       const col = lgAccentHex(i.color);
       const ll = i.llpoints.map(p => [p.lat, p.lng]);
@@ -4907,9 +4980,8 @@ function lgAddItems(layer, interactive, items){
         const a = state.abschnitte.find(x => x.id === i.abschnittId);
         if(a){
           const pos = i.labelLL ? [i.labelLL.lat, i.labelLL.lng] : shp.getBounds().getCenter();
-          const lcol = LG_SHAPE_COLORS.includes(i.color) ? i.color : "fw";
           const lm = L.marker(pos, { draggable:interactive, interactive,
-            icon: lgDivIcon(`<span class="lg-ealbl" style="position:static;transform:none;color:var(--${lcol})">${esc(abKuerzel(i.abschnittId))}</span>`) });
+            icon: lgDivIcon(`<span class="lg-ealbl" style="position:static;transform:none;color:${lgColorCss(i.color)}">${esc(abKuerzel(i.abschnittId))}</span>`) });
           if(interactive) lm.on("dragend", () => { const p = lm.getLatLng(); i.labelLL = { lat:p.lat, lng:p.lng }; markChange(); });
           lm.addTo(layer);
         }
@@ -4917,7 +4989,7 @@ function lgAddItems(layer, interactive, items){
     }
   }
   for(const i of items){
-    if(!i.ll || i.type === "circle") continue;   // Kreis nutzt i.ll als Mittelpunkt, ist aber kein Marker
+    if(!i.ll || i.type === "circle" || i.type === "sector") continue;   // Kreis/Sektor nutzen i.ll als Mittel-/Apexpunkt, sind aber keine Marker
     const m = L.marker(i.ll, { draggable:interactive, interactive, icon: lgDivIcon(lgMarkerInner(i), i.id) });
     if(interactive){
       m.on("click", () => openLgEdit(i.id));
@@ -4943,6 +5015,7 @@ function lgMapSetup(){
   lgMapObj.on("click", e => lgMapClick(e.latlng));
   setTimeout(() => { if(lgMapObj) lgMapObj.invalidateSize(); }, 60);
   lgMapRenderLayers();
+  lgWindBadge("lgMap", true);   // Wind-Fahne (antippbar)
   // Beim ersten Öffnen automatisch auf die Einsatzadresse zoomen (Luftbild)
   if(!state.lage.mapView && lgEinsatzAdresse()){
     lgGeocode(lgEinsatzAdresse(), ll => {
@@ -4960,6 +5033,7 @@ function lgMonMapSetup(){
   lgMonObj = L.map(el, { zoomControl:true, attributionControl:true }).setView(v.center, v.zoom);
   lgBaseLayer(state.lage.mapLayer).addTo(lgMonObj);
   lgAddItems(L.layerGroup().addTo(lgMonObj), false);
+  lgWindBadge("lgMonMap", false);   // Wind-Fahne (Monitor, nur Anzeige)
   lgMonObj.on("moveend zoomend", () => {   // Ausschnitt merken (übersteht die Rotation)
     if(!lgMonObj) return;
     const c = lgMonObj.getCenter();
@@ -4967,6 +5041,85 @@ function lgMonMapSetup(){
     save();
   });
   setTimeout(() => { if(lgMonObj) lgMonObj.invalidateSize(); }, 60);
+}
+/* Wind-Fahne (Richtung + Stärke) auf eine Karte legen; interactive → antippbar zum Bearbeiten */
+function lgWindBadge(mapElId, interactive){
+  const el = document.getElementById(mapElId);
+  if(!el) return;
+  const old = el.querySelector(".lg-windbadge"); if(old) old.remove();
+  const w = state.lage.wind;
+  if(!w && !interactive) return;   // Monitor ohne Wind: nichts anzeigen
+  const badge = document.createElement("div");
+  badge.className = "lg-windbadge" + (interactive ? " clickable" : "");
+  if(!w){
+    badge.innerHTML = `<span class="lg-wind-add">＋ Wind</span>`;
+  }else{
+    const travel = (w.dir + 180) % 360;   // Pfeil zeigt in die Zugrichtung (nach Lee)
+    badge.innerHTML =
+      `<span class="lg-wind-arrow" style="transform:rotate(${travel}deg)">${LG_WIND_ARROW_SVG}</span>` +
+      `<span class="lg-wind-txt"><b>aus ${windHimmel(w.dir)}</b><span>${w.kmh} km/h · ${windBft(w.kmh)} Bft</span></span>`;
+  }
+  ["mousedown","dblclick","click"].forEach(ev => badge.addEventListener(ev, e => e.stopPropagation()));
+  if(interactive) badge.addEventListener("click", () => openLgWindEdit());
+  el.appendChild(badge);
+}
+/* Winddaten vom Open-Meteo-Dienst (kostenlos, ohne Key) für den aktuellen Kartenausschnitt */
+async function lgWindFetch(){
+  if(navigator.onLine === false) return { err:"Gerät ist offline." };
+  const c = lgMapObj ? lgMapObj.getCenter()
+    : (state.lage.mapView ? { lat:state.lage.mapView.center[0], lng:state.lage.mapView.center[1] } : null);
+  if(!c) return { err:"Kein Kartenausschnitt." };
+  try{
+    const r = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${(+c.lat).toFixed(4)}&longitude=${(+c.lng).toFixed(4)}&current=wind_speed_10m,wind_direction_10m&wind_speed_unit=kmh`);
+    const d = await r.json();
+    const cur = d && d.current;
+    if(!cur || cur.wind_direction_10m == null) return { err:"Keine Winddaten erhalten." };
+    return { dir:Math.round(cur.wind_direction_10m), kmh:Math.round(cur.wind_speed_10m) };
+  }catch(e){ return { err:e.message || "Abfrage fehlgeschlagen." }; }
+}
+/* Wind bearbeiten: Richtung (8 Himmelsrichtungen) + Stärke, optional aus Open-Meteo */
+function openLgWindEdit(){
+  const w = state.lage.wind || { dir:270, kmh:10 };
+  const dirs = [0,45,90,135,180,225,270,315];
+  const opts = dirs.map(d => `<option value="${d}" ${w.dir===d?"selected":""}>${windHimmel(d)} (${d}°)</option>`).join("");
+  $("#sheetHost").innerHTML = `
+  <div class="sheet-backdrop" data-close="1"></div>
+  <div class="sheet" role="dialog" aria-modal="true" aria-label="Wind" style="max-height:60vh">
+    <div class="sheet-head"><h2>Wind</h2><button class="sheet-close" data-close="1" aria-label="Schließen">×</button></div>
+    <div class="sheet-body">
+      <div class="field"><label for="wind-dir">Windrichtung <span style="text-transform:none;font-weight:500">(woher der Wind weht)</span></label>
+        <select id="wind-dir">${opts}</select></div>
+      <div class="field"><label for="wind-kmh">Windstärke</label>
+        <div style="display:flex;align-items:center;gap:10px">
+          <input id="wind-kmh" type="number" min="0" max="200" value="${w.kmh}" style="max-width:120px"><span class="mono">km/h</span>
+          <span id="wind-bft" class="lg-leg-qm"></span></div></div>
+      <button class="btn btn-ghost btn-block" id="wind-fetch">Aus Open-Meteo holen (online)</button>
+      <p class="hint">Der Gefahrenbereich-Keil richtet sich nach Lee (windabgewandt) aus. „Aus Open-Meteo" nutzt den aktuellen Kartenausschnitt.</p>
+    </div>
+    <div class="sheet-foot">
+      <button class="btn btn-danger-ghost" id="wind-del">Wind entfernen</button>
+      <button class="btn btn-primary" id="wind-save" style="flex:1">Fertig</button>
+    </div>
+  </div>`;
+  document.querySelectorAll("[data-close]").forEach(el => el.addEventListener("click", closeEditor));
+  const dirSel = $("#wind-dir"), kmhInp = $("#wind-kmh"), bft = $("#wind-bft");
+  const showBft = () => { bft.textContent = windHimmel(Number(dirSel.value)) + " · " + windBft(Number(kmhInp.value)||0) + " Bft"; };
+  showBft();
+  kmhInp.addEventListener("input", showBft);
+  dirSel.addEventListener("change", showBft);
+  $("#wind-fetch").addEventListener("click", async () => {
+    const btn = $("#wind-fetch"); btn.disabled = true; btn.textContent = "…";
+    const r = await lgWindFetch();
+    btn.disabled = false; btn.textContent = "Aus Open-Meteo holen (online)";
+    if(r.err){ modalInfo("Open-Meteo: " + r.err); return; }
+    dirSel.value = String((Math.round(r.dir / 45) * 45) % 360);   // auf nächste 8er-Richtung runden
+    kmhInp.value = r.kmh; showBft();
+  });
+  $("#wind-del").addEventListener("click", () => { state.lage.wind = null; markChange(); closeEditor(); render(); });
+  $("#wind-save").addEventListener("click", () => {
+    state.lage.wind = { dir:Number(dirSel.value), kmh:Math.max(0, Number(kmhInp.value)||0) };
+    markChange(); closeEditor(); render();
+  });
 }
 function lgMapRenderLayers(){
   if(!lgMapLayer) return;
@@ -5029,6 +5182,13 @@ function lgMapClick(latlng){
     }
     lgMapRenderLayers();
     return;
+  }
+  if(lgTool === "sector"){                                 // Gefahrenbereich: Apex setzen, Keil nach Lee
+    const w = state.lage.wind;
+    const bearing = w ? (w.dir + 180) % 360 : 90;          // Zugrichtung = windabgewandt, sonst Ost
+    const it = { id:uid(), type:"sector", ll:[latlng.lat, latlng.lng], bearingDeg:bearing, reachM:200, halfAngleDeg:22.5, color:"fw" };
+    state.lage.items.push(it); const nid = it.id;
+    lgTool = null; markChange(); render(); openLgShapeEdit(nid); return;
   }
   if(!lgTool) return;
   if(lgTool === "car"){
@@ -5487,7 +5647,7 @@ function openLgShapeEdit(id){
   const it = state.lage.items.find(i => i.id === id);
   if(!it) return;
   const names = LG_COLOR_NAMES;
-  const shName = { area:"Fläche", arrow:"Pfeil", circle:"Radius-Kreis" }[it.type] || "Linie";
+  const shName = { area:"Fläche", arrow:"Pfeil", circle:"Radius-Kreis", sector:"Gefahrenbereich" }[it.type] || "Linie";
   $("#sheetHost").innerHTML = `
   <div class="sheet-backdrop" data-close="1"></div>
   <div class="sheet" role="dialog" aria-modal="true" aria-label="${shName} bearbeiten" style="max-height:55vh">
@@ -5500,8 +5660,10 @@ function openLgShapeEdit(id){
         <div class="swatches">
           ${LG_SHAPE_COLORS.map(c => `
             <button data-shcolor="${c}" style="--sc:var(--${c})" aria-pressed="${(it.color||"fw")===c}" aria-label="${names[c]}"></button>`).join("")}
+          <label class="sw-custom${LG_SHAPE_COLORS.includes(it.color)?"":" active"}" title="Eigene Farbe">
+            <input type="color" data-shcustom value="${lgAccentHex(it.color||"fw")}" aria-label="Eigene Farbe"></label>
         </div>
-        <p class="hint">z. B. Blau = Schlauchleitung/Wasser, Rot = Absperrung, Gold = Fläche/Bereitstellung, Grün = Abschnitt.</p>
+        <p class="hint">Voreingestellte Farben oder rechts eine eigene wählen. z. B. Blau = Wasser, Rot = Absperrung, Gold = Bereitstellung, Grün = Abschnitt.</p>
       </div>
       <div class="field"><label for="sh-text">Beschriftung <span style="text-transform:none;font-weight:500">(erscheint in der Legende)</span></label>
         <input id="sh-text" value="${esc(it.text||"")}" placeholder="z. B. Schlauchleitung B, Absperrung" autocomplete="off"></div>
@@ -5514,6 +5676,16 @@ function openLgShapeEdit(id){
       ${it.type === "circle" && it.radiusM > 0 ? `
       <div class="field"><label>Radius · Durchmesser · Fläche</label>
         <div class="mono" style="font-size:1.1rem;font-weight:800">r ${laengeStr(it.radiusM)} · ⌀ ${laengeStr(it.radiusM*2)} · ${flaecheStr(Math.PI*it.radiusM*it.radiusM)}</div></div>` : ""}
+      ${it.type === "sector" && it.reachM > 0 ? `
+      <div class="field"><label>Reichweite · Zugrichtung</label>
+        <div class="mono" style="font-size:1.1rem;font-weight:800">${laengeStr(it.reachM)} · nach ${windHimmel(it.bearingDeg)}</div></div>
+      <div class="field"><label>Öffnungswinkel</label>
+        <div class="seg" style="max-width:none">
+          ${[["Schmal",15],["Normal",22.5],["Breit",35]].map(([n,a]) => `<button type="button" data-secang="${a}" class="${Math.abs((it.halfAngleDeg||22.5)-a)<0.1?"active":""}">${n} (${a*2}°)</button>`).join("")}
+        </div></div>
+      ${state.lage.wind ? `<button class="btn btn-ghost btn-block" id="sec-wind">↻ Nach aktuellem Wind ausrichten (aus ${windHimmel(state.lage.wind.dir)})</button>`
+        : `<p class="hint">Kein Wind gesetzt – über die Wind-Fahne oben rechts auf der Karte setzen, dann ausrichten.</p>`}
+      <p class="hint">Orientierungshilfe (Anhalt) – keine Ausbreitungsberechnung. Griffe: Apex verschieben, Fernpunkt = Richtung + Reichweite.</p>` : ""}
       ${it.type === "area" ? `
       <div class="field"><label for="sh-abschnitt">Einsatzabschnitt</label>
         <select id="sh-abschnitt">
@@ -5539,6 +5711,21 @@ function openLgShapeEdit(id){
       x.setAttribute("aria-pressed", x.dataset.shcolor === c.color));
     markChange(); render();   // Fläche und EA-Label sofort in der neuen Farbe zeichnen
   }));
+  const shCustom = $("[data-shcustom]");
+  if(shCustom) shCustom.addEventListener("change", () => {   // eigene Farbe (Colorpicker)
+    cur().color = shCustom.value;
+    document.querySelectorAll("[data-shcolor]").forEach(x => x.setAttribute("aria-pressed", "false"));
+    markChange(); render();
+  });
+  document.querySelectorAll("[data-secang]").forEach(b => b.addEventListener("click", () => {   // Öffnungswinkel
+    cur().halfAngleDeg = Number(b.dataset.secang);
+    document.querySelectorAll("[data-secang]").forEach(x => x.classList.toggle("active", x === b));
+    markChange(); render();
+  }));
+  const secWind = $("#sec-wind");
+  if(secWind) secWind.addEventListener("click", () => {   // Keil nach aktuellem Wind ausrichten
+    if(state.lage.wind){ cur().bearingDeg = (state.lage.wind.dir + 180) % 360; markChange(); render(); }
+  });
   const abSel = $("#sh-abschnitt");
   if(abSel) abSel.addEventListener("change", () => {
     cur().abschnittId = abSel.value || "";
@@ -5572,6 +5759,8 @@ function openLgFormEdit(id){
       <div class="field"><label>Farbe</label>
         <div class="swatches">
           ${LG_SHAPE_COLORS.map(c => `<button data-shcolor="${c}" style="--sc:var(--${c})" aria-pressed="${(it.color||"fw")===c}" aria-label="${names[c]}"></button>`).join("")}
+          <label class="sw-custom${LG_SHAPE_COLORS.includes(it.color)?"":" active"}" title="Eigene Farbe">
+            <input type="color" data-shcustom value="${lgAccentHex(it.color||"fw")}" aria-label="Eigene Farbe"></label>
         </div></div>
       <div class="field"><label for="form-text">Text <span style="text-transform:none;font-weight:500">(optional)</span></label>
         <input id="form-text" value="${esc(it.text||"")}" placeholder="z. B. BR, RTW, Absperrung …" autocomplete="off">
@@ -5595,6 +5784,12 @@ function openLgFormEdit(id){
     document.querySelectorAll("[data-shcolor]").forEach(x => x.setAttribute("aria-pressed", x.dataset.shcolor === c.color));
     c.text = txt.value.trim(); markChange(); render();
   }));
+  const formCustom = $("[data-shcustom]");
+  if(formCustom) formCustom.addEventListener("change", () => {   // eigene Farbe (Colorpicker)
+    const c = cur(); c.color = formCustom.value;
+    document.querySelectorAll("[data-shcolor]").forEach(x => x.setAttribute("aria-pressed", "false"));
+    c.text = txt.value.trim(); markChange(); render();
+  });
   txt.addEventListener("keydown", e => { if(e.key === "Enter") $("#form-save").click(); });
   $("#form-del").addEventListener("click", () => {
     state.lage.items = state.lage.items.filter(i => i.id !== it.id);

@@ -624,9 +624,20 @@
     stroke-linejoin:round;stroke-linecap:round;pointer-events:visiblePainted;cursor:pointer}
   .lg-shapes .tmp{stroke:var(--accent);stroke-dasharray:7 6;fill:none;pointer-events:none}
   .lg-shapes .tmp-dot{fill:var(--accent);stroke:none;pointer-events:none}
-  .swatches{display:flex;gap:10px}
+  .swatches{display:flex;gap:10px;flex-wrap:wrap}
   .swatches button{width:52px;height:52px;border-radius:12px;border:3px solid transparent;background:var(--sc)}
   .swatches button[aria-pressed="true"]{border-color:var(--ink);box-shadow:var(--shadow)}
+  /* Eigener Farbwähler (Colorpicker): zeigt die aktuelle Farbe + kleines Stift-Icon */
+  .swatches .sw-custom{position:relative;display:block;width:52px;height:52px;border-radius:12px;
+    overflow:hidden;cursor:pointer;border:3px solid transparent}
+  .swatches .sw-custom input[type=color]{position:absolute;inset:-2px;width:calc(100% + 4px);height:calc(100% + 4px);
+    border:none;margin:0;padding:0;background:none;cursor:pointer;-webkit-appearance:none;appearance:none}
+  .swatches .sw-custom input[type=color]::-webkit-color-swatch-wrapper{padding:0}
+  .swatches .sw-custom input[type=color]::-webkit-color-swatch{border:none}
+  .swatches .sw-custom input[type=color]::-moz-color-swatch{border:none}
+  .swatches .sw-custom::after{content:"";position:absolute;right:3px;bottom:3px;width:17px;height:17px;pointer-events:none;
+    background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Ccircle cx='12' cy='12' r='11' fill='white' stroke='%23333' stroke-width='1.5'/%3E%3Cpath d='M8.5 15.5l.7-2.4 5-5 1.7 1.7-5 5-2.4.7z' fill='%23333'/%3E%3C/svg%3E") center/contain no-repeat}
+  .swatches .sw-custom.active{border-color:var(--ink);box-shadow:var(--shadow)}
   .lg-item{position:absolute;transform:translate(-50%,-50%);z-index:2;cursor:grab;
     display:flex;flex-direction:column;align-items:center;gap:2px;touch-action:none;user-select:none;-webkit-user-select:none}
   .lg-item *{pointer-events:none}
@@ -680,6 +691,17 @@
   .leaflet-tooltip.lg-measure{background:var(--ink);color:#fff;border:none;font-weight:700;
     font-size:.8rem;padding:2px 8px;border-radius:6px;box-shadow:0 1px 4px rgba(0,0,0,.45)}
   .leaflet-tooltip.lg-measure::before{display:none}
+  /* Wind-Fahne auf der Karte (oben rechts) */
+  .lg-windbadge{position:absolute;top:10px;right:10px;z-index:1000;display:flex;align-items:center;gap:9px;
+    background:color-mix(in oklab,var(--surface) 92%,transparent);border:1px solid var(--line);
+    border-radius:12px;padding:7px 11px;box-shadow:var(--shadow);backdrop-filter:blur(3px);color:var(--ink)}
+  .lg-windbadge.clickable{cursor:pointer}
+  .lg-windbadge .lg-wind-arrow{display:block;width:26px;height:26px;color:var(--thw);flex:none}
+  .lg-windbadge .lg-wind-arrow svg{display:block;width:26px;height:26px}
+  .lg-windbadge .lg-wind-txt{display:flex;flex-direction:column;line-height:1.15}
+  .lg-windbadge .lg-wind-txt b{font-size:.9rem;font-weight:800}
+  .lg-windbadge .lg-wind-txt span{font-size:.72rem;color:var(--ink2);font-weight:600}
+  .lg-windbadge .lg-wind-add{font-size:.85rem;font-weight:700;color:var(--ink2)}
   .lg-leg-ea{display:inline-grid;place-items:center;min-width:32px;height:24px;padding:0 5px;
     border:2px solid var(--sc);color:var(--sc);border-radius:6px;font-size:.68rem;font-weight:800;white-space:nowrap}
   .lg-mini-area{width:26px;height:20px;border:2px solid var(--sc);border-radius:3px;
