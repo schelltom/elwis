@@ -700,7 +700,7 @@ function lgFoerderUebersichtHtml(line){
   const rest = (line.elev && line.elev.profile) ? lgFoerderRest(line.elev.profile, p, lastD) : null;
   const trupps = Math.max(1, Math.ceil(len / 350));
   const pumpList = pumps.length
-    ? pumps.map((pu, i) => `P${i+1} bei ${laengeStr(pu.d)} · Eingang ~${p.pIn} bar → auf ${p.pOut} bar`).join("<br>")
+    ? pumps.map((pu, i) => `P${i+1} bei ${laengeStr(pu.d)}${pu.addr ? " · " + esc(pu.addr) : ""} · Eingang ~${p.pIn} bar → auf ${p.pOut} bar`).join("<br>")
     : "keine Verstärkerpumpe nötig";
   const restStr = rest != null ? `${rest.toFixed(1)} bar${rest < 3 ? " ⚠ knapp – Strecke/Förderstrom prüfen" : ""}` : "–";
   const rows = [
@@ -719,6 +719,23 @@ function lgFoerderUebersichtHtml(line){
   ];
   if(line.elev && line.elev.loss > 30) rows.push(["Achtung Gefälle", "Druckbegrenzungsventil an der/den Pumpe(n) vorsehen"]);
   return `<table class="lg-ueber"><tbody>${rows.map(([k,v]) => `<tr><th>${esc(k)}</th><td>${v}</td></tr>`).join("")}</tbody></table>`;
+}
+// Straße + Hausnummer je Pumpe (Nominatim, sequenziell mit 1,1 s Abstand wegen Rate-Limit)
+function lgPumpAddresses(pumps, onEach){
+  if(navigator.onLine === false) return;
+  const todo = pumps.filter(p => !p.addr);
+  let i = 0;
+  const next = () => {
+    if(i >= todo.length) return;
+    const p = todo[i++];
+    reverseGeocode(p.lat, p.lng, d => {
+      const a = (d && d.address) || {};
+      p.addr = [a.road, a.house_number].filter(Boolean).join(" ") || "–";
+      if(onEach) onEach();
+      setTimeout(next, 1100);
+    });
+  };
+  next();
 }
 // Materialübersicht drucken (fürs Klemmbrett)
 function lgPrintFoerder(line){
@@ -5157,6 +5174,8 @@ function lgAddItems(layer, interactive, items){
             i.pumps[idx] = { d:nd, lat:at.lat, lng:at.lng, manual:true };
             if(i.elev && i.elev.profile) i.pumps = i.pumps.slice(0, idx+1).concat(lgFoerderPumps(i.elev.profile, lgFoerderParams(i), nd));
             markChange(); lgMapRenderLayers();
+            lgPumpAddresses(i.pumps, () => markChange());   // verschobene/neue Pumpen: Adresse nachladen
+
           });
           pm.addTo(layer);
         });
@@ -5942,9 +5961,11 @@ function openLgShapeEdit(id){
     c.pumps = lgFoerderPumps(c.elev.profile, lgFoerderParams(c), 0);
     markChange();
     const disp = $("#sh-pumps"); if(disp) disp.textContent = c.pumps.length + " Verstärkerpumpe" + (c.pumps.length===1?"":"n");
-    const ueber = $("#sh-uebersicht"); if(ueber) ueber.innerHTML = lgFoerderUebersichtHtml(c);
+    const refresh = () => { const u = $("#sh-uebersicht"); if(u) u.innerHTML = lgFoerderUebersichtHtml(c); markChange(); };
+    refresh();
     const pbtn = $("#sh-print-btn"); if(pbtn) pbtn.style.display = "";
     lgMapRenderLayers();
+    lgPumpAddresses(c.pumps, refresh);   // Straße/Hausnummer im Hintergrund nachladen
   });
   const printBtn = $("#sh-print-btn");
   if(printBtn) printBtn.addEventListener("click", () => lgPrintFoerder(cur()));
