@@ -599,6 +599,44 @@ function lgSectorLatLngs(ll, bearingDeg, reachM, halfAngleDeg){
 const LG_WIND_ARROW_SVG = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2 L18.5 20 L12 15.5 L5.5 20 Z" fill="currentColor"/></svg>`;
 // Kleines Keil-Symbol für die Legende
 function lgSectorBadge(c){ return `<svg viewBox="0 0 26 20" style="width:26px;height:20px" aria-hidden="true"><path d="M3 10 L25 2 L25 18 Z" fill="${c}" fill-opacity="0.3" stroke="${c}" stroke-width="2" stroke-linejoin="round"/></svg>`; }
+/* n gleichmäßig verteilte Punkte entlang eines Polylinien-Wegs (für das Höhenprofil) */
+function lgSamplePolyline(llpoints, n){
+  const segLen = []; let total = 0;
+  for(let i = 1; i < llpoints.length; i++){ const L = geoLineM([llpoints[i-1], llpoints[i]]); segLen.push(L); total += L; }
+  if(total === 0) return [llpoints[0], llpoints[llpoints.length-1]];
+  const out = [];
+  for(let k = 0; k < n; k++){
+    const target = total * k / (n-1);
+    let acc = 0, si = 0;
+    while(si < segLen.length-1 && acc + segLen[si] < target){ acc += segLen[si]; si++; }
+    const a = llpoints[si], b = llpoints[si+1] || llpoints[si];
+    const f = segLen[si] > 0 ? (target - acc) / segLen[si] : 0;
+    out.push({ lat: a.lat + (b.lat - a.lat) * f, lng: a.lng + (b.lng - a.lng) * f });
+  }
+  return out;
+}
+/* Höhenprofil einer Linie über Open-Meteo (kostenlos, ohne Key); liefert Start/Ende/Anstieg/Gefälle */
+async function lgLineElevFetch(llpoints){
+  if(navigator.onLine === false) return { err:"Gerät ist offline." };
+  if(!Array.isArray(llpoints) || llpoints.length < 2) return { err:"Keine Linie mit Koordinaten." };
+  const pts = lgSamplePolyline(llpoints, 100);
+  const lat = pts.map(p => p.lat.toFixed(5)).join(",");
+  const lng = pts.map(p => p.lng.toFixed(5)).join(",");
+  try{
+    const r = await fetch(`https://api.open-meteo.com/v1/elevation?latitude=${lat}&longitude=${lng}`);
+    const d = await r.json();
+    const el = d && d.elevation;
+    if(!Array.isArray(el) || !el.length) return { err:"Keine Höhendaten erhalten." };
+    let gain = 0, loss = 0;
+    for(let i = 1; i < el.length; i++){ const dd = el[i] - el[i-1]; if(dd > 0) gain += dd; else loss += -dd; }
+    return { start:el[0], end:el[el.length-1], min:Math.min(...el), max:Math.max(...el), gain, loss, dhEnd: el[el.length-1] - el[0] };
+  }catch(e){ return { err: e.message || "Abfrage fehlgeschlagen." }; }
+}
+function lgElevStr(e){
+  if(!e) return "–";
+  const s = v => (v >= 0 ? "+" : "") + Math.round(v);
+  return `Δ ${s(e.dhEnd)} m  ·  Start ${Math.round(e.start)} m → Ziel ${Math.round(e.end)} m  ·  Anstieg ${Math.round(e.gain)} m / Gefälle ${Math.round(e.loss)} m`;
+}
 function fmtZeit(iso){
   if(!iso) return "–";
   const d = new Date(iso);
@@ -5673,6 +5711,10 @@ function openLgShapeEdit(id){
       ${(it.type === "line" || it.type === "arrow") && geoLineM(it.llpoints) > 0 ? `
       <div class="field"><label>${it.type === "arrow" ? "Länge (Pfeil)" : "Länge"}</label>
         <div class="mono" style="font-size:1.1rem;font-weight:800">${laengeStr(geoLineM(it.llpoints))}</div></div>` : ""}
+      ${it.type === "line" && Array.isArray(it.llpoints) ? `
+      <div class="field"><label>Höhenprofil</label>
+        <div id="sh-elev" class="mono" style="font-size:.92rem;font-weight:700;line-height:1.5">${it.elev ? lgElevStr(it.elev) : "– noch nicht ermittelt –"}</div>
+        <button class="btn btn-ghost btn-block" id="sh-elev-btn" style="margin-top:8px">Höhe &amp; Profil ermitteln (online)</button></div>` : ""}
       ${it.type === "circle" && it.radiusM > 0 ? `
       <div class="field"><label>Radius · Durchmesser · Fläche</label>
         <div class="mono" style="font-size:1.1rem;font-weight:800">r ${laengeStr(it.radiusM)} · ⌀ ${laengeStr(it.radiusM*2)} · ${flaecheStr(Math.PI*it.radiusM*it.radiusM)}</div></div>` : ""}
@@ -5725,6 +5767,15 @@ function openLgShapeEdit(id){
   const secWind = $("#sec-wind");
   if(secWind) secWind.addEventListener("click", () => {   // Keil nach aktuellem Wind ausrichten
     if(state.lage.wind){ cur().bearingDeg = (state.lage.wind.dir + 180) % 360; markChange(); render(); }
+  });
+  const elevBtn = $("#sh-elev-btn");
+  if(elevBtn) elevBtn.addEventListener("click", async () => {   // Höhenprofil über Open-Meteo
+    elevBtn.disabled = true; elevBtn.textContent = "… wird ermittelt";
+    const r = await lgLineElevFetch(cur().llpoints);
+    elevBtn.disabled = false; elevBtn.textContent = "Höhe & Profil ermitteln (online)";
+    if(r.err){ modalInfo("Höhe: " + r.err); return; }
+    cur().elev = r; markChange();
+    const disp = $("#sh-elev"); if(disp) disp.textContent = lgElevStr(r);
   });
   const abSel = $("#sh-abschnitt");
   if(abSel) abSel.addEventListener("change", () => {
