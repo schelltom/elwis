@@ -700,7 +700,7 @@ function lgFoerderUebersichtHtml(line){
   const rest = (line.elev && line.elev.profile) ? lgFoerderRest(line.elev.profile, p, lastD) : null;
   const trupps = Math.max(1, Math.ceil(len / 350));
   const pumpList = pumps.length
-    ? pumps.map((pu, i) => `P${i+1} bei ${laengeStr(pu.d)}${pu.addr ? " · " + esc(pu.addr) : ""} · Eingang ~${p.pIn} bar → auf ${p.pOut} bar`).join("<br>")
+    ? pumps.map((pu, i) => `P${i+1} bei ${laengeStr(pu.d)} · ${pu.addr ? esc(pu.addr) : "Adresse wird ermittelt …"} · Eingang ~${p.pIn} bar → auf ${p.pOut} bar`).join("<br>")
     : "keine Verstärkerpumpe nötig";
   const restStr = rest != null ? `${rest.toFixed(1)} bar${rest < 3 ? " ⚠ knapp – Strecke/Förderstrom prüfen" : ""}` : "–";
   const rows = [
@@ -730,9 +730,12 @@ function lgPumpAddresses(pumps, onEach){
     const p = todo[i++];
     reverseGeocode(p.lat, p.lng, d => {
       const a = (d && d.address) || {};
-      p.addr = [a.road, a.house_number].filter(Boolean).join(" ") || "–";
+      p.addr = [a.road, a.house_number].filter(Boolean).join(" ")   // bevorzugt Straße + Hausnr.
+        || a.hamlet || a.neighbourhood || a.suburb || a.village || a.town || a.city   // sonst Ortsteil/Ort
+        || (d && d.display_name ? d.display_name.split(",").slice(0, 2).join(",").trim() : "")
+        || "freies Gelände";
       if(onEach) onEach();
-      setTimeout(next, 1100);
+      setTimeout(next, 1200);
     });
   };
   next();
