@@ -4,6 +4,8 @@
     --line:#BFB8AB; --shadow:0 1px 2px rgba(38,34,31,.12),0 4px 14px rgba(38,34,31,.10);
     --accent:#C4232B; --accent-ink:#FFFFFF; --accent-press:#A31B22;
     --fw:#C4232B; --brk:#B8720F; --pol:#1E7E3C; --thw:#23539E; --son:#6E6862;
+    /* Zusatz-Signaturfarben (theme-neutral, gelten in allen Themes) */
+    --orange:#F5820E; --violett:#A25AE8; --tuerkis:#12B4C4;
     --good:#1E7A3C; --good-bg:#E1F0E4;
     --warn:#8A5F00; --warn-bg:#F7ECD0;
     --rail:0px;
@@ -666,6 +668,18 @@
   .lg-mini-form.square{border-radius:4px;width:22px;height:22px}
   .lg-mini-form.rect{border-radius:4px}
   .lg-mini-line{width:28px;height:0;border-top:3px solid var(--sc);border-radius:2px}
+  /* Pfeilspitze am Zielpunkt einer Pfeil-Signatur (Rotation per Inline-Style).
+     Liegt über dem Zieh-Griff (blockiert ihn aber nicht) + heller Rand zum Abheben. */
+  .lg-arrowhead{display:block;width:26px;height:26px;line-height:0;pointer-events:none;
+    filter:drop-shadow(0 0 1.5px #fff) drop-shadow(0 0 1px rgba(0,0,0,.7))}
+  .lg-arrowhead svg{display:block;width:26px;height:26px}
+  /* Zieh-Griff für Kreis/Pfeil auf der Online-Karte – Ring, damit Pfeilspitze/Linie durchscheint */
+  .lg-handle{display:block;width:16px;height:16px;border-radius:50%;background:transparent;
+    border:3px solid #fff;box-shadow:0 0 0 1.5px rgba(0,0,0,.55),0 1px 3px rgba(0,0,0,.5);cursor:move}
+  /* Live-Maß-Tooltip beim Ziehen (Radius/Länge) */
+  .leaflet-tooltip.lg-measure{background:var(--ink);color:#fff;border:none;font-weight:700;
+    font-size:.8rem;padding:2px 8px;border-radius:6px;box-shadow:0 1px 4px rgba(0,0,0,.45)}
+  .leaflet-tooltip.lg-measure::before{display:none}
   .lg-leg-ea{display:inline-grid;place-items:center;min-width:32px;height:24px;padding:0 5px;
     border:2px solid var(--sc);color:var(--sc);border-radius:6px;font-size:.68rem;font-weight:800;white-space:nowrap}
   .lg-mini-area{width:26px;height:20px;border:2px solid var(--sc);border-radius:3px;

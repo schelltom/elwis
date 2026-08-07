@@ -3976,6 +3976,8 @@ function renderMonitor(){
         const gefahren = state.lage.items.filter(i => i.type === "gefahr").sort((a,b) => (a.num||0)-(b.num||0));
         const forms = state.lage.items.filter(i => i.type === "form");
         const lines = state.lage.items.filter(i => i.type === "line");
+        const arrows = state.lage.items.filter(i => i.type === "arrow");
+        const circles = state.lage.items.filter(i => i.type === "circle");
         const cars = state.lage.items.filter(i => i.type === "car").sort((a,b) => (a.num||0)-(b.num||0));
         const sc = i => `var(--${LG_SHAPE_COLORS.includes(i.color) ? i.color : "fw"})`;
         // Legende wie im Präsentationsmodus: Badge antippen → Symbol wackelt/blinkt auf der Karte
@@ -3984,6 +3986,8 @@ function renderMonitor(){
           ...nums.map(i => `<div class="lg-leg-item"><button class="lg-leg-badge" data-lgfind="${esc(i.id)}" aria-label="Auf der Karte zeigen"><span class="lg-leg-num">${esc(i.num)}</span></button>${legText(esc(i.text||""))}</div>`),
           ...forms.map(f => `<div class="lg-leg-item"><button class="lg-leg-badge" data-lgfind="${esc(f.id)}" aria-label="Auf der Karte zeigen"><span class="lg-mini-form ${f.shape||"rect"}" style="--sc:${sc(f)}"></span></button>${legText(esc(f.text||""))}</div>`),
           ...lines.map(l => `<div class="lg-leg-item"><button class="lg-leg-badge" data-lgfind="${esc(l.id)}" aria-label="Auf der Karte zeigen"><span class="lg-mini-line" style="--sc:${sc(l)}"></span></button>${legText(esc(l.text||""), laengeStr(geoLineM(l.llpoints)))}</div>`),
+          ...arrows.map(a => `<div class="lg-leg-item"><button class="lg-leg-badge" data-lgfind="${esc(a.id)}" aria-label="Auf der Karte zeigen">${lgArrowBadge(sc(a))}</button>${legText(esc(a.text||""), laengeStr(geoLineM(a.llpoints)))}</div>`),
+          ...circles.map(c => `<div class="lg-leg-item"><button class="lg-leg-badge" data-lgfind="${esc(c.id)}" aria-label="Auf der Karte zeigen">${lgCircleBadge(sc(c))}</button>${legText(esc(c.text||""), c.radiusM > 0 ? "r " + laengeStr(c.radiusM) : "")}</div>`),
         ].join("");
         const gefItems = gefahren.map(i => `<div class="lg-leg-item"><button class="lg-leg-badge" data-lgfind="${esc(i.id)}" aria-label="Auf der Karte zeigen"><span class="lg-leg-num tri">${esc(i.num)}</span></button>${legText(esc(i.text||""))}</div>`).join("");
         const carItems = cars.map(i => {
@@ -4282,6 +4286,11 @@ const LG_CAR_SVG = `<svg viewBox="0 0 24 24" aria-hidden="true">
   <path d="M2.5 15V9.5A1.5 1.5 0 0 1 4 8h9.5v7"/><path d="M13.5 9.5H18l3.5 3.5v2h-8"/>
   <circle cx="6.5" cy="17" r="2"/><circle cx="17" cy="17" r="2"/><path d="M8.5 17h6.5M2.5 15v2h2"/>
 </svg>`;
+// Pfeilspitze (zeigt nach rechts/Osten) – wird per CSS-Rotation ausgerichtet
+const LG_ARROWHEAD_SVG = `<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 3 L18 10 L3 17 Z" fill="currentColor"/></svg>`;
+// Kleine Legenden-Symbole für Pfeil/Radius-Kreis (Farbe via CSS-Variable, z. B. var(--fw))
+function lgArrowBadge(c){ return `<svg viewBox="0 0 30 12" style="width:28px;height:12px" aria-hidden="true"><line x1="2" y1="6" x2="20" y2="6" stroke="${c}" stroke-width="3" stroke-linecap="round"/><path d="M18 1.5 L29 6 L18 10.5 Z" fill="${c}"/></svg>`; }
+function lgCircleBadge(c){ return `<svg viewBox="0 0 24 24" style="width:22px;height:22px" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="none" stroke="${c}" stroke-width="2.5"/><circle cx="12" cy="12" r="1.7" fill="${c}"/></svg>`; }
 const LG_TOOLS = [
   { t:"num",     n:"Marker 1·2·3",    preview:'<span class="lg-num">1</span>' },
   { t:"car",     n:"Fahrzeug",        preview:`<span class="lg-car" style="color:var(--fw)">${LG_CAR_SVG}</span>` },
@@ -4293,9 +4302,12 @@ const LG_TOOLS = [
   { t:"form",    n:"Form",            preview:'<svg viewBox="0 0 40 30" style="width:34px;height:26px"><rect x="4" y="7" width="15" height="15" rx="2" style="fill:none;stroke:var(--brk);stroke-width:3"/><circle cx="30" cy="14.5" r="7.5" style="fill:none;stroke:var(--fw);stroke-width:3"/></svg>' },
   { t:"line",    n:"Linie",           preview:'<svg viewBox="0 0 40 30" style="width:38px;height:28px"><polyline points="4,24 16,10 26,18 36,6" style="fill:none;stroke:var(--thw);stroke-width:3;stroke-linecap:round;stroke-linejoin:round"/></svg>' },
   { t:"area",    n:"Fläche",          preview:'<svg viewBox="0 0 40 30" style="width:38px;height:28px"><polygon points="5,25 12,6 33,8 36,22 20,27" style="fill:var(--brk);fill-opacity:.3;stroke:var(--brk);stroke-width:2.5;stroke-linejoin:round"/></svg>' },
+  { t:"arrow",   n:"Pfeil",           preview:'<svg viewBox="0 0 40 30" style="width:38px;height:28px"><line x1="5" y1="15" x2="27" y2="15" stroke="var(--thw)" stroke-width="3" stroke-linecap="round"/><path d="M25 8 L37 15 L25 22 Z" fill="var(--thw)"/></svg>' },
+  { t:"circle",  n:"Radius-Kreis",    preview:'<svg viewBox="0 0 40 30" style="width:34px;height:26px"><circle cx="20" cy="15" r="11" fill="none" stroke="var(--fw)" stroke-width="3"/><circle cx="20" cy="15" r="2" fill="var(--fw)"/></svg>' },
   { t:"symsearch", n:"Taktische Zeichen", preview:'<svg viewBox="0 0 24 24" style="width:30px;height:30px;stroke:var(--ink2);fill:none;stroke-width:2;stroke-linecap:round"><circle cx="10.5" cy="10.5" r="6"/><path d="M15 15l5.5 5.5"/></svg>' },
 ];
-const LG_SHAPE_COLORS = ["fw","thw","brk","pol"];
+const LG_SHAPE_COLORS = ["fw","thw","brk","pol","orange","violett","tuerkis"];
+const LG_COLOR_NAMES = { fw:"Rot", thw:"Blau", brk:"Gold", pol:"Grün", orange:"Orange", violett:"Violett", tuerkis:"Türkis" };
 
 /* Taktische Zeichen nach DV 102 (vereinfachte Darstellung) – Brandstufen als 1–3 Flammen */
 function symFlames(n){
@@ -4433,22 +4445,27 @@ function lgCarOptions(currentUnitId){
   return `<option value="" ${!currentUnitId?"selected":""}>– Fahrzeug wählen –</option>${opts}`;
 }
 function renderLagekarte(){
-  const tools = LG_TOOLS.map(t => `
+  // Pfeil + Radius-Kreis nur im Karten-Modus (Richtung/Radius sind nur georeferenziert sinnvoll)
+  const tools = LG_TOOLS.filter(t => state.lage.mode === "karte" || (t.t !== "arrow" && t.t !== "circle")).map(t => `
     <button class="lg-tool" data-lgtool="${t.t}" aria-pressed="${lgTool===t.t || lgSubmenu===t.t}">
       ${t.preview}<span>${t.n}</span>
     </button>`).join("");
+  const drawName = { area:"Fläche", line:"Linie", arrow:"Pfeil", circle:"Radius-Kreis" };
   let statusText = "", drawButtons = "";
   if(lgDraw){
     const need = lgDraw.type === "area" ? 3 : 2;
-    statusText = `${lgDraw.type === "area" ? "Fläche" : "Linie"}: Punkte antippen (${lgDraw.points.length} gesetzt${lgDraw.points.length < need ? `, mind. ${need}` : ""})`;
-    drawButtons = lgDraw.points.length >= need ? `<button id="lgDrawDone" style="margin-right:14px">Fertig</button>` : "";
+    statusText = `${drawName[lgDraw.type] || "Linie"}: Punkte antippen (${lgDraw.points.length} gesetzt${lgDraw.points.length < need ? `, mind. ${need}` : ""})`;
+    // Pfeil/Kreis werden nach dem 2. Punkt automatisch fertig – kein „Fertig“-Knopf
+    drawButtons = (lgDraw.type !== "arrow" && lgDraw.type !== "circle" && lgDraw.points.length >= need) ? `<button id="lgDrawDone" style="margin-right:14px">Fertig</button>` : "";
   }else if(lgTool && lgTool.startsWith("sym:")){
     const s = SYM_KATALOG.find(x => x.key === lgTool.slice(4));
     statusText = s ? `Auf die Karte tippen, um „${s.name}“ zu platzieren` : "";
   }else if(lgTool){
     const t = LG_TOOLS.find(x => x.t === lgTool);
-    statusText = (lgTool === "line" || lgTool === "area")
+    statusText = lgTool === "line" || lgTool === "area"
       ? `${t.n}: Punkte nacheinander auf die Karte tippen`
+      : lgTool === "arrow"  ? "Pfeil: Start antippen, dann Ziel"
+      : lgTool === "circle" ? "Radius-Kreis: Mittelpunkt antippen, dann einen Randpunkt"
       : `Auf die Karte tippen, um „${t.n}“ zu platzieren`;
   }
   const nums = state.lage.items.filter(i => i.type === "num").sort((a,b) => a.num - b.num);
@@ -4505,9 +4522,15 @@ function renderLagekarte(){
   const formItems = forms.map(f => legRow(`<span class="lg-mini-form ${f.shape||"rect"}" style="--sc:${shpCol(f)}"></span>`, f, "Form beschriften …")).join("");
   const lineItems = lines.map(l => legRow(`<span class="lg-mini-line" style="--sc:${shpCol(l)}"></span>`,
     { id:l.id, text:(l.text||"").trim(), sub: laengeStr(geoLineM(l.llpoints)) }, "Linie beschriften …")).join("");
+  const arrows  = state.lage.items.filter(i => i.type === "arrow");
+  const circles = state.lage.items.filter(i => i.type === "circle");
+  const arrowItems = arrows.map(a => legRow(lgArrowBadge(shpCol(a)),
+    { id:a.id, text:(a.text||"").trim(), sub: laengeStr(geoLineM(a.llpoints)) }, "Pfeil beschriften …")).join("");
+  const circleItems = circles.map(c => legRow(lgCircleBadge(shpCol(c)),
+    { id:c.id, text:(c.text||"").trim(), sub: c.radiusM > 0 ? "r " + laengeStr(c.radiusM) : "" }, "Kreis beschriften …")).join("");
   const secMarker = `
         <div class="lg-leg-sec"><h3>Marker</h3>
-          ${(eaItems || areaItems || nums.length || forms.length || lines.length) ? eaItems + areaItems + numItems + formItems + lineItems
+          ${(eaItems || areaItems || nums.length || forms.length || lines.length || arrows.length || circles.length) ? eaItems + areaItems + numItems + formItems + lineItems + arrowItems + circleItems
           : `<p class="hint" style="margin:0">Noch keine Marker. Werkzeug wählen und auf die Karte tippen.</p>`}
         </div>`;
   const secGefahr = gefahren.length ? `
@@ -4758,6 +4781,22 @@ function lgBaseLayer(key){
 function lgDivIcon(inner, id){
   return L.divIcon({ html:`<div class="lg-mk"${id ? ` data-id="${esc(id)}"` : ""}>${inner}</div>`, className:"lg-divicon", iconSize:[0,0] });
 }
+/* Kleiner Zieh-Griff (Ring) für Kreis/Pfeil – zum Verschieben/Ändern auf der Karte */
+function lgDragHandleIcon(){
+  return L.divIcon({ html:`<div class="lg-mk"><span class="lg-handle"></span></div>`, className:"lg-divicon", iconSize:[0,0] });
+}
+/* Maß-Angabe (Radius/Länge) einer Form live in der Legende nachziehen – ohne kompletten Re-Render */
+function lgSetLegMeasure(id, text){
+  document.querySelectorAll(`[data-lgedit="${id}"] .lg-leg-qm`).forEach(el => el.textContent = text);
+}
+/* Beschriftungstext einer Form live in der Legende nachziehen (Maß-Span bleibt erhalten) */
+function lgSetLegLabel(id, text){
+  document.querySelectorAll(`[data-lgedit="${id}"]`).forEach(btn => {
+    const qm = btn.querySelector(".lg-leg-qm");
+    btn.textContent = (text || "").trim();
+    if(qm){ btn.append(" "); btn.append(qm); }
+  });
+}
 /* Adresse → Koordinaten (OpenStreetMap/Nominatim, nur online) */
 function lgGeocode(q, cb){
   if(!q){ cb(null); return; }
@@ -4811,7 +4850,32 @@ async function w3wAufloesen(){
 function lgAddItems(layer, interactive, items){
   items = items || state.lage.items;
   for(const i of items){
-    if((i.type === "line" || i.type === "area") && Array.isArray(i.llpoints)){
+    if(i.type === "circle" && Array.isArray(i.ll) && i.radiusM > 0){
+      const col = lgAccentHex(i.color);
+      const shp = L.circle(i.ll, { radius:i.radiusM, color:col, weight:3, fillOpacity:0.12, interactive });
+      if(interactive) shp.on("click", ev => { L.DomEvent.stop(ev); openLgShapeEdit(i.id); });
+      shp.addTo(layer);
+      const pe = shp.getElement && shp.getElement();
+      if(pe){ pe.setAttribute("data-shape", i.id); pe.style.pointerEvents = "stroke"; }   // Füllung lässt Klicks durch → Symbole überlagerbar
+      if(interactive){
+        // Griff in der Mitte → Kreis verschieben
+        const center = L.marker(i.ll, { draggable:true, icon:lgDragHandleIcon(), zIndexOffset:1000 });
+        center.on("drag", () => shp.setLatLng(center.getLatLng()));
+        center.on("dragend", () => { const p = center.getLatLng(); i.ll = [p.lat, p.lng]; markChange(); lgMapRenderLayers(); });
+        center.addTo(layer);
+        // Griff am Rand (östlich) → Radius ändern, mit Live-Maß
+        const dLng = i.radiusM / (111320 * Math.cos(i.ll[0] * Math.PI / 180));
+        const edge = L.marker([i.ll[0], i.ll[1] + dLng], { draggable:true, icon:lgDragHandleIcon(), zIndexOffset:1000 });
+        const edgeR = () => geoLineM([{ lat:i.ll[0], lng:i.ll[1] }, { lat:edge.getLatLng().lat, lng:edge.getLatLng().lng }]);
+        edge.bindTooltip("", { direction:"top", offset:[0,-8], className:"lg-measure" });
+        edge.on("dragstart", () => edge.setTooltipContent("r " + laengeStr(edgeR())).openTooltip());
+        edge.on("drag", () => { shp.setRadius(edgeR()); edge.setTooltipContent("r " + laengeStr(edgeR())); });
+        edge.on("dragend", () => { i.radiusM = edgeR(); edge.closeTooltip(); markChange(); lgSetLegMeasure(i.id, "r " + laengeStr(i.radiusM)); lgMapRenderLayers(); });
+        edge.addTo(layer);
+      }
+      continue;
+    }
+    if((i.type === "line" || i.type === "area" || i.type === "arrow") && Array.isArray(i.llpoints)){
       const col = lgAccentHex(i.color);
       const ll = i.llpoints.map(p => [p.lat, p.lng]);
       const shp = i.type === "area"
@@ -4819,7 +4883,26 @@ function lgAddItems(layer, interactive, items){
         : L.polyline(ll, { color:col, weight:3.5, interactive });
       if(interactive) shp.on("click", ev => { L.DomEvent.stop(ev); openLgShapeEdit(i.id); });
       shp.addTo(layer);
-      const pe = shp.getElement && shp.getElement(); if(pe) pe.setAttribute("data-shape", i.id);   // fürs Blinken
+      const pe = shp.getElement && shp.getElement();
+      if(pe){ pe.setAttribute("data-shape", i.id); if(i.type === "area") pe.style.pointerEvents = "stroke"; }   // Fläche: Klicks durch die Füllung → Symbole überlagerbar
+      if(i.type === "arrow" && i.llpoints.length >= 2){   // Pfeilspitze am Ziel, per CSS-Rotation ausgerichtet
+        const a = i.llpoints[i.llpoints.length - 2], b = i.llpoints[i.llpoints.length - 1];
+        const latMid = (a.lat + b.lat) / 2 * Math.PI / 180;   // Mercator-korrigierter Bildschirmwinkel (0° = Osten)
+        const ang = Math.atan2(-(b.lat - a.lat) / Math.cos(latMid), b.lng - a.lng) * 180 / Math.PI;
+        L.marker([b.lat, b.lng], { interactive:false, zIndexOffset:2000, icon: L.divIcon({ className:"lg-divicon", iconSize:[0,0],
+          html:`<div class="lg-mk"><span class="lg-arrowhead" style="transform:rotate(${ang}deg);color:${col}">${LG_ARROWHEAD_SVG}</span></div>` }) }).addTo(layer);
+      }
+      if(i.type === "arrow" && interactive){   // Griffe an Start + Ziel → verschieben / neu ausrichten, mit Live-Länge
+        const arrowLen = () => geoLineM(shp.getLatLngs().map(p => ({ lat:p.lat, lng:p.lng })));
+        i.llpoints.forEach((pt, idx) => {
+          const hm = L.marker([pt.lat, pt.lng], { draggable:true, icon:lgDragHandleIcon(), zIndexOffset:1000 });
+          hm.bindTooltip("", { direction:"top", offset:[0,-8], className:"lg-measure" });
+          hm.on("dragstart", () => hm.setTooltipContent(laengeStr(arrowLen())).openTooltip());
+          hm.on("drag", () => { const lls = shp.getLatLngs(); lls[idx] = hm.getLatLng(); shp.setLatLngs(lls); hm.setTooltipContent(laengeStr(arrowLen())); });
+          hm.on("dragend", () => { const p = hm.getLatLng(); i.llpoints[idx] = { lat:p.lat, lng:p.lng }; hm.closeTooltip(); markChange(); lgSetLegMeasure(i.id, laengeStr(geoLineM(i.llpoints))); lgMapRenderLayers(); });
+          hm.addTo(layer);
+        });
+      }
       if(i.type === "area" && i.abschnittId){
         const a = state.abschnitte.find(x => x.id === i.abschnittId);
         if(a){
@@ -4834,7 +4917,7 @@ function lgAddItems(layer, interactive, items){
     }
   }
   for(const i of items){
-    if(!i.ll) continue;
+    if(!i.ll || i.type === "circle") continue;   // Kreis nutzt i.ll als Mittelpunkt, ist aber kein Marker
     const m = L.marker(i.ll, { draggable:interactive, interactive, icon: lgDivIcon(lgMarkerInner(i), i.id) });
     if(interactive){
       m.on("click", () => openLgEdit(i.id));
@@ -4904,10 +4987,15 @@ function lgDrawbar(){
   if(!(lgDraw && lgDraw.geo)){ if(bar) bar.remove(); return; }
   const need = lgDraw.type === "area" ? 3 : 2;
   if(!bar){ bar = document.createElement("div"); bar.className = "lg-drawbar"; el.appendChild(bar); }
-  // Live-Maß während des Zeichnens: Linie → Länge, Fläche → Flächeninhalt
-  const mass = lgDraw.type === "area" ? flaecheStr(geoFlaecheM2(lgDraw.points)) : laengeStr(geoLineM(lgDraw.points));
-  bar.innerHTML = `<span>${lgDraw.type === "area" ? "Fläche" : "Linie"}: ${lgDraw.points.length} Punkt${lgDraw.points.length===1?"":"e"}${lgDraw.points.length<need?` (mind. ${need})`:mass?` · ${mass}`:""}</span>
-    ${lgDraw.points.length>=need?`<button data-dr="ok">Fertig</button>`:""}
+  const nm = { area:"Fläche", line:"Linie", arrow:"Pfeil", circle:"Radius-Kreis" }[lgDraw.type] || "Linie";
+  // Live-Maß während des Zeichnens: Linie/Pfeil → Länge, Fläche → Flächeninhalt
+  const mass = lgDraw.type === "area" ? flaecheStr(geoFlaecheM2(lgDraw.points))
+    : lgDraw.type === "circle" ? "" : laengeStr(geoLineM(lgDraw.points));
+  const hint = lgDraw.type === "circle" ? " · Randpunkt antippen" : lgDraw.points.length < need ? ` (mind. ${need})` : mass ? ` · ${mass}` : "";
+  // „Fertig“ nur für Linie/Fläche – Pfeil & Kreis werden nach 2 Punkten automatisch fertig
+  const showDone = lgDraw.type !== "arrow" && lgDraw.type !== "circle" && lgDraw.points.length >= need;
+  bar.innerHTML = `<span>${nm}: ${lgDraw.points.length} Punkt${lgDraw.points.length===1?"":"e"}${hint}</span>
+    ${showDone?`<button data-dr="ok">Fertig</button>`:""}
     <button data-dr="x">Abbrechen</button>`;
   bar.querySelectorAll("[data-dr]").forEach(b => b.addEventListener("click", ev => {
     ev.stopPropagation();
@@ -4919,9 +5007,26 @@ function lgDrawbar(){
 }
 function lgMapClick(latlng){
   const ll = [latlng.lat, latlng.lng];
-  if(lgTool === "line" || lgTool === "area"){
+  if(lgTool === "line" || lgTool === "area" || lgTool === "arrow"){
     if(!lgDraw || !lgDraw.geo) lgDraw = { type:lgTool, geo:true, points:[] };
     lgDraw.points.push({ lat:latlng.lat, lng:latlng.lng });
+    if(lgTool === "arrow" && lgDraw.points.length >= 2){   // Pfeil: Start→Ziel, nach 2 Punkten fertig
+      const it = { id:uid(), type:"arrow", llpoints:lgDraw.points.slice(0, 2), color:"fw" };
+      state.lage.items.push(it); const nid = it.id;
+      lgDraw = null; lgTool = null; markChange(); render(); openLgShapeEdit(nid); return;
+    }
+    lgMapRenderLayers();
+    return;
+  }
+  if(lgTool === "circle"){                                 // Mittelpunkt, dann Randpunkt → Radius
+    if(!lgDraw || !lgDraw.geo) lgDraw = { type:"circle", geo:true, points:[] };
+    lgDraw.points.push({ lat:latlng.lat, lng:latlng.lng });
+    if(lgDraw.points.length >= 2){
+      const c = lgDraw.points[0], edge = lgDraw.points[1];
+      const it = { id:uid(), type:"circle", ll:[c.lat, c.lng], radiusM:geoLineM([c, edge]), color:"fw" };
+      state.lage.items.push(it); const nid = it.id;
+      lgDraw = null; lgTool = null; markChange(); render(); openLgShapeEdit(nid); return;
+    }
     lgMapRenderLayers();
     return;
   }
@@ -5291,11 +5396,11 @@ function lgSnapPanelHtml(s, side){
       ${s.items.filter(i => i.x != null).map(lgMarkerHtml).join("")}
     </div></div>`;
 }
-function lgSnapPanelSetup(s, side, changed){
+function lgSnapPanelSetup(s, side, changed, view){
   if(s.mode === "karte" && typeof L !== "undefined"){
     const el = document.getElementById("lgCmpMap" + side);
     if(!el) return;
-    const v = s.mapView || { center:[49.6767, 12.1625], zoom:15 };
+    const v = view || s.mapView || { center:[49.6767, 12.1625], zoom:15 };   // gemeinsamer Start-Ausschnitt, falls übergeben
     const map = L.map(el, { zoomControl:true }).setView(v.center, v.zoom);
     lgBaseLayer(s.mapLayer).addTo(map);
     lgAddItems(L.layerGroup().addTo(map), false, s.items);
@@ -5337,8 +5442,10 @@ function openLgCompare(idA, idB){
   </div>`;
   document.querySelectorAll("[data-close]").forEach(el => el.addEventListener("click", closeEditor));
   wireLgFull();
-  lgSnapPanelSetup(s1, "A", changed);
-  lgSnapPanelSetup(s2, "B", changed);
+  // Beide Karten mit demselben Ausschnitt/Zoom starten (neuerer Snapshot gibt den Rahmen vor) → direkt vergleichbar
+  const cmpView = (s1.mode === "karte" && s2.mode === "karte") ? (s2.mapView || s1.mapView || null) : null;
+  lgSnapPanelSetup(s1, "A", changed, cmpView);
+  lgSnapPanelSetup(s2, "B", changed, cmpView);
 }
 /* Symbolsuche: die gängigsten taktischen Zeichen (DV 102) mit Filterfeld */
 function openSymSearch(){
@@ -5379,12 +5486,13 @@ function openSymSearch(){
 function openLgShapeEdit(id){
   const it = state.lage.items.find(i => i.id === id);
   if(!it) return;
-  const names = { fw:"Rot", thw:"Blau", brk:"Gold", pol:"Grün" };
+  const names = LG_COLOR_NAMES;
+  const shName = { area:"Fläche", arrow:"Pfeil", circle:"Radius-Kreis" }[it.type] || "Linie";
   $("#sheetHost").innerHTML = `
   <div class="sheet-backdrop" data-close="1"></div>
-  <div class="sheet" role="dialog" aria-modal="true" aria-label="${it.type==="area"?"Fläche":"Linie"} bearbeiten" style="max-height:55vh">
+  <div class="sheet" role="dialog" aria-modal="true" aria-label="${shName} bearbeiten" style="max-height:55vh">
     <div class="sheet-head">
-      <h2>${it.type === "area" ? "Fläche" : "Linie"} bearbeiten</h2>
+      <h2>${shName} bearbeiten</h2>
       <button class="sheet-close" data-close="1" aria-label="Schließen">×</button>
     </div>
     <div class="sheet-body">
@@ -5400,9 +5508,12 @@ function openLgShapeEdit(id){
       ${it.type === "area" && geoFlaecheM2(it.llpoints) > 0 ? `
       <div class="field"><label>Flächeninhalt</label>
         <div class="mono" style="font-size:1.1rem;font-weight:800">${flaecheStr(geoFlaecheM2(it.llpoints))}</div></div>` : ""}
-      ${it.type === "line" && geoLineM(it.llpoints) > 0 ? `
-      <div class="field"><label>Länge</label>
+      ${(it.type === "line" || it.type === "arrow") && geoLineM(it.llpoints) > 0 ? `
+      <div class="field"><label>${it.type === "arrow" ? "Länge (Pfeil)" : "Länge"}</label>
         <div class="mono" style="font-size:1.1rem;font-weight:800">${laengeStr(geoLineM(it.llpoints))}</div></div>` : ""}
+      ${it.type === "circle" && it.radiusM > 0 ? `
+      <div class="field"><label>Radius · Durchmesser · Fläche</label>
+        <div class="mono" style="font-size:1.1rem;font-weight:800">r ${laengeStr(it.radiusM)} · ⌀ ${laengeStr(it.radiusM*2)} · ${flaecheStr(Math.PI*it.radiusM*it.radiusM)}</div></div>` : ""}
       ${it.type === "area" ? `
       <div class="field"><label for="sh-abschnitt">Einsatzabschnitt</label>
         <select id="sh-abschnitt">
@@ -5419,6 +5530,9 @@ function openLgShapeEdit(id){
   </div>`;
   document.querySelectorAll("[data-close]").forEach(el => el.addEventListener("click", closeEditor));
   const cur = () => state.lage.items.find(i => i.id === it.id) || it;   // frisch aus State (Sync-sicher)
+  // Beschriftung live speichern (nicht erst bei „Fertig“) + sofort in die Legende ziehen
+  const shTxt = $("#sh-text");
+  if(shTxt) shTxt.addEventListener("input", () => { cur().text = shTxt.value; markChange(); lgSetLegLabel(it.id, shTxt.value); });
   document.querySelectorAll("[data-shcolor]").forEach(b => b.addEventListener("click", () => {
     const c = cur(); c.color = b.dataset.shcolor;
     document.querySelectorAll("[data-shcolor]").forEach(x =>
@@ -5443,7 +5557,7 @@ function openLgShapeEdit(id){
 function openLgFormEdit(id){
   const it = state.lage.items.find(i => i.id === id);
   if(!it) return;
-  const names = { fw:"Rot", thw:"Blau", brk:"Gold", pol:"Grün" };
+  const names = LG_COLOR_NAMES;
   const shapes = [ { s:"circle", n:"Kreis" }, { s:"square", n:"Quadrat" }, { s:"rect", n:"Rechteck" } ];
   $("#sheetHost").innerHTML = `
   <div class="sheet-backdrop" data-close="1"></div>

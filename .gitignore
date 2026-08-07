@@ -5,3 +5,5 @@ dist/
 server/elwis-daten.json
 server/elwis-daten.json.tmp
 server/backups/
+dist.alt/
+dist.neu/
