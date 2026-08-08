@@ -5510,15 +5510,18 @@ function lgMapClick(latlng){
     state.lage.items.push(it); const nid = it.id;
     lgTool = null; markChange(); render(); openLgShapeEdit(nid); return;
   }
-  if(lgTool.startsWith("gefahrgut:")){                     // Absperr-Kreis + (bei Wind) Ausbreitungskeil
+  if(lgTool.startsWith("gefahrgut:")){                     // Absperr-Kreis + Ausbreitungskeil
     const [r, keil] = lgTool.slice(10).split(":").map(Number);
     const ll = [latlng.lat, latlng.lng];
     state.lage.items.push({ id:uid(), type:"circle", ll, radiusM:r, color:"fw", text:"Absperrbereich" });
-    if(keil > 0 && state.lage.wind){
-      const bearing = (state.lage.wind.dir + 180) % 360;
+    const hatWind = !!state.lage.wind;
+    if(keil > 0){
+      const bearing = hatWind ? (state.lage.wind.dir + 180) % 360 : 90;   // ohne Wind: vorläufig nach Osten
       state.lage.items.push({ id:uid(), type:"sector", ll:[ll[0], ll[1]], bearingDeg:bearing, reachM:keil, halfAngleDeg:22.5, color:"fw", text:"Ausbreitung (Anhalt)" });
     }
-    lgTool = null; markChange(); render(); return;
+    lgTool = null; markChange(); render();
+    if(keil > 0 && !hatWind) modalInfo("Kein Wind gesetzt – der Ausbreitungskeil zeigt vorläufig nach Osten. Windrichtung über die „＋ Wind\"-Fahne oben rechts auf der Karte setzen, dann im Keil auf „nach aktuellem Wind ausrichten\" tippen.");
+    return;
   }
   if(!lgTool) return;
   if(lgTool === "car"){
