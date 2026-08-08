@@ -6491,10 +6491,19 @@ function syncColOf(name){
 let _syncSnap = null;
 function syncSnapLoad(){ return _syncSnap; }
 function syncSnapSave(s){ _syncSnap = s; idbSet("sync-snap", s).catch(()=>{}); }
+/* Einsatz-Stammdaten FELDWEISE als Singletons ("einsatz:stichwort" …) + lageBg.
+   So merged der Server jedes Feld einzeln per Zeitstempel – gleichzeitige Bearbeitung
+   verschiedener Felder überschreibt sich nicht mehr gegenseitig. */
+function syncSingleValues(){
+  const s = { lageBg: state.lage.bg };
+  for(const f of Object.keys(state.einsatz)) s["einsatz:" + f] = state.einsatz[f];
+  return s;
+}
 function syncSnapshotVomZustand(){
-  const snap = { einsatzId: state.einsatzId,
-    singletons: { einsatz: JSON.stringify(state.einsatz), lageBg: JSON.stringify(state.lage.bg) },
-    collections: {} };
+  const singletons = {};
+  const vals = syncSingleValues();
+  for(const k of Object.keys(vals)) singletons[k] = JSON.stringify(vals[k]);
+  const snap = { einsatzId: state.einsatzId, singletons, collections: {} };
   for(const name of SYNC_COLS){
     const col = {};
     for(const rec of (syncColOf(name) || [])) col[rec.id] = JSON.stringify(rec);
@@ -6510,7 +6519,7 @@ function syncDiff(){
   const out = { clientId: syncClientId(), einsatzId: state.einsatzId, einsatzStart: state.einsatzStart,
     seq: SYNC.seq, singletons: {}, collections: {}, tombstones: {} };
   let pending = 0;
-  const singles = { einsatz: state.einsatz, lageBg: state.lage.bg };
+  const singles = syncSingleValues();   // feldweise: einsatz:stichwort, einsatz:ort, …, lageBg
   for(const k of Object.keys(singles)){
     const j = JSON.stringify(singles[k]);
     if(!passt || !snap.singletons || snap.singletons[k] !== j){
@@ -6545,8 +6554,13 @@ function syncDiff(){
 function syncApply(server){
   state.einsatzId = server.einsatzId;
   state.einsatzStart = server.einsatzStart;
-  if(server.singletons && server.singletons.einsatz) state.einsatz = server.singletons.einsatz.v;
-  if(server.singletons && server.singletons.lageBg) state.lage.bg = server.singletons.lageBg.v || "";
+  const sg = server.singletons || {};
+  // Altbestand-Kompatibilität: hat der Server nur den alten „einsatz"-Block (kein Feld), übernehmen
+  if(sg.einsatz && !Object.keys(sg).some(k => k.startsWith("einsatz:"))) state.einsatz = sg.einsatz.v;
+  for(const k of Object.keys(sg)){
+    if(k === "lageBg") state.lage.bg = sg.lageBg.v || "";
+    else if(k.startsWith("einsatz:")) state.einsatz[k.slice(8)] = sg[k].v;   // feldweise mergen
+  }
   for(const name of SYNC_COLS){
     const arr = (server.collections && server.collections[name]) || [];
     if(name === "lageItems") state.lage.items = arr;
