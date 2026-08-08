@@ -302,6 +302,10 @@ function defaultConfig(){
     ugName:"UG-Weiden",
     elwFunk:"Kater Weiden 1/12/1",   // Funkrufname des ELW – vorbelegt als Empfänger im Funktagebuch
     w3wKey:"VLTV5K26",                // what3words-API-Key (für die 3-Wörter → Adresse-Umwandlung, nur online)
+    geoProvider:"nominatim",          // Geocoding-Anbieter: nominatim | geoapify | photon
+    geoKey:"",                        // API-Key (Geoapify) bzw. leer
+    geoUrl:"",                        // eigener Endpoint (Photon self-hosted), z. B. https://photon.example.de
+
     prefixes:{ FW:"Florian", BRK:"RK", POL:"Donau", THW:"Heros", SON:"" },
     ilsName:"ILS Nordoberpfalz",
     ilsGruppe:{mode:"TMO",gruppe:""},
@@ -1066,6 +1070,19 @@ function renderSettingsSheet(){
         <input id="cfg-w3w" class="mono" value="${esc(c.w3wKey||"")}" placeholder="kostenlos bei what3words registrieren" autocomplete="off">
         <p class="hint">Ermöglicht in den Einsatzstammdaten die Umwandlung von <em>3 Wörtern</em> in eine echte Adresse (nur online). Ohne Key bleibt die Funktion inaktiv.</p>
       </div>
+      <div class="field">
+        <label for="cfg-geoprov">Adress-Suche / Geocoding-Anbieter</label>
+        <select id="cfg-geoprov">
+          <option value="nominatim" ${(c.geoProvider||"nominatim")==="nominatim"?"selected":""}>OpenStreetMap / Nominatim (kostenlos, nicht für kommerziell)</option>
+          <option value="geoapify" ${c.geoProvider==="geoapify"?"selected":""}>Geoapify (API-Key, EU, kommerziell)</option>
+          <option value="photon" ${c.geoProvider==="photon"?"selected":""}>Photon (eigener Server, self-hosted)</option>
+        </select>
+        <div id="cfg-geo-extra" style="margin-top:8px">
+          <input id="cfg-geokey" class="mono" value="${esc(c.geoKey||"")}" placeholder="Geoapify API-Key" autocomplete="off" style="${c.geoProvider==="geoapify"?"":"display:none"}">
+          <input id="cfg-geourl" class="mono" value="${esc(c.geoUrl||"")}" placeholder="Photon-Endpoint, z. B. https://photon.example.de" autocomplete="off" style="${c.geoProvider==="photon"?"":"display:none"}">
+        </div>
+        <p class="hint">Wird genutzt, um die Lagekarte auf den Einsatzort zu zoomen und Pumpen-Adressen zu ermitteln. Für den kommerziellen Betrieb Geoapify (Key) oder eigenen Photon-Server wählen. Ohne Anbieter/Netz tippt man die Adresse selbst.</p>
+      </div>
       <div class="field"><label style="margin-bottom:10px">Komm-Skizze / Leitstelle</label>
         <div class="form-grid">
           <div class="field"><label for="cfg-ils">Leitstelle</label>
@@ -1146,6 +1163,9 @@ function renderSettingsSheet(){
     state.config.ugName = $("#cfg-ug").value.trim();
     state.config.elwFunk = $("#cfg-elw").value.trim();
     state.config.w3wKey = $("#cfg-w3w").value.trim();
+    state.config.geoProvider = $("#cfg-geoprov").value;
+    state.config.geoKey = $("#cfg-geokey").value.trim();
+    state.config.geoUrl = $("#cfg-geourl").value.trim();
     state.config.ilsName = $("#cfg-ils").value.trim();
     state.config.ilsGruppe = { mode: $("#cfg-ils-mode").value, gruppe: $("#cfg-ilsgrp").value.trim() };
     document.querySelectorAll("[data-pfx]").forEach(inp => {
@@ -1198,6 +1218,12 @@ function renderSettingsSheet(){
   $("#cfg-fk-add").addEventListener("click", fkAdd);
   ["cfg-fk-name","cfg-fk-funktion","cfg-fk-funkruf","cfg-fk-einheit"].forEach(id =>
     $("#"+id).addEventListener("keydown", e => { if(e.key === "Enter"){ e.preventDefault(); fkAdd(); } }));
+  const geoProvSel = $("#cfg-geoprov");
+  if(geoProvSel) geoProvSel.addEventListener("change", () => {   // passendes Zusatzfeld zeigen
+    const v = geoProvSel.value;
+    $("#cfg-geokey").style.display = v === "geoapify" ? "" : "none";
+    $("#cfg-geourl").style.display = v === "photon" ? "" : "none";
+  });
   $("#cfg-save").addEventListener("click", () => {
     leseSettings();
     markChange(); closeEditor(); render();
@@ -5147,21 +5173,54 @@ function lgRevealWackel(id, map){
   panned ? setTimeout(doWackel, 320) : doWackel();
 }
 /* Adresse → Koordinaten (OpenStreetMap/Nominatim, nur online) */
+/* Geocoding-Anbieter konfigurierbar: nominatim (Default) | geoapify | photon (self-hosted).
+   Alle Antworten werden auf die Nominatim-Form { address:{road,house_number,…}, display_name }
+   bzw. [lat,lng] normalisiert – die Aufrufer bleiben unverändert. */
+function geoProvider(){ return state.config.geoProvider || "nominatim"; }
+function geoKey(){ return (state.config.geoKey || "").trim(); }
+function geoBase(){ return (state.config.geoUrl || "").trim().replace(/\/+$/, ""); }
 function lgGeocode(q, cb){
-  if(!q){ cb(null); return; }
-  fetch("https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=de&q=" + encodeURIComponent(q),
-    { headers:{ "Accept":"application/json" } })
-    .then(r => r.ok ? r.json() : [])
-    .then(a => cb(a && a[0] ? [parseFloat(a[0].lat), parseFloat(a[0].lon)] : null))
+  if(!q || navigator.onLine === false){ cb(null); return; }
+  const p = geoProvider();
+  let url, pick;
+  if(p === "geoapify"){
+    if(!geoKey()){ cb(null); return; }
+    url = `https://api.geoapify.com/v1/geocode/search?text=${encodeURIComponent(q)}&filter=countrycode:de&limit=1&format=json&apiKey=${encodeURIComponent(geoKey())}`;
+    pick = d => d && d.results && d.results[0] ? [d.results[0].lat, d.results[0].lon] : null;
+  }else if(p === "photon"){
+    url = `${geoBase() || "https://photon.komoot.io"}/api?q=${encodeURIComponent(q)}&limit=1&lang=de`;
+    pick = d => { const f = d && d.features && d.features[0]; return f ? [f.geometry.coordinates[1], f.geometry.coordinates[0]] : null; };
+  }else{
+    url = `https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=de&q=${encodeURIComponent(q)}`;
+    pick = a => Array.isArray(a) && a[0] ? [parseFloat(a[0].lat), parseFloat(a[0].lon)] : null;
+  }
+  fetch(url, { headers:{ "Accept":"application/json" } })
+    .then(r => r.ok ? r.json() : null)
+    .then(d => cb(d ? pick(d) : null))
     .catch(() => cb(null));
 }
 function lgEinsatzAdresse(){ return (state.einsatz.ort || state.einsatz.objekt || "").trim(); }
-/* Koordinaten → Adresse (OpenStreetMap/Nominatim Reverse, nur online) */
+/* Koordinaten → Adresse (Anbieter konfigurierbar, nur online) */
 function reverseGeocode(lat, lng, cb){
-  fetch("https://nominatim.openstreetmap.org/reverse?format=json&zoom=18&addressdetails=1&lat=" + lat + "&lon=" + lng,
-    { headers:{ "Accept":"application/json" } })
+  if(navigator.onLine === false){ cb(null); return; }
+  const p = geoProvider();
+  let url, norm;
+  if(p === "geoapify"){
+    if(!geoKey()){ cb(null); return; }
+    url = `https://api.geoapify.com/v1/geocode/reverse?lat=${lat}&lon=${lng}&lang=de&format=json&apiKey=${encodeURIComponent(geoKey())}`;
+    norm = d => { const r = d && d.results && d.results[0]; return r ? { address:{ road:r.street, house_number:r.housenumber, postcode:r.postcode, city:r.city, town:r.town, village:r.village, suburb:r.suburb, hamlet:r.hamlet, neighbourhood:r.district, municipality:r.municipality }, display_name:r.formatted } : null; };
+  }else if(p === "photon"){
+    url = `${geoBase() || "https://photon.komoot.io"}/reverse?lat=${lat}&lon=${lng}&lang=de`;
+    norm = d => { const f = d && d.features && d.features[0]; if(!f) return null; const pr = f.properties || {};
+      return { address:{ road:pr.street, house_number:pr.housenumber, postcode:pr.postcode, city:pr.city, town:pr.town, village:pr.village, suburb:pr.district, hamlet:pr.locality, neighbourhood:pr.district, municipality:pr.county },
+        display_name:[pr.name, pr.street && (pr.street + (pr.housenumber ? " " + pr.housenumber : "")), pr.postcode && (pr.postcode + " " + (pr.city||"")), pr.city && !pr.postcode ? pr.city : ""].filter(Boolean).join(", ") }; };
+  }else{
+    url = `https://nominatim.openstreetmap.org/reverse?format=json&zoom=18&addressdetails=1&lat=${lat}&lon=${lng}`;
+    norm = d => d && !d.error ? d : null;   // schon Nominatim-Form
+  }
+  fetch(url, { headers:{ "Accept":"application/json" } })
     .then(r => r.ok ? r.json() : null)
-    .then(d => cb(d && !d.error ? d : null))
+    .then(d => cb(d ? norm(d) : null))
     .catch(() => cb(null));
 }
 function nominatimAdresse(d){
