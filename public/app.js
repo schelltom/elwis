@@ -324,6 +324,7 @@ function defaultState(){
     lage: { items: [], bg: "", snapshots: [], mode: "raster", mapView: null, mapLayer: "luftbild" },
     funk: [], besprechungen: [], anforderungen: [], checks: [], fotos: [],
     asTraeger: [], asTrupps: [], asSub: "sammelstelle",
+    lwbilanz: { rohre: { c:0, b:0, ww:0 }, extra:0, kont:0, vorrat:0 },
     monHide: { panels: {}, ab: {} },
     config: defaultConfig(),
     wlan:false, pending:0, view:"einsatz", ksub:"einheiten",
@@ -359,6 +360,7 @@ function zustandAufbauen(stored){
   if(!Array.isArray(state.anforderungen)) state.anforderungen = [];
   if(!Array.isArray(state.checks)) state.checks = [];
   if(!Array.isArray(state.fotos)) state.fotos = [];
+  if(!state.lwbilanz || !state.lwbilanz.rohre) state.lwbilanz = defaultState().lwbilanz;
   if(!Array.isArray(state.asTraeger)) state.asTraeger = [];
   if(!Array.isArray(state.asTrupps)) state.asTrupps = [];
   // Abschnitte: alte TMO/DMO-Felder auf Führungs-/Arbeitsrufgruppe (je Modus + Gruppe) migrieren
@@ -762,6 +764,61 @@ function lgPrintFoerder(line){
       <p style="font-size:8pt;color:#666;margin-top:16px">Anhalt nach Faustformel – keine hydraulische Berechnung. Gedruckt am ${new Date().toLocaleString("de-DE")} · ELWIS · ${esc(state.config.ugName)}</p>
     </section>`;
   window.print();
+}
+/* ---- Löschwasser-Bilanz ---- */
+const LW_ROHRE = [
+  { key:"c",  n:"C-Rohr",       q:100 },
+  { key:"b",  n:"B-Rohr",       q:400 },
+  { key:"ww", n:"Wasserwerfer", q:1600 },
+];
+function lwBedarf(b){ return LW_ROHRE.reduce((s, r) => s + (b.rohre[r.key]||0) * r.q, 0) + (Number(b.extra)||0); }
+function lwBilanzInfo(b){
+  const bedarf = lwBedarf(b), kont = Number(b.kont)||0, vorrat = Number(b.vorrat)||0;
+  const bilanz = kont - bedarf;
+  if(bedarf === 0) return { bedarf, cls:"", text:"Kein Bedarf eingetragen." };
+  if(bilanz >= 0) return { bedarf, cls:"ok", text:`Versorgung gesichert · Überschuss ${bilanz} l/min` };
+  const defizit = -bilanz;
+  if(vorrat <= 0) return { bedarf, cls:"krit", text:`Defizit ${defizit} l/min · KEIN Vorrat – sofort Nachschub!` };
+  const min = vorrat / defizit;
+  return { bedarf, cls:"warn", text:`Defizit ${defizit} l/min · Vorrat (${vorrat} l) reicht noch ${min<1?"unter 1":Math.floor(min)} min` };
+}
+function openLwBilanz(){
+  const b = state.lwbilanz;
+  // Kontinuierliche Zufuhr aus einer berechneten Wasserförderungs-Strecke vorschlagen
+  if(!b.kont){ const line = state.lage.items.find(i => i.type === "line" && Array.isArray(i.pumps)); if(line) b.kont = lgFoerderParams(line).q; }
+  const subLine = () => { const info = lwBilanzInfo(b); return `Bedarf ${info.bedarf} l/min · Zufuhr ${Number(b.kont)||0} l/min`; };
+  const drawResult = () => { const info = lwBilanzInfo(b); const r = document.querySelector(".lw-result");
+    if(r){ r.className = "lw-result " + info.cls; r.querySelector(".lw-big").textContent = info.text; r.querySelector(".lw-sub").textContent = subLine(); } };
+  const draw = () => {
+    const info = lwBilanzInfo(b);
+    $("#lw-body").innerHTML = `
+      <div class="field"><label>Bedarf (Strahlrohre)</label>
+        <div class="lw-rohre">
+          ${LW_ROHRE.map(r => `<div class="lw-rohr"><span class="lw-rohr-n">${r.n} <small>${r.q} l/min</small></span>
+            <div class="lw-count"><button data-lwdec="${r.key}" aria-label="weniger">−</button><b>${b.rohre[r.key]||0}</b><button data-lwinc="${r.key}" aria-label="mehr">+</button></div></div>`).join("")}
+        </div>
+        <label style="margin-top:10px">Zusätzlich (l/min)</label>
+        <input id="lw-extra" type="number" min="0" value="${b.extra||0}" style="max-width:150px"></div>
+      <div class="field"><label>Angebot</label>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+          <label class="lg-fparam">Kontinuierlich (Hydrant/Förderstrecke) <input id="lw-kont" type="number" min="0" value="${b.kont||0}"> l/min</label>
+          <label class="lg-fparam">Vorrat (Tanks gesamt) <input id="lw-vorrat" type="number" min="0" value="${b.vorrat||0}"> l</label>
+        </div></div>
+      <div class="lw-result ${info.cls}"><div class="lw-big">${esc(info.text)}</div><div class="lw-sub">${esc(subLine())}</div></div>
+      <p class="hint">C-Rohr ≈ 100 · B-Rohr ≈ 400 · Wasserwerfer ≈ 1600 l/min (Anhalt). „Reicht noch" = Vorrat ÷ Defizit.</p>`;
+    document.querySelectorAll("[data-lwinc]").forEach(x => x.addEventListener("click", () => { b.rohre[x.dataset.lwinc] = (b.rohre[x.dataset.lwinc]||0) + 1; markChange(); draw(); }));
+    document.querySelectorAll("[data-lwdec]").forEach(x => x.addEventListener("click", () => { b.rohre[x.dataset.lwdec] = Math.max(0, (b.rohre[x.dataset.lwdec]||0) - 1); markChange(); draw(); }));
+    [["#lw-extra","extra"],["#lw-kont","kont"],["#lw-vorrat","vorrat"]].forEach(([id,f]) => { const el = $(id); if(el) el.addEventListener("input", () => { b[f] = Number(el.value)||0; markChange(); drawResult(); }); });
+  };
+  $("#sheetHost").innerHTML = `
+  <div class="sheet-backdrop" data-close="1"></div>
+  <div class="sheet" role="dialog" aria-modal="true" aria-label="Löschwasser-Bilanz" style="max-height:78vh">
+    <div class="sheet-head"><h2>Löschwasser-Bilanz</h2><button class="sheet-close" data-close="1" aria-label="Schließen">×</button></div>
+    <div class="sheet-body" id="lw-body"></div>
+    <div class="sheet-foot"><button class="btn btn-primary btn-block" data-close="1">Fertig</button></div>
+  </div>`;
+  document.querySelectorAll("[data-close]").forEach(el => el.addEventListener("click", closeEditor));
+  draw();
 }
 // Nächster Punkt auf dem Weg zu pt → Distanz d (m), planar cos-korrigiert
 function lgProjectOnPolyline(llpoints, pt){
@@ -4820,6 +4877,7 @@ function renderLagekarte(){
     </div>`}
     <p class="hint">Symbol wählen und auf die Karte tippen · Symbole mit dem Finger verschieben · Antippen zum Beschriften oder Löschen · Nummern-Marker halten die Karte frei, der Text steht in der Legende.</p>
     <div class="lg-bgrow">
+      <button class="btn btn-ghost" id="lgLwBilanz">💧 Löschwasser-Bilanz</button>
       <button class="btn btn-ghost" id="lgPrint">Lagekarte drucken</button>
       <button class="btn btn-ghost" id="lgBgBtn">Foto / Lageplan als Hintergrund</button>
       <button class="btn btn-ghost" id="lgBgPaste" title="z. B. Screenshot aus dem BayernAtlas – auch mit Strg+V">Aus Zwischenablage einfügen</button>
@@ -5518,6 +5576,7 @@ function wireLagekarte(){
     b.addEventListener("click", () => openLgEdit(b.dataset.lgedit)));
   document.querySelectorAll("[data-lgfind]").forEach(b => b.addEventListener("click", () => lgRevealWackel(b.dataset.lgfind, lgMapObj)));
   const lgPr = $("#lgPrint"); if(lgPr) lgPr.addEventListener("click", doPrintLagekarte);
+  const lgLw = $("#lgLwBilanz"); if(lgLw) lgLw.addEventListener("click", openLwBilanz);
   document.querySelectorAll("select[data-lgcar]").forEach(sel =>
     sel.addEventListener("change", () => {
       const it = state.lage.items.find(i => i.id === sel.dataset.lgcar);
@@ -6495,7 +6554,7 @@ function syncSnapSave(s){ _syncSnap = s; idbSet("sync-snap", s).catch(()=>{}); }
    So merged der Server jedes Feld einzeln per Zeitstempel – gleichzeitige Bearbeitung
    verschiedener Felder überschreibt sich nicht mehr gegenseitig. */
 function syncSingleValues(){
-  const s = { lageBg: state.lage.bg };
+  const s = { lageBg: state.lage.bg, lwbilanz: state.lwbilanz };
   for(const f of Object.keys(state.einsatz)) s["einsatz:" + f] = state.einsatz[f];
   return s;
 }
@@ -6559,6 +6618,7 @@ function syncApply(server){
   if(sg.einsatz && !Object.keys(sg).some(k => k.startsWith("einsatz:"))) state.einsatz = sg.einsatz.v;
   for(const k of Object.keys(sg)){
     if(k === "lageBg") state.lage.bg = sg.lageBg.v || "";
+    else if(k === "lwbilanz"){ if(sg.lwbilanz.v) state.lwbilanz = sg.lwbilanz.v; }
     else if(k.startsWith("einsatz:")) state.einsatz[k.slice(8)] = sg[k].v;   // feldweise mergen
   }
   for(const name of SYNC_COLS){
