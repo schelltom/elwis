@@ -4582,10 +4582,10 @@ const LG_SUBMENUS = {
     { sym:"gewaesser", n:"Offenes Gewässer" }, { sym:"zisterne", n:"Zisterne / Behälter" } ] },
   // Gefahrgut-Absperrbereich: r = Absperrradius (m), keil = Ausbreitung nach Lee (m, 0 = keiner)
   gefahrgut: { label:"Gefahrgut-Absperrbereich (Anhalt FwDV 500 / GAMS)", opts:[
-    { n:"ABC unklar · Erstmaßnahme", r:50,  keil:0 },
-    { n:"Kleine Freisetzung / Gas",  r:50,  keil:150 },
-    { n:"Größere Freisetzung / Tank", r:100, keil:300 },
-    { n:"Explosionsgefahr",          r:300, keil:0 } ] },
+    { n:"ABC unklar – nur Absperrkreis",   r:50,  keil:0 },
+    { n:"Gas / Dampf klein  + Keil",       r:50,  keil:150 },
+    { n:"Tank / große Freisetzung  + Keil", r:100, keil:300 },
+    { n:"Explosionsgefahr – nur Kreis",    r:300, keil:0 } ] },
 };
 let lgBig = false;        // Legende ausgeblendet (Karte über volle Breite, Werkzeuge bleiben)
 let lgPresent = false;    // Präsentationsmodus: Karte + Legende bildschirmfüllend, nur Zoom
