@@ -275,7 +275,7 @@ const TABS = [
     icon:'<rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4.5V3h6v1.5"/><path d="M8.5 10h7M8.5 13.5h7M8.5 17h4.5"/>' },
   { id:"kraefte",  label:"Kräfte",
     icon:'<path d="M2.5 15V9.5A1.5 1.5 0 0 1 4 8h9.5v7"/><path d="M13.5 9.5H18l3.5 3.5v2h-8"/><circle cx="6.5" cy="17" r="2"/><circle cx="17" cy="17" r="2"/><path d="M8.5 17h6.5M2.5 15v2h2"/>' },
-  { id:"funk",     label:"Funk",
+  { id:"funk",     label:"Tagebuch",
     icon:'<circle cx="12" cy="7" r="2.2"/><path d="M12 9.2V21M8.5 21h7"/><path d="M7.2 2.6a7.4 7.4 0 0 0 0 8.8M16.8 2.6a7.4 7.4 0 0 1 0 8.8"/>' },
   { id:"skizze",   label:"Komm-Skizze", nurGross:true,
     icon:'<rect x="8.5" y="3" width="7" height="5" rx="1"/><rect x="2.5" y="16" width="7" height="5" rx="1"/><rect x="14.5" y="16" width="7" height="5" rx="1"/><path d="M12 8v4M6 16v-4h12v4"/>' },
@@ -2807,26 +2807,48 @@ function fsSuggestions(){
   ["Leitstelle", "ELW", state.config.elwFunk, state.config.ugName].forEach(add);
   return s;
 }
+const FS_TYPEN = { funk:"Funk", ereignis:"Ereignis", befehl:"Befehl", lage:"Lagemeldung" };
+const FS_EREIGNIS_PRESETS = ["Menschenrettung", "Feuer unter Kontrolle", "Feuer aus",
+  "Nachforderung", "Einsatzabschnitt gebildet", "Lage erkundet", "Einsatzstelle übergeben"];
+let fsFilter = "alle";   // alle | ereignis | wichtig
+const fsTyp = f => f.typ || "funk";
 function renderFunk(){
-  const list = [...state.funk].sort((a,b) => (b.zeit||"").localeCompare(a.zeit||""));
-  const items = list.length ? `<div class="fs-list">${list.map(f => `
-    <button class="fs-item ${f.wichtig?"imp":""}" data-editfs="${esc(f.id)}">
+  const all = [...state.funk].sort((a,b) => (b.zeit||"").localeCompare(a.zeit||""));
+  const list = all.filter(f => fsFilter === "alle" ? true : fsFilter === "ereignis" ? fsTyp(f) !== "funk" : f.wichtig);
+  const ereignisN = state.funk.filter(f => fsTyp(f) !== "funk").length;
+  const rowHtml = f => {
+    const head = fsTyp(f) === "funk"
+      ? `<span class="fs-route"><strong>${esc(f.von)}</strong> → <strong>${esc(f.an)}</strong></span>`
+      : `<span class="chip fs-typ fs-typ-${fsTyp(f)}">${esc(FS_TYPEN[fsTyp(f)] || "")}</span>`;
+    return `<button class="fs-item ${f.wichtig?"imp":""}" data-editfs="${esc(f.id)}">
       <div class="fs-head">
         <span class="fs-zeit mono">${istHeute(f.zeit) ? "" : fmtTagKurz(f.zeit) + " "}${fmtZeit(f.zeit)}</span>
-        <span class="fs-route"><strong>${esc(f.von)}</strong> → <strong>${esc(f.an)}</strong></span>
+        ${head}
         ${f.wichtig ? `<span class="chip chip-imp">WICHTIG</span>` : ""}
       </div>
       <div class="fs-text">${esc(f.text)}</div>
-    </button>`).join("")}</div>`
-  : `<div class="empty"><p>Noch keine Funksprüche erfasst.<br>Sender, Empfänger, Inhalt – Zeitstempel kommt automatisch.</p></div>`;
+    </button>`;
+  };
+  const items = list.length ? `<div class="fs-list">${list.map(rowHtml).join("")}</div>`
+    : `<div class="empty"><p>${fsFilter === "alle"
+        ? "Noch keine Einträge.<br>Funksprüche und wichtige Ereignisse landen hier – Zeitstempel kommt automatisch."
+        : "Keine Einträge in diesem Filter."}</p></div>`;
+  const presets = FS_EREIGNIS_PRESETS.map(x => `<button class="fs-ev" data-fsev="${esc(x)}">${esc(x)}</button>`).join("");
   return `
   <div class="statstrip" role="status">
-    <div class="stat"><div class="k">Funksprüche</div><div class="v mono">${state.funk.length}</div><div class="s">gesamt</div></div>
+    <div class="stat"><div class="k">Einträge</div><div class="v mono">${state.funk.length}</div><div class="s">gesamt</div></div>
+    <div class="stat"><div class="k">Ereignisse</div><div class="v mono">${ereignisN}</div><div class="s">erfasst</div></div>
     <div class="stat"><div class="k">Wichtig</div><div class="v mono">${state.funk.filter(f=>f.wichtig).length}</div><div class="s">markiert</div></div>
-    <div class="stat"><div class="k">Zuletzt</div><div class="v mono">${list.length?fmtZeit(list[0].zeit):"–"}</div><div class="s">Uhrzeit</div></div>
   </div>
-  <button class="btn btn-primary btn-block" id="btnAddFs" style="margin-bottom:10px">＋&nbsp; Funkspruch erfassen</button>
-  ${state.funk.length ? `<button class="btn btn-ghost btn-block" id="btnPrintFs" style="margin-bottom:16px">Funksprüche drucken (Einsatztagebuch)</button>` : ""}
+  <div class="field" style="margin-bottom:10px"><label style="margin-bottom:6px">Ereignis schnell erfassen (ein Tipp = Zeitstempel)</label>
+    <div class="fs-events">${presets}</div></div>
+  <button class="btn btn-primary btn-block" id="btnAddFs" style="margin-bottom:10px">＋&nbsp; Eintrag erfassen (Funk / Ereignis)</button>
+  <div class="seg fs-filter" role="tablist" style="max-width:none;margin-bottom:12px">
+    <button role="tab" data-fsfilter="alle" class="${fsFilter==="alle"?"active":""}">Alle</button>
+    <button role="tab" data-fsfilter="ereignis" class="${fsFilter==="ereignis"?"active":""}">Ereignisse</button>
+    <button role="tab" data-fsfilter="wichtig" class="${fsFilter==="wichtig"?"active":""}">Wichtig</button>
+  </div>
+  ${state.funk.length ? `<button class="btn btn-ghost btn-block" id="btnPrintFs" style="margin-bottom:16px">Einsatztagebuch drucken</button>` : ""}
   ${items}`;
 }
 function wireFunk(){
@@ -2835,6 +2857,11 @@ function wireFunk(){
   if(pr) pr.addEventListener("click", doPrintFunk);
   document.querySelectorAll("[data-editfs]").forEach(el =>
     el.addEventListener("click", () => openFsEditor(el.dataset.editfs)));
+  document.querySelectorAll("[data-fsev]").forEach(b => b.addEventListener("click", () => {   // Ereignis-Schnellerfassung
+    state.funk.push({ id:uid(), zeit:new Date().toISOString(), typ:"ereignis", von:"", an:"", text:b.dataset.fsev, wichtig:true });
+    markChange(); render();
+  }));
+  document.querySelectorAll("[data-fsfilter]").forEach(b => b.addEventListener("click", () => { fsFilter = b.dataset.fsfilter; render(); }));
 }
 function doPrintFunk(){
   const e = state.einsatz;
@@ -2843,17 +2870,18 @@ function doPrintFunk(){
   $("#printArea").innerHTML = `
     <div class="p-head">
       <div>
-        <div class="p-sub">${esc(state.config.ugName)} · Einsatztagebuch · Funksprüche</div>
+        <div class="p-sub">${esc(state.config.ugName)} · Einsatztagebuch (Funk & Ereignisse)</div>
         <h1>${esc(e.stichwort) || "Ohne Stichwort"}</h1>
         <div>${esc(e.ort)}${e.beginn ? " · Alarm " + fmtDatum(e.beginn) + " " + fmtZeit(e.beginn) + " Uhr" : ""}</div>
       </div>
       <div class="p-mark">ELWIS</div>
     </div>
-    <table><thead><tr><th>Nr.</th><th>Zeit</th><th>Von</th><th>An</th><th>Inhalt</th></tr></thead><tbody>
+    <table><thead><tr><th>Nr.</th><th>Zeit</th><th>Art</th><th>Von</th><th>An</th><th>Inhalt</th></tr></thead><tbody>
       ${sorted.map((f,idx) => `
       <tr>
         <td class="p-mono">${idx+1}${f.wichtig ? " !" : ""}</td>
         <td class="p-mono">${mehrtaegig ? fmtTagKurz(f.zeit) + " " : ""}${fmtZeit(f.zeit)}</td>
+        <td>${esc(FS_TYPEN[f.typ||"funk"] || "")}</td>
         <td>${esc(f.von)}</td>
         <td>${esc(f.an)}</td>
         <td>${f.wichtig ? `<strong>${esc(f.text)}</strong>` : esc(f.text)}</td>
@@ -2872,7 +2900,7 @@ function openFsEditor(id){
     if(!f) return;
     editingFs = { fs: {...f}, isNew:false };
   }else{
-    editingFs = { fs: { id:uid(), zeit:new Date().toISOString(), von:"", an:state.config.elwFunk||"Kater Weiden 1/12/1",
+    editingFs = { fs: { id:uid(), zeit:new Date().toISOString(), typ:"funk", von:"", an:state.config.elwFunk||"Kater Weiden 1/12/1",
       text:"", wichtig:false }, isNew:true };
   }
   renderFsSheet();
@@ -2883,9 +2911,9 @@ function renderFsSheet(){
   const sugg = fsSuggestions().map(x => `<option value="${esc(x)}">`).join("");
   $("#sheetHost").innerHTML = `
   <div class="sheet-backdrop" data-close="1"></div>
-  <div class="sheet" role="dialog" aria-modal="true" aria-label="${editingFs.isNew?"Funkspruch erfassen":"Funkspruch bearbeiten"}">
+  <div class="sheet" role="dialog" aria-modal="true" aria-label="${editingFs.isNew?"Eintrag erfassen":"Eintrag bearbeiten"}">
     <div class="sheet-head">
-      <h2>${editingFs.isNew ? "Funkspruch erfassen" : "Funkspruch bearbeiten"}</h2>
+      <h2>${editingFs.isNew ? "Eintrag erfassen" : "Eintrag bearbeiten"}</h2>
       <button class="sheet-close" data-close="1" aria-label="Schließen">×</button>
     </div>
     <div class="sheet-body">
@@ -2898,7 +2926,11 @@ function renderFsSheet(){
         </div>
         <p class="hint">Vorbelegt mit jetzt – bei Einsätzen über Mitternacht Datum anpassen.</p>
       </div>
-      <div class="field">
+      <div class="field"><label>Art des Eintrags</label>
+        <div class="seg" id="fs-typ-seg" role="tablist" style="max-width:none">
+          ${Object.entries(FS_TYPEN).map(([t,n]) => `<button type="button" role="tab" data-fstyp="${t}" class="${(f.typ||"funk")===t?"active":""}">${esc(n)}</button>`).join("")}
+        </div></div>
+      <div class="field" id="fs-vonan" style="${(f.typ||"funk")==="funk"?"":"display:none"}">
         <div class="swap-row">
           <div><label for="fs-von">Von (Sender)</label>
             <input id="fs-von" value="${esc(f.von)}" list="fs-sugg" placeholder="z. B. Florian Weiden 1/40/1" autocomplete="off"></div>
@@ -2929,6 +2961,11 @@ function renderFsSheet(){
   </div>`;
   document.querySelectorAll("[data-close]").forEach(el => el.addEventListener("click", closeEditor));
   attachDictation($("#fs-mic"), $("#fs-text"));
+  document.querySelectorAll("[data-fstyp]").forEach(b => b.addEventListener("click", () => {
+    f.typ = b.dataset.fstyp;
+    document.querySelectorAll("[data-fstyp]").forEach(x => x.classList.toggle("active", x.dataset.fstyp === f.typ));
+    const va = $("#fs-vonan"); if(va) va.style.display = f.typ === "funk" ? "" : "none";   // Von/An nur bei Funk
+  }));
   $("#fs-swap").addEventListener("click", () => {
     const v = $("#fs-von").value;
     $("#fs-von").value = $("#fs-an").value;
@@ -2958,7 +2995,7 @@ function renderFsSheet(){
     f.von = $("#fs-von").value.trim();
     f.an = $("#fs-an").value.trim();
     f.text = $("#fs-text").value.trim();
-    if(!f.text && !f.von){ $("#fs-von").focus(); return; }
+    if(!f.text){ $("#fs-text").focus(); return; }   // Text ist bei jedem Eintrag Pflicht
     const idx = state.funk.findIndex(x => x.id === f.id);
     if(idx >= 0) state.funk[idx] = f; else state.funk.push(f);
     markChange(); closeEditor(); render();
@@ -4118,7 +4155,7 @@ function renderMonitor(){
       <div class="fsm-top">
         ${f.wichtig ? `<span class="imp-dot" title="Wichtig"></span>` : ""}
         <span class="z mono">${istHeute(f.zeit) ? "" : fmtTagKurz(f.zeit) + " "}${fmtZeit(f.zeit)}</span>
-        <span>${esc(f.von)} → ${esc(f.an)}</span>
+        <span>${(f.typ||"funk") === "funk" ? esc(f.von) + " → " + esc(f.an) : esc(FS_TYPEN[f.typ] || "Ereignis")}</span>
       </div>
       <div class="fsm-text">${esc(f.text)}</div>
     </div>`).join("");

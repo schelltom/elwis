@@ -877,6 +877,16 @@
   .fs-zeit{font-weight:750;color:var(--ink)}
   .fs-route strong{color:var(--ink)}
   .chip-imp{background:color-mix(in oklab,var(--accent) 14%,var(--surface));color:var(--accent)}
+  /* Tagebuch: Eintrags-Typ-Chips (Ereignis/Befehl/Lagemeldung) */
+  .fs-typ{font-weight:800;font-size:.72rem;letter-spacing:.03em}
+  .fs-typ-ereignis{background:color-mix(in oklab,var(--good) 16%,var(--surface));color:var(--good)}
+  .fs-typ-befehl{background:color-mix(in oklab,var(--thw) 16%,var(--surface));color:var(--thw)}
+  .fs-typ-lage{background:color-mix(in oklab,var(--warn) 20%,var(--surface));color:var(--warn)}
+  /* Ereignis-Schnellknöpfe */
+  .fs-events{display:flex;flex-wrap:wrap;gap:8px}
+  .fs-ev{padding:9px 13px;border-radius:999px;border:1.5px solid var(--line);background:var(--surface);
+    font-weight:700;font-size:.85rem;cursor:pointer;min-height:42px}
+  .fs-ev:active{background:var(--surface2)}
   .fs-text{margin-top:5px;font-size:.95rem;line-height:1.4}
   .swap-row{display:grid;grid-template-columns:1fr 52px 1fr;gap:8px;align-items:end}
   .swap-row .swapbtn{width:52px;height:48px;border-radius:10px;border:1.5px solid var(--line);
