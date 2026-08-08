@@ -5244,7 +5244,7 @@ function lgAddItems(layer, interactive, items){
         far.bindTooltip("", { direction:"top", offset:[0,-8], className:"lg-measure" });
         far.on("dragstart", () => far.setTooltipContent(laengeStr(calc().r)).openTooltip());
         far.on("drag", () => { const c = calc(); shp.setLatLngs(lgSectorLatLngs(i.ll, c.br, c.r, i.halfAngleDeg)); far.setTooltipContent(laengeStr(c.r)); });
-        far.on("dragend", () => { const c = calc(); i.bearingDeg = c.br; i.reachM = c.r; far.closeTooltip(); markChange(); lgSetLegMeasure(i.id, laengeStr(c.r)); lgMapRenderLayers(); });
+        far.on("dragend", () => { const c = calc(); i.bearingDeg = c.br; i.reachM = c.r; i.windLinked = false; far.closeTooltip(); markChange(); lgSetLegMeasure(i.id, laengeStr(c.r)); lgMapRenderLayers(); });
         far.addTo(layer);
       }
       continue;
@@ -5362,6 +5362,15 @@ function lgMonMapSetup(){
   });
   setTimeout(() => { if(lgMonObj) lgMonObj.invalidateSize(); }, 60);
 }
+/* Alle windgebundenen Keile (sector.windLinked) auf die aktuelle Windrichtung (nach Lee) drehen.
+   Manuell ausgerichtete Keile (windLinked=false) bleiben unberührt. */
+function lgWindAlignSectors(){
+  if(!state.lage.wind) return 0;
+  const b = (state.lage.wind.dir + 180) % 360;
+  let n = 0;
+  state.lage.items.forEach(i => { if(i.type === "sector" && i.windLinked){ i.bearingDeg = b; n++; } });
+  return n;
+}
 /* Wind-Fahne (Richtung + Stärke) auf eine Karte legen; interactive → antippbar zum Bearbeiten */
 function lgWindBadge(mapElId, interactive){
   const el = document.getElementById(mapElId);
@@ -5438,6 +5447,7 @@ function openLgWindEdit(){
   $("#wind-del").addEventListener("click", () => { state.lage.wind = null; markChange(); closeEditor(); render(); });
   $("#wind-save").addEventListener("click", () => {
     state.lage.wind = { dir:Number(dirSel.value), kmh:Math.max(0, Number(kmhInp.value)||0) };
+    lgWindAlignSectors();   // windgebundene Keile automatisch mitdrehen
     markChange(); closeEditor(); render();
   });
 }
@@ -5506,7 +5516,7 @@ function lgMapClick(latlng){
   if(lgTool === "sector"){                                 // Gefahrenbereich: Apex setzen, Keil nach Lee
     const w = state.lage.wind;
     const bearing = w ? (w.dir + 180) % 360 : 90;          // Zugrichtung = windabgewandt, sonst Ost
-    const it = { id:uid(), type:"sector", ll:[latlng.lat, latlng.lng], bearingDeg:bearing, reachM:200, halfAngleDeg:22.5, color:"fw" };
+    const it = { id:uid(), type:"sector", ll:[latlng.lat, latlng.lng], bearingDeg:bearing, reachM:200, halfAngleDeg:22.5, color:"fw", windLinked:true };
     state.lage.items.push(it); const nid = it.id;
     lgTool = null; markChange(); render(); openLgShapeEdit(nid); return;
   }
@@ -5517,7 +5527,7 @@ function lgMapClick(latlng){
     const hatWind = !!state.lage.wind;
     if(keil > 0){
       const bearing = hatWind ? (state.lage.wind.dir + 180) % 360 : 90;   // ohne Wind: vorläufig nach Osten
-      state.lage.items.push({ id:uid(), type:"sector", ll:[ll[0], ll[1]], bearingDeg:bearing, reachM:keil, halfAngleDeg:22.5, color:"fw", text:"Ausbreitung (Anhalt)" });
+      state.lage.items.push({ id:uid(), type:"sector", ll:[ll[0], ll[1]], bearingDeg:bearing, reachM:keil, halfAngleDeg:22.5, color:"fw", text:"Ausbreitung (Anhalt)", windLinked:true });
     }
     lgTool = null; markChange(); render();
     if(keil > 0 && !hatWind) modalInfo("Kein Wind gesetzt – der Ausbreitungskeil zeigt vorläufig nach Osten. Windrichtung über die „＋ Wind\"-Fahne oben rechts auf der Karte setzen, dann im Keil auf „nach aktuellem Wind ausrichten\" tippen.");
@@ -6024,7 +6034,8 @@ function openLgShapeEdit(id){
         <div class="mono" style="font-size:1.1rem;font-weight:800">r ${laengeStr(it.radiusM)} · ⌀ ${laengeStr(it.radiusM*2)} · ${flaecheStr(Math.PI*it.radiusM*it.radiusM)}</div></div>` : ""}
       ${it.type === "sector" && it.reachM > 0 ? `
       <div class="field"><label>Reichweite · Zugrichtung</label>
-        <div class="mono" style="font-size:1.1rem;font-weight:800">${laengeStr(it.reachM)} · nach ${windHimmel(it.bearingDeg)}</div></div>
+        <div class="mono" style="font-size:1.1rem;font-weight:800">${laengeStr(it.reachM)} · nach ${windHimmel(it.bearingDeg)}</div>
+        <div class="lg-leg-qm" style="margin-top:4px">${it.windLinked ? "🧭 folgt automatisch der Windrichtung" : "📌 manuell ausgerichtet – dreht nicht mit dem Wind mit"}</div></div>
       <div class="field"><label>Öffnungswinkel</label>
         <div class="seg" style="max-width:none">
           ${[["Schmal",15],["Normal",22.5],["Breit",35]].map(([n,a]) => `<button type="button" data-secang="${a}" class="${Math.abs((it.halfAngleDeg||22.5)-a)<0.1?"active":""}">${n} (${a*2}°)</button>`).join("")}
@@ -6069,8 +6080,8 @@ function openLgShapeEdit(id){
     markChange(); render();
   }));
   const secWind = $("#sec-wind");
-  if(secWind) secWind.addEventListener("click", () => {   // Keil nach aktuellem Wind ausrichten
-    if(state.lage.wind){ cur().bearingDeg = (state.lage.wind.dir + 180) % 360; markChange(); render(); }
+  if(secWind) secWind.addEventListener("click", () => {   // Keil nach aktuellem Wind ausrichten + wieder ankoppeln
+    if(state.lage.wind){ const c = cur(); c.bearingDeg = (state.lage.wind.dir + 180) % 360; c.windLinked = true; markChange(); render(); }
   });
   const elevBtn = $("#sh-elev-btn");
   if(elevBtn) elevBtn.addEventListener("click", async () => {   // Höhenprofil über Open-Meteo
