@@ -591,6 +591,8 @@
   .lg-subopt{display:flex;align-items:center;gap:8px;padding:6px 10px;border:1.5px solid var(--line);
     border-radius:8px;background:var(--surface);font-weight:650;font-size:.85rem}
   .lg-subopt:active{background:var(--surface2)}
+  .lg-gefahr-r{display:inline-grid;place-items:center;min-width:38px;padding:2px 6px;border-radius:6px;
+    background:var(--fw);color:#fff;font-weight:800;font-size:.72rem}
   .lg-unitchips{display:flex;flex-wrap:wrap;gap:8px}
   .lg-unitchips .chip{min-height:44px;padding:6px 12px;font-size:.8rem;cursor:pointer;
     border:1.5px solid transparent}

@@ -4543,6 +4543,12 @@ const LG_SUBMENUS = {
   wasser: { label:"Wasserentnahme", opts:[
     { sym:"hydrant", n:"Hydrant" }, { sym:"hydrantO", n:"Überflurhydrant" },
     { sym:"gewaesser", n:"Offenes Gewässer" }, { sym:"zisterne", n:"Zisterne / Behälter" } ] },
+  // Gefahrgut-Absperrbereich: r = Absperrradius (m), keil = Ausbreitung nach Lee (m, 0 = keiner)
+  gefahrgut: { label:"Gefahrgut-Absperrbereich (Anhalt FwDV 500 / GAMS)", opts:[
+    { n:"ABC unklar · Erstmaßnahme", r:50,  keil:0 },
+    { n:"Kleine Freisetzung / Gas",  r:50,  keil:150 },
+    { n:"Größere Freisetzung / Tank", r:100, keil:300 },
+    { n:"Explosionsgefahr",          r:300, keil:0 } ] },
 };
 let lgBig = false;        // Legende ausgeblendet (Karte über volle Breite, Werkzeuge bleiben)
 let lgPresent = false;    // Präsentationsmodus: Karte + Legende bildschirmfüllend, nur Zoom
@@ -4571,6 +4577,7 @@ const LG_TOOLS = [
   { t:"arrow",   n:"Pfeil",           preview:'<svg viewBox="0 0 40 30" style="width:38px;height:28px"><line x1="5" y1="15" x2="27" y2="15" stroke="var(--thw)" stroke-width="3" stroke-linecap="round"/><path d="M25 8 L37 15 L25 22 Z" fill="var(--thw)"/></svg>' },
   { t:"circle",  n:"Radius-Kreis",    preview:'<svg viewBox="0 0 40 30" style="width:34px;height:26px"><circle cx="20" cy="15" r="11" fill="none" stroke="var(--fw)" stroke-width="3"/><circle cx="20" cy="15" r="2" fill="var(--fw)"/></svg>' },
   { t:"sector",  n:"Gefahrenbereich", preview:'<svg viewBox="0 0 40 30" style="width:38px;height:28px"><path d="M6 15 L36 5 L36 25 Z" fill="var(--fw)" fill-opacity="0.3" stroke="var(--fw)" stroke-width="2.5" stroke-linejoin="round"/></svg>' },
+  { t:"gefahrgut", n:"Gefahrgut",     preview:'<svg viewBox="0 0 40 30" style="width:34px;height:26px"><circle cx="20" cy="15" r="11" fill="none" stroke="var(--fw)" stroke-width="2.5" stroke-dasharray="4 3"/><path d="M20 9 L25 20 L15 20 Z" fill="var(--warn)" stroke="#1a1a1a" stroke-width="1.2" stroke-linejoin="round"/><rect x="19.1" y="13" width="1.8" height="4" fill="#1a1a1a"/><rect x="19.1" y="18" width="1.8" height="1.6" fill="#1a1a1a"/></svg>' },
   { t:"symsearch", n:"Taktische Zeichen", preview:'<svg viewBox="0 0 24 24" style="width:30px;height:30px;stroke:var(--ink2);fill:none;stroke-width:2;stroke-linecap:round"><circle cx="10.5" cy="10.5" r="6"/><path d="M15 15l5.5 5.5"/></svg>' },
 ];
 const LG_SHAPE_COLORS = ["fw","thw","brk","pol","orange","violett","tuerkis"];
@@ -4712,7 +4719,7 @@ function lgCarOptions(currentUnitId){
 }
 function renderLagekarte(){
   // Pfeil + Radius-Kreis nur im Karten-Modus (Richtung/Radius sind nur georeferenziert sinnvoll)
-  const tools = LG_TOOLS.filter(t => state.lage.mode === "karte" || (t.t !== "arrow" && t.t !== "circle" && t.t !== "sector")).map(t => `
+  const tools = LG_TOOLS.filter(t => state.lage.mode === "karte" || !["arrow","circle","sector","gefahrgut"].includes(t.t)).map(t => `
     <button class="lg-tool" data-lgtool="${t.t}" aria-pressed="${lgTool===t.t || lgSubmenu===t.t}">
       ${t.preview}<span>${t.n}</span>
     </button>`).join("");
@@ -4726,8 +4733,10 @@ function renderLagekarte(){
   }else if(lgTool && lgTool.startsWith("sym:")){
     const s = SYM_KATALOG.find(x => x.key === lgTool.slice(4));
     statusText = s ? `Auf die Karte tippen, um „${s.name}“ zu platzieren` : "";
+  }else if(lgTool && lgTool.startsWith("gefahrgut:")){
+    statusText = "Gefahrgut: auf die Gefahrenstelle tippen – Absperrbereich" + (state.lage.wind ? " + Ausbreitungskeil nach Lee" : " (Wind für Keil setzen)");
   }else if(lgTool){
-    const t = LG_TOOLS.find(x => x.t === lgTool);
+    const t = LG_TOOLS.find(x => x.t === lgTool) || { n:"Symbol" };
     statusText = lgTool === "line" || lgTool === "area"
       ? `${t.n}: Punkte nacheinander auf die Karte tippen`
       : lgTool === "arrow"  ? "Pfeil: Start antippen, dann Ziel"
@@ -4851,6 +4860,7 @@ function renderLagekarte(){
     <div class="lg-submenu">
       <span class="lg-sub-lbl">${esc(LG_SUBMENUS[lgSubmenu].label)}:</span>
       ${LG_SUBMENUS[lgSubmenu].opts.map(o => {
+        if(!o.sym) return `<button class="lg-subopt" data-lggefahr="${o.r}:${o.keil||0}"><span class="lg-gefahr-r">${o.r} m</span><span>${esc(o.n)}</span></button>`;
         const s = SYM_KATALOG.find(x => x.key === o.sym);
         return `<button class="lg-subopt" data-lgsub="${esc(o.sym)}">${s ? symTile(s, true) : ""}<span>${esc(o.n)}</span></button>`;
       }).join("")}
@@ -5463,6 +5473,16 @@ function lgMapClick(latlng){
     state.lage.items.push(it); const nid = it.id;
     lgTool = null; markChange(); render(); openLgShapeEdit(nid); return;
   }
+  if(lgTool.startsWith("gefahrgut:")){                     // Absperr-Kreis + (bei Wind) Ausbreitungskeil
+    const [r, keil] = lgTool.slice(10).split(":").map(Number);
+    const ll = [latlng.lat, latlng.lng];
+    state.lage.items.push({ id:uid(), type:"circle", ll, radiusM:r, color:"fw", text:"Absperrbereich" });
+    if(keil > 0 && state.lage.wind){
+      const bearing = (state.lage.wind.dir + 180) % 360;
+      state.lage.items.push({ id:uid(), type:"sector", ll:[ll[0], ll[1]], bearingDeg:bearing, reachM:keil, halfAngleDeg:22.5, color:"fw", text:"Ausbreitung (Anhalt)" });
+    }
+    lgTool = null; markChange(); render(); return;
+  }
   if(!lgTool) return;
   if(lgTool === "car"){
     const num = state.lage.items.filter(i => i.type==="car").reduce((m,i)=>Math.max(m,i.num||0),0)+1;
@@ -5558,6 +5578,10 @@ function wireLagekarte(){
   }));
   document.querySelectorAll("[data-lgsub]").forEach(b => b.addEventListener("click", () => {
     lgTool = "sym:" + b.dataset.lgsub;           // Untermenü-Auswahl → passendes Symbol platzieren
+    lgSubmenu = null; lgDraw = null; render();
+  }));
+  document.querySelectorAll("[data-lggefahr]").forEach(b => b.addEventListener("click", () => {
+    lgTool = "gefahrgut:" + b.dataset.lggefahr;   // Gefahrgut-Preset (Radius:Keil) → dann auf die Karte tippen
     lgSubmenu = null; lgDraw = null; render();
   }));
   const cancel = $("#lgCancel");
