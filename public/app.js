@@ -699,9 +699,11 @@ function lgFoerderUebersichtHtml(line){
   const lastD = pumps.length ? pumps[pumps.length - 1].d : 0;
   const rest = (line.elev && line.elev.profile) ? lgFoerderRest(line.elev.profile, p, lastD) : null;
   const trupps = Math.max(1, Math.ceil(len / 350));
-  const pumpList = pumps.length
-    ? pumps.map((pu, i) => `P${i+1} bei ${laengeStr(pu.d)} · ${pu.addr ? esc(pu.addr) : "Adresse wird ermittelt …"} · Eingang ~${p.pIn} bar → auf ${p.pOut} bar`).join("<br>")
-    : "keine Verstärkerpumpe nötig";
+  const fpZeile = `FP – Förderpumpe (Saugstelle) bei 0 m · ${line.fpAddr ? esc(line.fpAddr) : "Adresse wird ermittelt …"} · fördert mit ${p.pOut} bar`;
+  const relay = pumps.length
+    ? pumps.map((pu, i) => `P${i+1} bei ${laengeStr(pu.d)} · ${pu.addr ? esc(pu.addr) : "Adresse wird ermittelt …"} · Eingang ~${p.pIn} bar → auf ${p.pOut} bar`)
+    : ["keine Verstärkerpumpe nötig"];
+  const pumpList = [fpZeile].concat(relay).join("<br>");
   const restStr = rest != null ? `${rest.toFixed(1)} bar${rest < 3 ? " ⚠ knapp – Strecke/Förderstrom prüfen" : ""}` : "–";
   const rows = [
     ["Wegstrecke", esc(laengeStr(len) + (dh != null ? ` · Höhe Δ ${dh>=0?"+":""}${Math.round(dh)} m` : ""))],
@@ -720,20 +722,23 @@ function lgFoerderUebersichtHtml(line){
   if(line.elev && line.elev.loss > 30) rows.push(["Achtung Gefälle", "Druckbegrenzungsventil an der/den Pumpe(n) vorsehen"]);
   return `<table class="lg-ueber"><tbody>${rows.map(([k,v]) => `<tr><th>${esc(k)}</th><td>${v}</td></tr>`).join("")}</tbody></table>`;
 }
-// Straße + Hausnummer je Pumpe (Nominatim, sequenziell mit 1,1 s Abstand wegen Rate-Limit)
-function lgPumpAddresses(pumps, onEach){
+// Straße + Hausnummer für Saugstelle + Pumpen (Nominatim, sequenziell wegen Rate-Limit)
+function lgPumpAddresses(line, onEach){
   if(navigator.onLine === false) return;
-  const todo = pumps.filter(p => !p.addr);
+  const targets = [];
+  const src = line.llpoints && line.llpoints[0];
+  if(src && !line.fpAddr) targets.push({ lat:src.lat, lng:src.lng, apply:v => line.fpAddr = v });
+  (line.pumps || []).forEach(p => { if(!p.addr) targets.push({ lat:p.lat, lng:p.lng, apply:v => p.addr = v }); });
   let i = 0;
   const next = () => {
-    if(i >= todo.length) return;
-    const p = todo[i++];
-    reverseGeocode(p.lat, p.lng, d => {
+    if(i >= targets.length) return;
+    const t = targets[i++];
+    reverseGeocode(t.lat, t.lng, d => {
       const a = (d && d.address) || {};
-      p.addr = [a.road, a.house_number].filter(Boolean).join(" ")   // bevorzugt Straße + Hausnr.
+      t.apply([a.road, a.house_number].filter(Boolean).join(" ")   // bevorzugt Straße + Hausnr.
         || a.hamlet || a.neighbourhood || a.suburb || a.village || a.town || a.city   // sonst Ortsteil/Ort
         || (d && d.display_name ? d.display_name.split(",").slice(0, 2).join(",").trim() : "")
-        || "freies Gelände";
+        || "freies Gelände");
       if(onEach) onEach();
       setTimeout(next, 1200);
     });
@@ -5167,7 +5172,10 @@ function lgAddItems(layer, interactive, items){
           hm.addTo(layer);
         });
       }
-      if(i.type === "line" && Array.isArray(i.pumps) && i.pumps.length){   // Verstärkerpumpen der Wasserförderung
+      if(i.type === "line" && Array.isArray(i.pumps) && i.llpoints.length){   // Wasserförderung: Förderpumpe + Verstärkerpumpen
+        const src = i.llpoints[0];   // Förderpumpe (FP) an der Saugstelle / offenes Gewässer
+        L.marker([src.lat, src.lng], { interactive:false, zIndexOffset:1500,
+          icon: L.divIcon({ className:"lg-divicon", iconSize:[0,0], html:`<div class="lg-mk"><span class="lg-pump fp">FP</span></div>` }) }).addTo(layer);
         i.pumps.forEach((p, idx) => {
           const pm = L.marker([p.lat, p.lng], { draggable:interactive, zIndexOffset:1500,
             icon: L.divIcon({ className:"lg-divicon", iconSize:[0,0], html:`<div class="lg-mk"><span class="lg-pump">P${idx+1}</span></div>` }) });
@@ -5177,7 +5185,7 @@ function lgAddItems(layer, interactive, items){
             i.pumps[idx] = { d:nd, lat:at.lat, lng:at.lng, manual:true };
             if(i.elev && i.elev.profile) i.pumps = i.pumps.slice(0, idx+1).concat(lgFoerderPumps(i.elev.profile, lgFoerderParams(i), nd));
             markChange(); lgMapRenderLayers();
-            lgPumpAddresses(i.pumps, () => markChange());   // verschobene/neue Pumpen: Adresse nachladen
+            lgPumpAddresses(i, () => markChange());   // verschobene/neue Pumpen: Adresse nachladen
 
           });
           pm.addTo(layer);
@@ -5968,7 +5976,7 @@ function openLgShapeEdit(id){
     refresh();
     const pbtn = $("#sh-print-btn"); if(pbtn) pbtn.style.display = "";
     lgMapRenderLayers();
-    lgPumpAddresses(c.pumps, refresh);   // Straße/Hausnummer im Hintergrund nachladen
+    lgPumpAddresses(c, refresh);   // Straße/Hausnummer im Hintergrund nachladen
   });
   const printBtn = $("#sh-print-btn");
   if(printBtn) printBtn.addEventListener("click", () => lgPrintFoerder(cur()));
