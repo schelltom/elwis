@@ -5119,11 +5119,11 @@ function lgColorCss(c){
 }
 /* Kartengrundlage (OpenData) je Schlüssel als frische Leaflet-Ebene */
 function lgBaseLayer(key){
-  const bayVV = "Bayerische Vermessungsverwaltung – geodaten.bayern.de";
+  const bayVV = "© Bayerische Vermessungsverwaltung – geodaten.bayern.de (dl-de/by-2.0)";
   if(key === "basis") return L.tileLayer("https://wmtsod{s}.bayernwolke.de/wmts/by_webkarte/smerc/{z}/{x}/{y}",
-    { subdomains:["1","2","3","4","5","6","7"], maxZoom:20, attribution:bayVV });
+    { subdomains:["1","2","3","4","5","6","7"], maxZoom:20, attribution:"Karte: " + bayVV });
   if(key === "strasse") return L.tileLayer("https://sgx.geodatenzentrum.de/wmts_topplus_open/tile/1.0.0/web/default/WEBMERCATOR/{z}/{y}/{x}.png",
-    { maxZoom:18, attribution:"© Bundesamt für Kartographie und Geodäsie (TopPlusOpen)" });
+    { maxZoom:18, attribution:"Karte: © Bundesamt für Kartographie und Geodäsie – TopPlusOpen (dl-de/by-2.0)" });
   return L.tileLayer.wms("https://geoservices.bayern.de/od/wms/dop/v1/dop40",
     { layers:"by_dop40c", format:"image/png", version:"1.3.0", maxZoom:20, attribution:"Luftbild: " + bayVV });
 }

@@ -704,6 +704,11 @@
   .lg-windbadge .lg-wind-txt b{font-size:.9rem;font-weight:800}
   .lg-windbadge .lg-wind-txt span{font-size:.72rem;color:var(--ink2);font-weight:600}
   .lg-windbadge .lg-wind-add{font-size:.85rem;font-weight:700;color:var(--ink2)}
+  /* Karten-Attribution (Namensnennung) deutlich sichtbar – Pflicht bei OpenData (dl-de/by-2.0) */
+  .leaflet-control-attribution{background:rgba(255,255,255,.93)!important;color:#1a1a1a!important;
+    font-size:.72rem!important;font-weight:600;padding:3px 9px!important;line-height:1.4;
+    max-width:min(92vw,560px);box-shadow:0 0 0 1px rgba(0,0,0,.18)}
+  .leaflet-control-attribution a{color:#1a4f9c!important;text-decoration:none}
   /* Verstärkerpumpe der Wasserförderung */
   .lg-pump{display:grid;place-items:center;min-width:27px;height:27px;padding:0 5px;border-radius:50%;
     background:var(--thw);color:#fff;font-weight:800;font-size:.78rem;border:2.5px solid #fff;
