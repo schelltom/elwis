@@ -505,6 +505,25 @@ const AB_EL_ID = "EL";
 const AB_EL = { id:AB_EL_ID, name:"Einsatzleitung", el:true };
 /* Abschnitte für Auswahl-Listen: Einsatzleitung immer vorne, dann echte Abschnitte. */
 function abschnitteWahl(){ return [AB_EL, ...state.abschnitte]; }
+/* Gemeinsame, sortierbare Reihenfolge der Abschnitts-Kacheln INKL. Einsatzleitung ("EL").
+   Einzige Quelle für Einsatz-Liste und Monitor. Initial steht die Einsatzleitung vorne.
+   Reconciliert: stale Ids raus, EL sicherstellen, neue Abschnitte hinten anhängen. */
+function abOrderList(){
+  const ids = state.abschnitte.map(a => a.id);
+  let ord = Array.isArray(state.abOrder) ? state.abOrder.slice() : [AB_EL_ID, ...ids];
+  ord = ord.filter(id => id === AB_EL_ID || ids.includes(id));
+  if(!ord.includes(AB_EL_ID)) ord.unshift(AB_EL_ID);
+  for(const id of ids) if(!ord.includes(id)) ord.push(id);
+  state.abOrder = ord;
+  return ord;
+}
+/* Neue Reihenfolge übernehmen: abOrder speichern UND state.abschnitte danach ausrichten,
+   damit Monitor/Bericht/Skizze (die state.abschnitte iterieren) automatisch folgen. */
+function abOrderAnwenden(ord){
+  state.abOrder = ord.slice();
+  const byId = new Map(state.abschnitte.map(a => [a.id, a]));
+  state.abschnitte = ord.filter(id => id !== AB_EL_ID && byId.has(id)).map(id => byId.get(id));
+}
 /* Ansprechpartner + optionale Telefonnummer des Abschnittsleiters als eine Zeile. */
 function abAnsprech(a){
   const ap = (a.ansprechpartner || "").trim();
@@ -1265,19 +1284,32 @@ function renderSettingsSheet(){
 function renderEinsatz(){
   const e = state.einsatz;
   const elN = state.einheiten.filter(u => u.abschnitt === AB_EL_ID).length;
-  const elRow = `
-    <div class="arch">
-      <div class="a-main">
-        <div class="a-t">${esc(AB_EL.name)} <span class="badge-schaetz" style="vertical-align:middle">fest</span></div>
-        <div class="a-s">${elN} Einheit${elN===1?"":"en"} · kein echter Abschnitt – für Kräfte direkt bei der Einsatzleitung</div>
-      </div>
-    </div>`;
-  const abRows = state.abschnitte.map(a => {
+  const ord = abOrderList();               // Reihenfolge inkl. Einsatzleitung ("EL")
+  const lastIdx = ord.length - 1;
+  const ordBtns = (id, idx) => `
+      <div class="ab-order">
+        <button class="ab-ord-btn" data-abup="${esc(id)}" aria-label="Nach oben" title="Nach oben" ${idx===0?"disabled":""}>▲</button>
+        <button class="ab-ord-btn" data-abdown="${esc(id)}" aria-label="Nach unten" title="Nach unten" ${idx===lastIdx?"disabled":""}>▼</button>
+      </div>`;
+  const abRows = ord.map((id, idx) => {
+    if(id === AB_EL_ID){
+      return `
+      <div class="arch">
+        ${ordBtns(id, idx)}
+        <div class="a-main">
+          <div class="a-t">${esc(AB_EL.name)} <span class="badge-schaetz" style="vertical-align:middle">fest</span></div>
+          <div class="a-s">${elN} Einheit${elN===1?"":"en"} · kein echter Abschnitt – für Kräfte direkt bei der Einsatzleitung</div>
+        </div>
+      </div>`;
+    }
+    const a = state.abschnitte.find(x => x.id === id);
+    if(!a) return "";
     const n = state.einheiten.filter(u => u.abschnitt === a.id).length;
     const funk = [abAnsprech(a) ? `AP ${abAnsprech(a)}` : "",
       gruppeStr(a.fuehrung), gruppeStr(a.arbeit)].filter(Boolean).join(" · ");
     return `
     <div class="arch">
+      ${ordBtns(a.id, idx)}
       <div class="a-main">
         <div class="a-t">${esc(a.name)}</div>
         <div class="a-s">${n} Einheit${n===1?"":"en"}${funk ? " · " + esc(funk) : ""}</div>
@@ -1346,8 +1378,9 @@ function renderEinsatz(){
           <option value="DMO" ${(e.ilsGruppe||{}).mode==="DMO"?"selected":""}>DMO</option>
         </select>
         <input id="f-ils-grp" class="mono" value="${esc((e.ilsGruppe||{}).gruppe||"")}" placeholder="z. B. 2772"></div></div>
-    ${elRow}
-    ${abRows || `<p class="hint" style="margin:12px 0">Noch keine echten Abschnitte – Einheiten lassen sich bei der Erfassung einem Abschnitt oder direkt der Einsatzleitung zuordnen.</p>`}
+    ${ord.length > 1 ? `<p class="hint" style="margin:10px 0 6px">Reihenfolge mit den Pfeilen ▲▼ ändern (Einsatzleitung inklusive) – wirkt auch im Monitor, Bericht und in der Komm-Skizze.</p>` : ""}
+    ${abRows}
+    ${state.abschnitte.length ? "" : `<p class="hint" style="margin:12px 0">Noch keine echten Abschnitte – Einheiten lassen sich bei der Erfassung einem Abschnitt oder direkt der Einsatzleitung zuordnen.</p>`}
     <button class="btn btn-ghost btn-block" id="abAdd" style="margin-top:12px">＋&nbsp; Abschnitt anlegen</button>
   </div>
   <div class="card">
@@ -1400,6 +1433,17 @@ function wireEinsatz(){
   $("#abAdd").addEventListener("click", () => openAbEditor(null));
   document.querySelectorAll("[data-abedit]").forEach(b =>
     b.addEventListener("click", () => openAbEditor(b.dataset.abedit)));
+  const abMove = (id, dir) => {
+    const ord = abOrderList();             // inkl. "EL"
+    const i = ord.indexOf(id);
+    const j = i + dir;
+    if(i < 0 || j < 0 || j >= ord.length) return;
+    [ord[i], ord[j]] = [ord[j], ord[i]];   // tauschen
+    abOrderAnwenden(ord);                    // Reihenfolge + state.abschnitte angleichen
+    markChange(); render();
+  };
+  document.querySelectorAll("[data-abup]").forEach(b => b.addEventListener("click", () => abMove(b.dataset.abup, -1)));
+  document.querySelectorAll("[data-abdown]").forEach(b => b.addEventListener("click", () => abMove(b.dataset.abdown, 1)));
   $("#btnExport").addEventListener("click", exportEinsatz);
   $("#btnImport").addEventListener("click", () => $("#importFile").click());
   $("#importFile").addEventListener("change", e => {
@@ -1687,8 +1731,9 @@ function baueArchivEintrag(){
     checks: state.checks.map(c => ({...c, punkte:c.punkte.map(p => ({...p}))})),
     asTraeger: state.asTraeger.map(t => ({...t})),
     asTrupps: state.asTrupps.map(t => ({...t, memberIds:[...(t.memberIds||[])]})),
-    lage: { bg: state.lage.bg, mode: state.lage.mode, mapView: state.lage.mapView, mapLayer: state.lage.mapLayer,
+    lage: { bg: state.lage.bg, bgW: state.lage.bgW, bgH: state.lage.bgH, mode: state.lage.mode, mapView: state.lage.mapView, mapLayer: state.lage.mapLayer,
       items: state.lage.items.map(i => ({...i})),
+      tiles: (state.lage.tiles || []).map(t => ({...t, items: (t.items||[]).map(i => ({...i}))})),
       snapshots: state.lage.snapshots.map(s => ({...s, items: s.items.map(i => ({...i}))})) },
     fotos: state.fotos.map(f => ({...f})),
   };
@@ -1750,79 +1795,70 @@ async function endeEinsatz(){
   render();
   if(await modalConfirm("Einsatz archiviert. Bericht jetzt drucken?", "Drucken", "Später")) openPrintDialog(entry);
 }
-function loadDemo(){
-  const t = (minAgo) => new Date(Date.now() - minAgo*60000).toISOString();
-  const a1 = uid(), a2 = uid();
-  const lbT = new Date(Date.now() + 30*60000);
-  state.einsatz = {
-    stichwort:"B4 – Brand Lagerhalle", ort:"Industriestraße 12, Weiden", objekt:"Lagerhalle Nord", ende:"",
-    beginn: nowLocalInput(), leiter:"KBI Mustermann", bemerkung:"Zwei Abschnitte gebildet",
-    lagebespr: `${String(lbT.getHours()).padStart(2,"0")}:${String(lbT.getMinutes()).padStart(2,"0")}`,
-  };
-  state.abschnitte = [
-    { id:a1, name:"Abschnitt 1 – Brandbekämpfung",  ansprechpartner:"Florian Weiden 3/1",      telefon:"0961 12345", fuehrung:{mode:"TMO",gruppe:"2901"}, arbeit:{mode:"DMO",gruppe:"307_F"} },
-    { id:a2, name:"Abschnitt 2 – Wasserversorgung", ansprechpartner:"Florian Rothenstadt 10/1", telefon:"", fuehrung:{mode:"TMO",gruppe:"2902"}, arbeit:{mode:"DMO",gruppe:"308_F"} },
-  ];
-  state.einheiten = [
-    { id:uid(), org:"FW",  name:"Florian Weiden",      kennung:"40/1", f:0,u:1,m:8, agt:4, ankunft:t(42), abgerueckt:false, abschnitt:a1 },
-    { id:uid(), org:"FW",  name:"Florian Weiden",      kennung:"30/1", f:1,u:0,m:2, agt:0, ankunft:t(40), abgerueckt:false, abschnitt:"EL" },
-    { id:uid(), org:"FW",  name:"Florian Rothenstadt", kennung:"42/1", f:0,u:1,m:5, agt:2, ankunft:t(31), abgerueckt:false, abschnitt:a2 },
-    { id:uid(), org:"BRK", name:"RK Weiden",           kennung:"71/1", f:0,u:1,m:1, agt:0, ankunft:t(28), abgerueckt:false, abschnitt:"" },
-    { id:uid(), org:"POL", name:"Donau",               kennung:"23/1", f:0,u:0,m:2, agt:0, ankunft:t(25), abgerueckt:false, abschnitt:"" },
-    { id:uid(), org:"THW", name:"Heros Weiden",        kennung:"21/25",f:0,u:1,m:3, agt:0, ankunft:t(12), abgerueckt:false, abschnitt:a2 },
-    { id:uid(), org:"FW",  name:"Florian Weiden",      kennung:"11/1", f:1,u:1,m:1, agt:0, ankunft:t(45), abgerueckt:true,  abschnitt:"" },
-    { id:uid(), org:"FW",  name:"Florian Weiden",      kennung:"1/23/1", f:0,u:1,m:2, agt:2, ankunft:t(6), abgerueckt:false, abschnitt:"BR" },
-  ];
-  state.anforderungen = [
-    { id:uid(), was:"DLK 23/12",              status:"alarmiert",   angefordert:t(28), alarmiert:t(24), eingetroffen:"" },
-    { id:uid(), was:"Löschzug FF Nachbarort", status:"angefordert", angefordert:t(10), alarmiert:"",    eingetroffen:"" },
-  ];
-  state.checks = [
-    { id:uid(), name:"Einsatzleiter – Erstmaßnahmen", punkte:[
-      { text:"Lage erkunden",                     done:true,  zeit:t(41) },
-      { text:"Rückmeldung an Leitstelle",         done:true,  zeit:t(38) },
-      { text:"Einsatzstelle absichern",           done:true,  zeit:t(35) },
-      { text:"Bereitstellungsraum festlegen",     done:true,  zeit:t(26) },
-      { text:"Abschnitte bilden",                 done:true,  zeit:t(24) },
-      { text:"Atemschutzüberwachung sicherstellen", done:false, zeit:"" },
-      { text:"Lagekarte anlegen",                 done:true,  zeit:t(18) },
-      { text:"Presse/Behörden informieren",       done:false, zeit:"" },
-      { text:"Lagebesprechung ansetzen",          done:true,  zeit:t(21) },
-    ]},
-  ];
-  state.fotos = [];
-  state.fuehrung = [
-    { id:uid(), org:"FW",  name:"KBI Mustermann", funktion:"Einsatzleiter",            einheit:"" },
-    { id:uid(), org:"FW",  name:"ZF Huber",       funktion:"Abschnittsleiter",         einheit:"Abschnitt 1" },
-    { id:uid(), org:"BRK", name:"H. Meier",       funktion:"Organisatorischer Leiter", einheit:"" },
-    { id:uid(), org:"THW", name:"S. Schmidt",     funktion:"Fachberater THW",          einheit:"" },
-  ];
-  const lf = state.einheiten[0], tlf = state.einheiten[2];
-  state.lage = { bg:"", snapshots:[], items: [
-    { id:uid(), type:"sym", sym:"brand3", label:"Lagerhalle", x:50, y:34 },
-    { id:uid(), type:"car",     num:1, unitId:lf.id,  x:34, y:52 },
-    { id:uid(), type:"car",     num:2, unitId:tlf.id, x:66, y:56 },
-    { id:uid(), type:"el",      label:"ELW 1",       x:16, y:82 },
-    { id:uid(), type:"wasser",  label:"Hydrant",     x:82, y:22 },
-    { id:uid(), type:"gefahr",  num:1, text:"Gasflaschen", x:60, y:24 },
-    { id:uid(), type:"num", num:1, text:"Faltbehälter 10.000 Liter",        x:24, y:30 },
-    { id:uid(), type:"num", num:2, text:"Bereitstellungsraum Parkplatz Süd", x:78, y:78 },
-  ]};
-  state.funk = [
-    { id:uid(), zeit:t(38), von:"Florian Weiden 40/1", an:"ELW",
-      text:"Ankunft Einsatzstelle, Erkundung läuft.", wichtig:false },
-    { id:uid(), zeit:t(30), von:"Florian Weiden 40/1", an:"ELW",
-      text:"Lagemeldung: Vollbrand Lagerhalle, zwei Trupps unter PA im Innenangriff. Nachforderung: 1 Löschzug, Drehleiter.", wichtig:true },
-    { id:uid(), zeit:t(22), von:"ELW", an:"Leitstelle",
-      text:"Nachforderung Löschzug + DLK 23/12 bestätigt, Abschnittsbildung eingeleitet.", wichtig:false },
-    { id:uid(), zeit:t(8),  von:"Heros Weiden 21/25", an:"ELW",
-      text:"Bereitstellungsraum Parkplatz Süd bezogen.", wichtig:false },
-  ];
-  state.besprechungen = [
-    { id:uid(), zeit:t(20), teilnehmer:"EL, AL 1, AL 2, OrgL",
-      protokoll:"Lage: Vollbrand Lagerhalle, Ausbreitung auf Nachbargebäude verhindert.\nBeschluss: Abschnitt 2 verstärkt Wasserversorgung über Faltbehälter.\nAuftrag: THW prüft Statik Giebelwand.\nNächste Besprechung 30 min." },
-  ];
+/* Beispieldaten = ein echter, im Feld gepflegter Einsatz (public/demo-einsatz.json, aus dem
+   Server-Stand rekonstruiert). Beim Laden werden alle Zeitstempel auf „jetzt" verschoben,
+   damit der Beispiel-Einsatz immer aktuell/laufend wirkt. Archiv & Konfiguration bleiben. */
+async function loadDemo(){
+  let demo;
+  try{
+    const url = new URL("demo-einsatz.json", document.baseURI).href;
+    demo = await fetch(url, { cache:"no-store" }).then(r => { if(!r.ok) throw new Error("HTTP " + r.status); return r.json(); });
+  }catch(err){
+    modalInfo("Beispieldaten konnten nicht geladen werden (demo-einsatz.json)." +
+      (navigator.onLine === false ? " Gerät ist offline und die Datei ist noch nicht im Cache." : " " + (err && err.message || "")));
+    return;
+  }
+  demo = JSON.parse(JSON.stringify(demo));   // tiefe Kopie, Original-Fetch unangetastet
+  demoRebaseZeiten(demo);                      // Zeitstempel auf „jetzt" schieben
+  state.einsatz = Object.assign(
+    { stichwort:"", ort:"", objekt:"", beginn:"", ende:"", leiter:"", bereitstellungsraum:"", bereitstellung:false, bemerkung:"", ilsGruppe:{mode:"TMO",gruppe:""} },
+    demo.einsatz || {});
+  state.abschnitte    = demo.abschnitte    || [];
+  state.einheiten     = demo.einheiten     || [];
+  state.fuehrung      = demo.fuehrung      || [];
+  state.funk          = demo.funk          || [];
+  state.besprechungen = demo.besprechungen || [];
+  state.anforderungen = demo.anforderungen || [];
+  state.checks        = demo.checks        || [];
+  state.fotos         = demo.fotos         || [];
+  state.asTraeger     = demo.asTraeger     || [];
+  state.asTrupps      = demo.asTrupps      || [];
+  state.lage = Object.assign({ items:[], bg:"", snapshots:[], mode:"raster", mapView:null, mapLayer:"luftbild" }, demo.lage || {});
+  if(demo.lwbilanz) state.lwbilanz = demo.lwbilanz;
   markChange(); render();
+}
+/* Alle Zeitstempel des Beispiel-Einsatzes verschieben, sodass die jüngste Aktivität ~jetzt liegt;
+   die relativen Abstände (Alarm, Funksprüche, Atemschutzzeiten …) bleiben erhalten. */
+function demoRebaseZeiten(demo){
+  const isISO   = s => typeof s === "string" && /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d/.test(s);   // ISO mit Sekunden/Z
+  const isLocal = s => typeof s === "string" && /^\d{4}-\d\d-\d\dT\d\d:\d\d$/.test(s);         // datetime-local (beginn/ende)
+  const pad = n => String(n).padStart(2, "0");
+  const fmtLocal = d => `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  let maxT = -Infinity;
+  (function scan(v){
+    if(isISO(v)){ const t = Date.parse(v); if(t > maxT) maxT = t; }
+    else if(isLocal(v)){ const t = new Date(v).getTime(); if(t > maxT) maxT = t; }
+    else if(Array.isArray(v)) v.forEach(scan);
+    else if(v && typeof v === "object") Object.values(v).forEach(scan);
+  })(demo);
+  if(!isFinite(maxT)) return;
+  const offset = Date.now() - maxT;
+  const shiftVal = v => {
+    if(isISO(v))   return new Date(Date.parse(v) + offset).toISOString();
+    if(isLocal(v)) return fmtLocal(new Date(new Date(v).getTime() + offset));
+    if(Array.isArray(v) || (v && typeof v === "object")){ shift(v); return v; }
+    return v;
+  };
+  const shift = obj => {
+    if(Array.isArray(obj)) obj.forEach((v, i) => { obj[i] = shiftVal(v); });
+    else if(obj && typeof obj === "object") for(const k of Object.keys(obj)) obj[k] = shiftVal(obj[k]);
+  };
+  shift(demo);
+  // „Nächste Lagebesprechung" (nur HH:MM) auf jetzt + 30 min setzen
+  if(demo.einsatz && demo.einsatz.lagebespr){
+    const d = new Date(Date.now() + 30*60000);
+    demo.einsatz.lagebespr = `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  }
 }
 
 /* ---------------- Ansicht: Kräfte ---------------- */
@@ -2701,6 +2737,8 @@ function renderAbSheet(){
     modalConfirm(`Abschnitt „${a.name}“ löschen? Zugeordnete Einheiten bleiben erhalten (ohne Abschnitt).`).then(ok => { if(!ok) return;
       state.abschnitte = state.abschnitte.filter(x => x.id !== a.id);
       state.einheiten.forEach(u => { if(u.abschnitt === a.id) u.abschnitt = ""; });
+      // automatisch angelegten Abschnittsleiter mit entfernen
+      if(a.leiterFkId){ const fk = state.fuehrung.find(f => f.id === a.leiterFkId); if(fk && fk.autoAb) state.fuehrung = state.fuehrung.filter(f => f.id !== a.leiterFkId); }
       if(a.br) state.einsatz.bereitstellung = false;   // Auto-Abschnitt manuell gelöscht → Schalter aus
       markChange(); closeEditor(); render();
     });
@@ -2713,12 +2751,37 @@ function renderAbSheet(){
     a.fuehrung = { mode: $("#ab-fg-mode").value, gruppe: $("#ab-fg-grp").value.trim() };
     a.arbeit   = { mode: $("#ab-ag-mode").value, gruppe: $("#ab-ag-grp").value.trim(), via: $("#ab-ag-via").value };
     delete a.tmo; delete a.dmo;
+    syncAbschnittsleiterFk(a);   // Ansprechpartner ↔ verknüpfte Führungskraft aktuell halten
     const idx = state.abschnitte.findIndex(x => x.id === a.id);
     if(idx >= 0) state.abschnitte[idx] = a; else state.abschnitte.push(a);
     markChange(); closeEditor(); render();
   });
 }
 
+/* Ansprechpartner eines Abschnitts automatisch als Führungskraft (Abschnittsleiter) führen und
+   mit dem Abschnitt verknüpfen (f.einheit = Abschnittsname). So zählt der Leiter in die Stärke
+   und erscheint in FK-Liste/Skizze/Bericht. Verknüpfung über a.leiterFkId; automatisch angelegte
+   FK tragen autoAb=true (nur die werden auto-aktualisiert/-entfernt, manuelle bleiben unangetastet). */
+function syncAbschnittsleiterFk(a){
+  if(a.br) return;   // Bereitstellungsraum bekommt keinen Auto-Leiter
+  const ap = (a.ansprechpartner || "").trim();
+  const vorhanden = a.leiterFkId ? state.fuehrung.find(f => f.id === a.leiterFkId) : null;
+  if(!ap){
+    if(vorhanden && vorhanden.autoAb) state.fuehrung = state.fuehrung.filter(f => f.id !== vorhanden.id);
+    a.leiterFkId = "";
+    return;
+  }
+  if(vorhanden){
+    if(vorhanden.autoAb){ vorhanden.name = ap; vorhanden.funkrufname = ap; }
+    vorhanden.einheit = a.name;                       // Bindung an (ggf. umbenannten) Abschnitt
+    if(!vorhanden.funktion) vorhanden.funktion = "Abschnittsleiter";
+  }else{
+    const fk = { id:uid(), org:"FW", name:ap, funktion:"Abschnittsleiter", funkrufname:ap,
+      einheit:a.name, tatsaechlich:true, autoAb:true };
+    state.fuehrung.push(fk);
+    a.leiterFkId = fk.id;
+  }
+}
 /* ---------------- Editor: Führungskraft ---------------- */
 function openFkEditor(id){
   if(id){
@@ -2760,9 +2823,20 @@ function renderFkSheet(){
         <select id="fk-abschnitt">
           <option value="">– keinem Abschnitt zugeordnet –</option>
           <option value="${esc(AB_EL.name)}" ${f.einheit===AB_EL.name?"selected":""}>${esc(AB_EL.name)}</option>
-          ${state.abschnitte.map(a => `<option value="${esc(a.name)}" ${f.einheit===a.name?"selected":""}>${esc(a.name)}</option>`).join("")}
+          ${(() => {
+            // Ein Einsatzabschnitt gehört genau einer Führungskraft. Schon von einer ANDEREN
+            // Führungskraft belegte Abschnitte werden gesperrt; der aktuell dieser Person
+            // zugeordnete Abschnitt bleibt wählbar. Ausnahme: Einsatzleitung (mehrfach erlaubt).
+            const belegt = new Set(state.fuehrung
+              .filter(x => x.id !== f.id && x.einheit && x.einheit !== AB_EL.name)
+              .map(x => x.einheit));
+            return state.abschnitte.map(a => {
+              const gesperrt = belegt.has(a.name) && a.name !== f.einheit;
+              return `<option value="${esc(a.name)}" ${f.einheit===a.name?"selected":""} ${gesperrt?"disabled":""}>${esc(a.name)}${gesperrt?" – schon zugeordnet":""}</option>`;
+            }).join("");
+          })()}
         </select>
-        <p class="hint" style="margin:.4rem 0 0">Einsatzleitung oder vorhandenen Abschnitt wählen – oder unten frei eintragen.</p></div>
+        <p class="hint" style="margin:.4rem 0 0">Einsatzleitung oder vorhandenen Abschnitt wählen – oder unten frei eintragen. Bereits belegte Abschnitte sind gesperrt (nur die Einsatzleitung darf mehreren Personen zugeordnet werden).</p></div>
       <div class="field"><label for="fk-einheit">Einheit / Abschnitt <span style="text-transform:none;font-weight:500">(optional)</span></label>
         <input id="fk-einheit" value="${esc(f.einheit||"")}" placeholder="z. B. Abschnitt 1, ${esc(pfx("FW"))} Weiden 1/40/1" autocomplete="off"></div>
       <div class="field">
@@ -3298,7 +3372,8 @@ function asTraegerName(id){ const t = state.asTraeger.find(x => x.id === id); re
 function asTruppOf(traegerId){
   return state.asTrupps.find(t => t.status !== "zurueck" && (t.memberIds||[]).includes(traegerId));
 }
-function asFreieTraeger(){ return state.asTraeger.filter(t => !asTruppOf(t.id)); }
+// Frei = keinem aktiven Trupp zugeteilt UND nicht „außer Dienst" (kein weiterer Atemschutz-Einsatz).
+function asFreieTraeger(){ return state.asTraeger.filter(t => !asTruppOf(t.id) && !t.ausserDienst); }
 
 function renderAtemschutz(){
   const seg = `
@@ -3361,18 +3436,18 @@ function renderASSammelstelle(){
   const traegerList = state.asTraeger.length ? `<div class="as-traeger-list">${state.asTraeger.map(tr => {
     const trupp = asTruppOf(tr.id);
     return `
-    <button class="as-traeger ${trupp?"gebunden":""}" data-astraegeredit="${tr.id}">
+    <button class="as-traeger ${trupp?"gebunden":""} ${tr.ausserDienst?"ausser":""}" data-astraegeredit="${tr.id}">
       <div style="flex:1;min-width:0">
         <div class="as-tr-name">${esc(tr.name) || "<span style='color:var(--ink3)'>ohne Name</span>"}</div>
         <div class="as-sub2">${esc(tr.feuerwehr||"")}${tr.geraeteNr?` · Gerät ${esc(tr.geraeteNr)}`:""}${tr.maskeNr?` · Maske ${esc(tr.maskeNr)}`:""}${tr.lungenNr?` · LA ${esc(tr.lungenNr)}`:""}</div>
       </div>
       ${tr.csa ? `<span class="badge-agt" style="margin-right:6px">CSA</span>` : ""}
-      ${trupp ? `<span class="chip">Trupp ${trupp.nr}</span>` : `<span class="chip chip-POL">frei</span>`}
+      ${tr.ausserDienst ? `<span class="chip">außer Dienst</span>` : trupp ? `<span class="chip">Trupp ${trupp.nr}</span>` : `<span class="chip chip-POL">frei</span>`}
     </button>`;
   }).join("")}</div>` : `<p class="hint" style="margin:0">Noch keine Geräteträger registriert.</p>`;
   return `
   <div class="statstrip" role="status">
-    <div class="stat"><div class="k">Träger</div><div class="v mono">${state.asTraeger.length}</div><div class="s">${frei.length} frei</div></div>
+    <div class="stat"><div class="k">Träger</div><div class="v mono">${state.asTraeger.length}</div><div class="s">${frei.length} frei${state.asTraeger.some(t=>t.ausserDienst)?` · ${state.asTraeger.filter(t=>t.ausserDienst).length} außer Dienst`:""}</div></div>
     <div class="stat"><div class="k">Trupps</div><div class="v mono">${state.asTrupps.length}</div><div class="s">gesamt</div></div>
     <div class="stat"><div class="k">Im Einsatz</div><div class="v mono">${state.asTrupps.filter(t=>t.status==="einsatz").length}</div><div class="s">unter PA</div></div>
   </div>
@@ -3573,7 +3648,10 @@ function wireAtemschutz(){
   document.querySelectorAll("[data-aswieder]").forEach(b => b.addEventListener("click", () => {
     const t = state.asTrupps.find(x => x.id === b.dataset.aswieder);
     if(!t) return;
-    openTruppEditor(null, t.memberIds);   // neuer Trupp, neue Nummer, Mitglieder vorbelegt
+    // „kein weiterer Einsatz"-Träger werden nicht wieder eingeteilt
+    const wieder = (t.memberIds||[]).filter(id => { const tr = state.asTraeger.find(x => x.id === id); return tr && !tr.ausserDienst; });
+    if(!wieder.length){ modalInfo("Alle Träger dieses Trupps sind als „kein weiterer Einsatz“ markiert – niemand mehr einsatzbereit."); return; }
+    openTruppEditor(null, wieder);   // neuer Trupp, neue Nummer, verbleibende Mitglieder vorbelegt
   }));
   document.querySelectorAll("[data-astruppdel]").forEach(b => b.addEventListener("click", () => {
     modalConfirm("Diesen Trupp wirklich entfernen? Die Träger werden wieder frei.").then(ok => { if(!ok) return;
@@ -3593,7 +3671,8 @@ function openRueckmeldung(id){
     const d = t.druck[mid] || {};
     return `<div class="as-druckrow">
       <span>${esc(tr.name||"?")}<br><small class="mono" style="color:var(--ink3)">Start ${d.start?esc(d.start)+" bar":"–"}</small></span>
-      <input data-endd="${esc(mid)}" class="mono" inputmode="numeric" value="${esc(d.end||"")}" placeholder="Enddruck bar"></div>`;
+      <input data-endd="${esc(mid)}" class="mono" inputmode="numeric" value="${esc(d.end||"")}" placeholder="Enddruck bar">
+      <label class="as-raus"><input type="checkbox" data-raus="${esc(mid)}" ${tr.ausserDienst?"checked":""}> kein weiterer Einsatz</label></div>`;
   }).join("");
   $("#sheetHost").innerHTML = `
   <div class="sheet-backdrop" data-close="1"></div>
@@ -3614,6 +3693,11 @@ function openRueckmeldung(id){
     document.querySelectorAll("[data-endd]").forEach(inp => {
       t.druck[inp.dataset.endd] = t.druck[inp.dataset.endd] || {};
       t.druck[inp.dataset.endd].end = inp.value.trim();
+    });
+    // Personen-Entscheidung „kein weiterer Einsatz" auf den Geräteträger übernehmen
+    document.querySelectorAll("[data-raus]").forEach(cb => {
+      const tr = state.asTraeger.find(x => x.id === cb.dataset.raus);
+      if(tr) tr.ausserDienst = cb.checked;
     });
     const tv = $("#rm-zeit").value;
     const d = new Date();
@@ -3741,7 +3825,8 @@ function openTraegerEditor(id){
         </div>
         <p class="hint">Lungenautomat wird mit der Gerätenummer vorbelegt (oft identisch) – bei Bedarf überschreiben.</p></div>
       <div class="field"><label>Zusatz</label>
-        <label class="as-check"><input type="checkbox" id="tr-csa" ${tr.csa?"checked":""}> CSA-Träger (Chemikalienschutzanzug)</label></div>
+        <label class="as-check"><input type="checkbox" id="tr-csa" ${tr.csa?"checked":""}> CSA-Träger (Chemikalienschutzanzug)</label>
+        <label class="as-check"><input type="checkbox" id="tr-raus" ${tr.ausserDienst?"checked":""}> Kein weiterer Atemschutz-Einsatz (außer Dienst) – nicht mehr für Trupps wählbar</label></div>
     </div>
     <div class="sheet-foot">
       ${neu?"":`<button class="btn btn-danger-ghost" id="tr-del">Löschen</button>`}
@@ -3770,6 +3855,7 @@ function openTraegerEditor(id){
     tr.maskeNr = $("#tr-mnr").value.trim();
     tr.lungenNr = $("#tr-lnr").value.trim() || tr.geraeteNr;
     tr.csa = $("#tr-csa").checked;
+    tr.ausserDienst = $("#tr-raus").checked;
     delete tr.zusatz;
     if(!tr.name){ $("#tr-name").focus(); return; }
     const fehlt = !tr.geraeteNr ? "#tr-gnr" : !tr.maskeNr ? "#tr-mnr" : !tr.lungenNr ? "#tr-lnr" : null;
@@ -3792,7 +3878,9 @@ function openTruppEditor(id, vorbelegt){
   // Auswählbare Träger: freie + die bereits in diesem Trupp
   const waehlbar = state.asTraeger.filter(tr => {
     const trupp = asTruppOf(tr.id);
-    return !trupp || trupp.id === t.id || t.memberIds.includes(tr.id);
+    const imTrupp = t.memberIds.includes(tr.id);
+    if(tr.ausserDienst && !imTrupp) return false;   // „kein weiterer Einsatz" → nicht mehr wählbar
+    return !trupp || trupp.id === t.id || imTrupp;
   });
   // Einsatzabschnitt aus den bestehenden Abschnitten; Abschnittsleiter-Funkruf übernehmbar
   const abList = state.abschnitte.map(a => ({ name:a.name, ap:a.ansprechpartner||"" }));
@@ -4085,10 +4173,13 @@ function openBesprEditor(id){
   </div>`;
   document.querySelectorAll("[data-close]").forEach(el => el.addEventListener("click", closeEditor));
   attachDictation($("#b-mic"), $("#b-prot"));
-  $("#b-freeze").addEventListener("click", () => {
-    const s = lgFreeze();
+  $("#b-freeze").addEventListener("click", async () => {
+    const btn = $("#b-freeze"); const t0 = btn && btn.textContent;
+    if(btn){ btn.disabled = true; btn.textContent = "Lagebild wird eingefroren …"; }
+    const s = await lgFreeze();
     b.snapshotId = s.id;
     $("#b-freeze-info").textContent = `Lagebild ${fmtZeit(s.zeit)} Uhr eingefroren und mit dieser Besprechung verknüpft.`;
+    if(btn){ btn.disabled = false; btn.textContent = t0; }
   });
   const del = $("#b-del");
   if(del) del.addEventListener("click", () => {
@@ -4189,7 +4280,11 @@ function renderMonitor(){
   // Abschnitts-Kacheln: Stärke, Erreichbarkeit, Fahrzeuge ausgeschrieben & alphabetisch
   const abCard = (title, units, opts) => {
     const su = summen(units);
-    const g = su.f+su.u+su.m;
+    // Diesem Abschnitt zugeordnete Führungskräfte (z. B. Abschnittsleiter) zählen als Führer
+    // in die Stärke mit rein (Zuordnung = f.einheit === Abschnittsname).
+    const fks = state.fuehrung.filter(f => f.einheit === title);
+    const sf = su.f + fks.length;
+    const g = sf + su.u + su.m;
     // Kacheln wachsen nach unten – bei Großlagen stehen viele Fahrzeuge im Abschnitt
     const sorted = [...units].sort((x,y) => fullName(x).localeCompare(fullName(y), "de"));
     const rows = sorted.map(u => `
@@ -4210,10 +4305,11 @@ function renderMonitor(){
           <h4>${esc(title)}</h4>
           ${opts.sub ? `<div class="ab-cardsub">${esc(opts.sub)}</div>` : ""}
         </div>
-        <div class="ab-staerke mono">${su.f}/${su.u}/${su.m}/${g}</div>
+        <div class="ab-staerke mono">${sf}/${su.u}/${su.m}/${g}</div>
       </div>
       <div class="ab-sub">
         <span><strong class="mono">${units.length}</strong> Einheiten</span>
+        ${fks.length ? `<span>Führung <strong class="mono">${fks.length}</strong> (${fks.map(f => esc(f.name || f.funktion || "FK")).join(", ")})</span>` : ""}
         <span>AGT <strong class="mono">${su.agt}</strong></span>
         <span>CSA <strong class="mono">${su.csa}</strong></span>
         ${opts.ansprechpartner ? `<span>Ansprechpartner <strong class="mono">${esc(opts.ansprechpartner)}</strong></span>` : ""}
@@ -4445,13 +4541,19 @@ function monCardsData(){
   const cards = [];
   const brUnits = act.filter(u => u.abschnitt === "BR");
   const elUnits = act.filter(u => u.abschnitt === AB_EL_ID);
-  // Reihenfolge: 1) echte Abschnitte  2) Bereitstellungsraum  3) Einsatzleitung  4) Ohne Abschnitt (immer zuletzt)
-  state.abschnitte.forEach(a => { if(!hid[a.id]) cards.push({
-    key:a.id, title:a.name, units:act.filter(u => u.abschnitt === a.id),
-    opts:{ fuehrung:a.fuehrung, arbeit:a.arbeit, ansprechpartner:abAnsprech(a) } }); });
+  // Reihenfolge folgt abOrderList() (inkl. Einsatzleitung an ihrer Sortierposition);
+  // danach Legacy-Bereitstellungsraum und „Ohne Abschnitt" (immer zuletzt).
+  abOrderList().forEach(id => {
+    if(id === AB_EL_ID){
+      if(elUnits.length && !hid[AB_EL_ID]) cards.push({ key:AB_EL_ID, title:AB_EL.name, units:elUnits, opts:{ none:true } });
+      return;
+    }
+    const a = state.abschnitte.find(x => x.id === id);
+    if(a && !hid[a.id]) cards.push({ key:a.id, title:a.name, units:act.filter(u => u.abschnitt === a.id),
+      opts:{ fuehrung:a.fuehrung, arbeit:a.arbeit, ansprechpartner:abAnsprech(a) } });
+  });
   // Legacy-BR-Kachel nur, wenn kein echter Bereitstellungs-Abschnitt existiert (sonst doppelt)
   if(brUnits.length && !hid.BR && !state.abschnitte.some(a => a.br)) cards.push({ key:"BR", title:"Bereitstellungsraum", units:brUnits, opts:{ br:true, sub: state.einsatz.bereitstellungsraum } });
-  if(elUnits.length && !hid[AB_EL_ID]) cards.push({ key:AB_EL_ID, title:AB_EL.name, units:elUnits, opts:{ none:true } });
   const rest = act.filter(u => u.abschnitt !== "BR" && u.abschnitt !== AB_EL_ID &&
     (!u.abschnitt || !state.abschnitte.some(a => a.id === u.abschnitt)));
   if(state.abschnitte.length){
@@ -4916,7 +5018,9 @@ function renderLagekarte(){
         <button data-lglayer="basis" class="${state.lage.mapLayer==="basis"?"active":""}">Bayern-Karte</button>
         <button data-lglayer="strasse" class="${state.lage.mapLayer==="strasse"?"active":""}">Straße</button>
       </div>
-      ${lgEinsatzAdresse() ? `<button class="btn btn-ghost" id="lgToAddr" style="min-height:42px;padding:6px 14px;font-size:.85rem">⌖ Einsatzadresse</button>` : ""}` : ""}
+      ${lgEinsatzAdresse() ? `<button class="btn btn-ghost" id="lgToAddr" style="min-height:42px;padding:6px 14px;font-size:.85rem">⌖ Einsatzadresse</button>` : ""}
+      <button class="btn btn-ghost" id="lgLuftbild" style="min-height:42px;padding:6px 14px;font-size:.85rem" title="Aktuell sichtbaren Kartenausschnitt als Luftbild-Hintergrund einfangen – erscheint im Bericht/PDF/Word">🛰 Ausschnitt einfangen</button>
+      <button class="btn btn-ghost" id="lgLuftbildAll" style="min-height:42px;padding:6px 12px;font-size:.85rem" title="Luftbild automatisch um alle eingezeichneten Elemente einfangen">alle Elemente</button>` : ""}
     </div>
     <div class="lg-toolbar">${tools}</div>
     ${lgSubmenu && LG_SUBMENUS[lgSubmenu] ? `
@@ -4996,11 +5100,123 @@ document.addEventListener("paste", e => {
     resizeImage(file, 1920, data => setLgBg(data));
   }
 });
-function lgFreeze(){
+/* WMS-DOP-Luftbild für eine 3857-Bounding-Box laden → JPEG-Daten-URL. CORS-fähig (crossOrigin)
+   → aufs Canvas → toDataURL OHNE Tainted-Canvas. WMS liefert EIN Bild pro Ausschnitt. */
+function lgWmsDop(minX, minY, maxX, maxY, W, H){
+  const url = "https://geoservices.bayern.de/od/wms/dop/v1/dop40?SERVICE=WMS&REQUEST=GetMap&VERSION=1.3.0"
+    + "&LAYERS=by_dop40c&STYLES=&FORMAT=image/png&CRS=EPSG:3857"
+    + "&BBOX=" + [minX, minY, maxX, maxY].join(",") + "&WIDTH=" + W + "&HEIGHT=" + H;
+  return new Promise((res, rej) => {
+    const img = new Image(); img.crossOrigin = "anonymous";
+    img.onload = () => { try{ const c = document.createElement("canvas"); c.width = img.naturalWidth || W; c.height = img.naturalHeight || H;
+      c.getContext("2d").drawImage(img, 0, 0); res(c.toDataURL("image/jpeg", 0.85)); }catch(e){ rej(e); } };
+    img.onerror = () => rej(new Error("Luftbild-Server nicht erreichbar (Internet/CORS)"));
+    img.src = url; setTimeout(() => rej(new Error("Zeitüberschreitung")), 12000);
+  });
+}
+/* Items in eine 3857-Bounding-Box projizieren → NEUE Kopien mit x/y (%) bzw. points (%). */
+function lgProjItemsTo(items, minX, maxX, minY, maxY){
+  const P = ll => L.CRS.EPSG3857.project(ll);
+  const prX = x => (x - minX) / (maxX - minX) * 100;
+  const prY = y => (maxY - y) / (maxY - minY) * 100;
+  return (items || []).map(i => {
+    const j = { ...i };
+    if(Array.isArray(i.ll)){ const q = P(L.latLng(i.ll[0], i.ll[1])); j.x = prX(q.x); j.y = prY(q.y); }
+    if(Array.isArray(i.llpoints)) j.points = i.llpoints.map(p => { const q = P(L.latLng(p.lat, p.lng)); return { x: prX(q.x), y: prY(q.y) }; });
+    return j;
+  });
+}
+/* Luftbild (Bayern-WMS DOP) für ALLE eingezeichneten Elemente einfangen und als Karten-Hintergrund
+   setzen (Modus „Bild") → Karte + Symbole offline in Bericht/PDF/Word. Bei dichten/überlappenden
+   Symbolen zusätzlich gezoomte Detail-Kacheln (state.lage.tiles) → je eigene Bericht-Seite. */
+async function lgLuftbildEinfangen(setBusy, fitAll){
+  const P = ll => L.CRS.EPSG3857.project(ll);
+  const items0 = state.lage.items || [];
+  const markerLL = [];
+  for(const i of items0) if(Array.isArray(i.ll)) markerLL.push(i.ll);
+  let minX, maxX, minY, maxY, W, H;
+  if(fitAll){
+    // Auto: Ausschnitt um ALLE Elemente (+ Rand), auf 16:10 aufgezogen (ohne Verzerrung).
+    const geoPts = [];
+    for(const i of items0){
+      if(Array.isArray(i.ll)) geoPts.push(L.latLng(i.ll[0], i.ll[1]));
+      if(Array.isArray(i.llpoints)) for(const p of i.llpoints) geoPts.push(L.latLng(p.lat, p.lng));
+    }
+    const bounds = geoPts.length ? L.latLngBounds(geoPts).pad(0.18) : (lgMapObj && lgMapObj.getBounds());
+    if(!bounds){ modalInfo("Kein Kartenausschnitt vorhanden – erst Elemente einzeichnen oder Karte öffnen."); return; }
+    const sw = P(bounds.getSouthWest()), ne = P(bounds.getNorthEast());
+    minX = sw.x; maxX = ne.x; minY = sw.y; maxY = ne.y;
+    const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2;
+    let hw = (maxX - minX) / 2, hh = (maxY - minY) / 2;
+    if(hw < 120) hw = 120; if(hh < 75) hh = 75;
+    const A = 16 / 10;
+    if(hw / hh < A) hw = hh * A; else hh = hw / A;
+    minX = cx - hw; maxX = cx + hw; minY = cy - hh; maxY = cy + hh;
+    W = 1600; H = 1000;
+  }else{
+    // Aktuell sichtbarer Kartenausschnitt (Anwender framet live per Schieben/Zoomen).
+    if(!lgMapObj){ modalInfo("Karte ist nicht geöffnet – oben Modus „Karte (online)“ wählen und Ausschnitt einstellen."); return; }
+    const b = lgMapObj.getBounds(), size = lgMapObj.getSize();
+    const sw = P(b.getSouthWest()), ne = P(b.getNorthEast());
+    minX = sw.x; maxX = ne.x; minY = sw.y; maxY = ne.y;
+    W = Math.max(600, Math.min(1920, Math.round(size.x)));
+    H = Math.max(1, Math.round(W * (maxY - minY) / (maxX - minX)));   // Bild-Seitenverhältnis = Ausschnitt (keine Verzerrung)
+  }
+  // --- Übersichts-Luftbild ---
+  let dataUrl;
+  try{ dataUrl = await lgWmsDop(minX, minY, maxX, maxY, W, H); }
+  catch(err){ modalInfo("Luftbild einfangen fehlgeschlagen: " + (err.message || err) + ".\nGerät muss online sein. Alternativ Screenshot als Hintergrund einfügen."); return; }
+  // Übersicht auf die LIVE-Items projizieren (frisch – Sync kann das Array getauscht haben).
+  const cur = state.lage.items || [];
+  const projOv = lgProjItemsTo(cur, minX, maxX, minY, maxY);
+  cur.forEach((i, idx) => { const j = projOv[idx]; if(j){ if(j.x != null){ i.x = j.x; i.y = j.y; } if(j.points) i.points = j.points; } });
+  state.lage.bg = dataUrl; state.lage.bgW = W; state.lage.bgH = H; state.lage.mode = "bild";
+  // --- Dichte prüfen → Detail-Kacheln (gezoomte Ausschnitte) ---
+  const m3857 = markerLL.map(ll => P(L.latLng(ll[0], ll[1])));
+  const ovM = m3857.map(q => ({ x: (q.x - minX) / (maxX - minX) * 100, y: (maxY - q.y) / (maxY - minY) * 100 }));
+  let minGap = Infinity;
+  for(let a = 0; a < ovM.length; a++) for(let b = a + 1; b < ovM.length; b++)
+    minGap = Math.min(minGap, Math.hypot(ovM[a].x - ovM[b].x, ovM[a].y - ovM[b].y));
+  const dicht = ovM.length >= 2 && (minGap < 12 || ovM.length > 8);   // Überlappung oder viele Symbole
+  const tiles = [];
+  if(dicht){
+    const G = ovM.length > 8 ? 3 : 2;
+    const cw = (maxX - minX) / G, ch = (maxY - minY) / G;
+    let nr = 0;
+    for(let r = 0; r < G; r++) for(let c = 0; c < G; c++){
+      const tMinX = minX + c * cw, tMaxX = minX + (c + 1) * cw, tMaxY = maxY - r * ch, tMinY = maxY - (r + 1) * ch;
+      if(!m3857.some(q => q.x >= tMinX && q.x <= tMaxX && q.y >= tMinY && q.y <= tMaxY)) continue;   // leere Zelle überspringen
+      nr++;
+      if(setBusy) setBusy("🛰 Ausschnitt " + nr + " …");
+      let bg; try{ bg = await lgWmsDop(tMinX, tMinY, tMaxX, tMaxY, 1600, 1000); }catch(e){ continue; }
+      tiles.push({ bg, bgW: 1600, bgH: 1000, label: "Ausschnitt " + nr, items: lgProjItemsTo(state.lage.items || [], tMinX, tMaxX, tMinY, tMaxY) });
+    }
+  }
+  state.lage.tiles = tiles;
+  try{ markChange(); }catch(e){ state.lage.bg = ""; state.lage.tiles = []; modalInfo("Bild zu groß für den lokalen Speicher."); return; }
+  render();
+  modalInfo("Luftbild eingefangen" + (tiles.length ? " + " + tiles.length + " Detail-Ausschnitte (dichte Symbole)" : "") +
+    ". Erscheint im Bericht (PDF) und im Word-Export.\nZum Weiterzeichnen oben wieder auf „Karte (online)“ umschalten.");
+}
+async function lgFreeze(){
   const s = { id:uid(), zeit:new Date().toISOString(),
-    bg: state.lage.bg, mode: state.lage.mode, mapLayer: state.lage.mapLayer,
+    bg: state.lage.bg, bgW: state.lage.bgW, bgH: state.lage.bgH, mode: state.lage.mode, mapLayer: state.lage.mapLayer,
     mapView: state.lage.mapView ? { center:[...state.lage.mapView.center], zoom: state.lage.mapView.zoom } : null,
     items: state.lage.items.map(i => ({...i})) };
+  // Online-Karte ohne Bild → aktuelles Luftbild 1:1 (Fenstergröße) ZUSÄTZLICH in s.bild ablegen
+  // (nur für den Bericht). s.mode/s.items bleiben „karte" mit Geo-Koordinaten, damit der
+  // Lagebild-Vergleich weiterhin interaktiv (zoom-/verschiebbar) ist.
+  if(state.lage.mode === "karte" && !state.lage.bg && lgMapObj && navigator.onLine !== false){
+    try{
+      const P = ll => L.CRS.EPSG3857.project(ll);
+      const b = lgMapObj.getBounds(), size = lgMapObj.getSize();
+      const sw = P(b.getSouthWest()), ne = P(b.getNorthEast());
+      const W = Math.max(600, Math.min(1920, Math.round(size.x)));
+      const H = Math.max(1, Math.round(W * (ne.y - sw.y) / (ne.x - sw.x)));
+      const bg = await lgWmsDop(sw.x, sw.y, ne.x, ne.y, W, H);
+      s.bild = { bg, bgW: W, bgH: H, items: lgProjItemsTo(state.lage.items || [], sw.x, ne.x, sw.y, ne.y) };
+    }catch(e){ /* offline/Fehler → Bericht rendert schematisch, kein Abbruch */ }
+  }
   state.lage.snapshots.push(s);
   markChange();
   return s;
@@ -5637,7 +5853,19 @@ function wireLagekarte(){
       else modalInfo("Adresse konnte nicht gefunden werden – bitte Einsatzort prüfen.");
     });
   });
-  $("#lgSnapBtn").addEventListener("click", () => { lgFreeze(); render(); });
+  $("#lgSnapBtn").addEventListener("click", async () => {
+    const btn = $("#lgSnapBtn"); const t0 = btn && btn.textContent;
+    if(btn){ btn.disabled = true; btn.textContent = "Snapshot wird eingefroren …"; }
+    await lgFreeze();
+    if(btn){ btn.disabled = false; btn.textContent = t0; }
+    render();
+  });
+  const lgLb = $("#lgLuftbild"), lgLbAll = $("#lgLuftbildAll");
+  const einfangen = (btn, fitAll) => { const t0 = btn.textContent; btn.disabled = true; if(lgLb) lgLb.disabled = true; if(lgLbAll) lgLbAll.disabled = true;
+    btn.textContent = "🛰 lädt …"; lgLuftbildEinfangen(t => { btn.textContent = t; }, fitAll)
+      .finally(() => { btn.textContent = t0; if(lgLb) lgLb.disabled = false; if(lgLbAll) lgLbAll.disabled = false; }); };
+  if(lgLb) lgLb.addEventListener("click", () => einfangen(lgLb, false));
+  if(lgLbAll) lgLbAll.addEventListener("click", () => einfangen(lgLbAll, true));
   document.querySelectorAll("[data-lgsnap]").forEach(b =>
     b.addEventListener("click", () => openLgSnapshot(b.dataset.lgsnap)));
   document.querySelectorAll("[data-lgsnapsel]").forEach(cb =>
@@ -6003,6 +6231,18 @@ function openLgCompare(idA, idB){
   const cmpView = (s1.mode === "karte" && s2.mode === "karte") ? (s2.mapView || s1.mapView || null) : null;
   lgSnapPanelSetup(s1, "A", changed, cmpView);
   lgSnapPanelSetup(s2, "B", changed, cmpView);
+  // Beide Vergleichs-Karten koppeln: Zoom/Verschieben im einen Fenster wirkt sofort aufs andere.
+  if(lgCmpA && lgCmpB){
+    let syncing = false;
+    const link = (from, to) => from.on("move zoom", () => {
+      if(syncing) return;
+      syncing = true;
+      try{ to.setView(from.getCenter(), from.getZoom(), { animate:false }); }catch(e){}
+      syncing = false;
+    });
+    link(lgCmpA, lgCmpB);
+    link(lgCmpB, lgCmpA);
+  }
 }
 /* Symbolsuche: die gängigsten taktischen Zeichen (DV 102) mit Filterfeld */
 function openSymSearch(){
@@ -6308,18 +6548,52 @@ function openLgEdit(id){
 }
 
 /* ---------------- Druck: Einsatzbericht ---------------- */
-function printMapHtml(lage){
-  if(lage.mode === "karte"){
-    return `<p style="font-size:10pt">Lagekarte im Online-Luftbild-Modus – Kartenkacheln lassen sich offline nicht
-      in den Ausdruck rastern. Für ein echtes Kartenbild in der Doku: am Gerät einen Screenshot der Karte machen
-      und in der Lagekarte per Einfügen (Strg&nbsp;+&nbsp;V) als Bild-Hintergrund setzen – dann erscheint die Karte
-      hier als Bild. Die taktische Legende steht unten.</p>`;
+/* Geo-Lagekarte (Online-Luftbild-Modus) druckbar machen: Kartenkacheln lassen sich offline
+   nicht rastern, aber die eingezeichneten Elemente haben Geo-Koordinaten (ll / llpoints).
+   Wir projizieren sie auf x/y-Prozent innerhalb ihrer Bounding-Box → schematische Karte
+   (Positionen ohne Luftbild), die dann wie der Zeichen-Modus über lgShapesSvg/lgMarkerHtml
+   gerendert und für Word rasterisiert werden kann. Items mit x/y (Bild-/Raster-Modus) bleiben. */
+function lgGeoProject(items){
+  items = items || [];
+  const pts = [];
+  for(const i of items){
+    if(Array.isArray(i.ll)) pts.push({ lat:i.ll[0], lng:i.ll[1] });
+    if(Array.isArray(i.llpoints)) for(const p of i.llpoints) pts.push({ lat:p.lat, lng:p.lng });
   }
-  return `<div class="p-map">
-    <div class="lg-canvas ${lage.bg ? "hasbg" : ""}" ${lage.bg ? `style="background-image:url('${lage.bg}')"` : ""}>
-      ${lgShapesSvg(lage.items, null)}
-      ${lage.items.filter(i => i.x != null).map(lgMarkerHtml).join("")}
+  if(!pts.length) return items;   // nichts Geo-Referenziertes → unverändert
+  let minLat=Infinity, maxLat=-Infinity, minLng=Infinity, maxLng=-Infinity;
+  for(const p of pts){ minLat=Math.min(minLat,p.lat); maxLat=Math.max(maxLat,p.lat); minLng=Math.min(minLng,p.lng); maxLng=Math.max(maxLng,p.lng); }
+  const spanLat = (maxLat-minLat) || 1e-5, spanLng = (maxLng-minLng) || 1e-5;
+  const M = 10;                                   // Rand in Prozent, damit nichts am Bildrand klebt
+  const prX = lng => M + ((lng-minLng)/spanLng) * (100-2*M);
+  const prY = lat => M + ((maxLat-lat)/spanLat) * (100-2*M);   // Nord = oben → lat invertieren
+  return items.map(i => {
+    if(!Array.isArray(i.ll) && !Array.isArray(i.llpoints)) return i;   // Raster-/Bild-Item unverändert
+    const j = {...i};
+    if(Array.isArray(i.ll)){ j.x = prX(i.ll[1]); j.y = prY(i.ll[0]); }
+    if(Array.isArray(i.llpoints)) j.points = i.llpoints.map(p => ({ x:prX(p.lng), y:prY(p.lat) }));
+    return j;
+  });
+}
+function printMapHtml(lage){
+  // Bei eingefangenem Luftbild/Screenshot sind x/y bzw. points bereits exakt auf dessen
+  // Bounding-Box gesetzt → NICHT neu projizieren (sonst Maßstab/Positionen ≠ Hintergrund).
+  // Nur im Schema-Fall (Geo-Karte ohne Bild) die GPS-Koordinaten auf die Fläche projizieren.
+  const items = lage.bg ? (lage.items || []) : lgGeoProject(lage.items || []);
+  const hatInhalt = items.some(i => i.x != null || Array.isArray(i.points));
+  if(!hatInhalt){
+    return `<p style="font-size:10pt">Keine einzeichenbaren Lage-Elemente vorhanden.</p>`;
+  }
+  const geoSchema = lage.mode === "karte" && !lage.bg;   // Online-Karte ohne Screenshot → Schema
+  // Bei eingefangenem Luftbild/Hintergrund die Kachel auf dessen Seitenverhältnis bringen,
+  // damit die Symbole (per background-size:cover) exakt auf dem Bild sitzen.
+  const aspect = (lage.bg && lage.bgW && lage.bgH) ? ` style="aspect-ratio:${lage.bgW}/${lage.bgH}"` : "";
+  return `<div class="p-map${geoSchema ? " p-map-schema" : ""}"${aspect}>
+    <div class="lg-canvas ${lage.bg ? "hasbg" : ""}" ${lage.bg ? `style="background-image:url('${lage.bg}');background-size:100% 100%"` : ""}>
+      ${lgShapesSvg(items, null)}
+      ${items.filter(i => i.x != null).map(lgMarkerHtml).join("")}
     </div>
+    ${geoSchema ? `<div class="p-map-note">Schematische Lagekarte – Positionen aus GPS, ohne Luftbild. Für ein echtes Kartenbild in der Lagekarte oben „🛰 Luftbild einfangen" nutzen.</div>` : ""}
   </div>`;
 }
 function printLegendHtml(items, units){
@@ -6357,9 +6631,30 @@ function doPrintLagekarte(){
       ${printLegendHtml(state.lage.items, state.einheiten)}
       <p style="font-size:8pt;color:#666;margin-top:16px">Gedruckt am ${new Date().toLocaleString("de-DE")} · ELWIS – Lagekarte · ${esc(state.config.ugName)}</p>
     </section>`;
-  window.print();
+  warteAufBilder($("#printArea")).then(() => window.print());
 }
-function doPrint(data, sel){
+/* Berichtskopf: im PDF ein Flex-Block (float rendert der Browser sauber),
+   im Word-Export eine Tabelle – nur so sitzt der ELWIS-Kasten zuverlässig oben rechts. */
+function reportHead(e, pEnde, opts){
+  const sub = `${esc(state.config.ugName)} · Einsatzbericht · Kräfteübersicht${pEnde ? "" : " · Zwischenstand"}`;
+  const titel = esc(e.stichwort) || "Ohne Stichwort";
+  const ort = `${esc(e.ort)}${e.objekt ? " · " + esc(e.objekt) : ""}`;
+  if(opts && opts.word){
+    return `<table class="p-headw"><tr>
+      <td class="p-headw-l"><div class="p-sub">${sub}</div><h1>${titel}</h1><div>${ort}</div></td>
+      <td class="p-headw-r"><span class="p-mark">ELWIS</span></td>
+    </tr></table>`;
+  }
+  return `<div class="p-head">
+      <div>
+        <div class="p-sub">${sub}</div>
+        <h1>${titel}</h1>
+        <div>${ort}</div>
+      </div>
+      <div class="p-mark">ELWIS</div>
+    </div>`;
+}
+function reportBodyHtml(data, sel, opts){
   const on = id => !sel || sel[id] !== false;   // ohne Auswahl: alle Bereiche drucken
   const e = data.einsatz;
   const pEnde = e.ende || data.ende;   // Einsatzende: Stammdatenfeld, sonst Archiv-Zeitstempel
@@ -6404,6 +6699,7 @@ function doPrint(data, sel){
       <tr><td>Einsatzdauer</td><td>${dauerStr(e.beginn, pEnde) || "–"}</td></tr>
       <tr><td>Kräfte gesamt</td><td><strong>${persGesamt} Einsatzkräfte</strong> · ${data.einheiten.length} Einheiten, ${fkN} Führungskräfte · Stärke <span class="p-mono">${sAll.f+fkN}/${sAll.u}/${sAll.m}/${persGesamt}</span> · AGT ${sAll.agt}, CSA ${sAll.csa}${pEnde ? "" : ` · aktuell vor Ort: <span class="p-mono">${persVorOrt}</span>`}</td></tr>
       <tr><td>Einsatzleiter</td><td>${esc(e.leiter) || "–"}</td></tr>
+      ${e.bereitstellungsraum ? `<tr><td>${e.bereitstellung ? "Bereitstellungsraum" : "Verfügungsraum"}</td><td>${esc(e.bereitstellungsraum)}</td></tr>` : ""}
       ${(!pEnde && e.lagebespr) ? `<tr><td>Nächste Lagebesprechung</td><td>${esc(e.lagebespr)} Uhr</td></tr>` : ""}
       ${gruppeStr(e.ilsGruppe) ? `<tr><td>Leitstelle</td><td>${esc(state.config.ilsName||"Leitstelle")} · ${esc(gruppeStr(e.ilsGruppe))}</td></tr>` : ""}
       ${abs.length ? `<tr><td>Einsatzabschnitte</td><td>${abs.length} gebildet – siehe eigener Abschnitt unten</td></tr>` : ""}
@@ -6430,10 +6726,10 @@ function doPrint(data, sel){
     <h2>Einheiten (${data.einheiten.length})</h2>
     ${unitRows ? `<table><thead><tr><th>Ankunft</th><th>Organisation</th><th>Funkrufname</th>${showAb?"<th>Abschnitt</th>":""}<th>Stärke</th><th>AGT</th><th>CSA</th><th>Status</th></tr></thead><tbody>${unitRows}</tbody></table>` : "<p>Keine erfasst.</p>"}
     <h2>Nachforderungen (${(data.anforderungen||[]).length})</h2>
-    ${(data.anforderungen||[]).length ? `<table><thead><tr><th>Was</th><th>Status</th><th>Angefordert</th><th>Alarmiert</th><th>Eingetroffen</th></tr></thead><tbody>
+    ${(data.anforderungen||[]).length ? `<table><thead><tr><th>Was</th>${showAb?"<th>Abschnitt</th>":""}<th>Status</th><th>Angefordert</th><th>Alarmiert</th><th>Eingetroffen</th></tr></thead><tbody>
       ${[...data.anforderungen].sort((a,b) => (a.angefordert||"").localeCompare(b.angefordert||"")).map(a => `
       <tr>
-        <td>${esc(a.was)}</td><td>${esc(a.status)}</td>
+        <td>${esc(a.was)}</td>${showAb?`<td>${esc(abNameOf(a.abschnitt, abs)) || "–"}</td>`:""}<td>${esc(a.status)}</td>
         <td class="p-mono">${fmtZeit(a.angefordert)}</td>
         <td class="p-mono">${a.alarmiert ? fmtZeit(a.alarmiert) : "–"}</td>
         <td class="p-mono">${a.eingetroffen ? fmtZeit(a.eingetroffen) : "–"}</td>
@@ -6474,10 +6770,10 @@ function doPrint(data, sel){
     <h2>Fotodokumentation (${data.fotos.length})</h2>
     <div class="p-fotos">
       ${[...data.fotos].sort((a,b) => (a.zeit||"").localeCompare(b.zeit||"")).map(f => `
-      <figure>
+      <div class="p-foto">
         <img src="${f.data}" alt="Einsatzfoto">
-        <figcaption class="p-mono">${fmtZeit(f.zeit)} Uhr${f.notiz ? " – " + esc(f.notiz) : ""}</figcaption>
-      </figure>`).join("")}
+        <div class="p-foto-cap"><span class="p-mono">${fmtZeit(f.zeit)} Uhr</span>${f.notiz ? " – " + esc(f.notiz) : ""}</div>
+      </div>`).join("")}
     </div>` : "";
   const secListen = on("listen") ? `
     <h2>Checklisten (${(data.checks||[]).length})</h2>
@@ -6494,54 +6790,89 @@ function doPrint(data, sel){
           <td class="p-mono" style="width:70px;text-align:right">${p.zeit ? fmtZeit(p.zeit) : ""}</td>
         </tr>`).join("")}
       </tbody></table>`;}).join("") : "<p>Keine.</p>"}` : "";
-  const secAtem = on("atemschutz") && (data.asTrupps||[]).length ? `
-    <h2>Atemschutz – Trupps (${data.asTrupps.length})</h2>
-    <table><thead><tr><th>Nr.</th><th>Träger</th><th>Feuerwehr</th><th>Gerät</th><th>Maske</th><th>LA</th><th>CSA</th><th>Start</th><th>Ende</th><th>Abschnitt / Funk</th><th>ausgerückt</th><th>angeschl.</th><th>zurück</th></tr></thead><tbody>
-      ${[...data.asTrupps].sort((a,b)=>a.nr-b.nr).map(t => {
-        const ids = t.memberIds||[];
+  const asTrupps = [...(data.asTrupps||[])].sort((a,b)=>a.nr-b.nr);
+  const secAtem = on("atemschutz") && asTrupps.length ? `
+    <section class="p-land">
+    <h2>Atemschutz – Trupps (${asTrupps.length})</h2>
+    <div class="p-atem">
+    <table><thead><tr><th>Nr.</th><th>Träger (Feuerwehr)</th><th>Gerät / Maske / LA</th><th>CSA</th><th>Start</th><th>Ziel</th><th>Ende</th><th>Rückzugsdr.</th><th>Abschnitt / Funk</th><th>ausgerückt</th><th>angeschl.</th><th>Ziel</th><th>zurück</th><th>Einsatzzeit</th></tr></thead><tbody>
+      ${asTrupps.map(t => {
+        const mem = t.memberIds||[];
+        // Truppführer zuerst listen (steht oben mit den Zeiten)
+        const ids = (t.tf && mem.includes(t.tf)) ? [t.tf, ...mem.filter(x => x !== t.tf)] : mem;
+        const rz = asRzTrupp(t);
+        const dauer = dauerStr(asMonitorStart(t), t.rueckkehr);
         return ids.map((id,idx) => {
           const tr = (data.asTraeger||[]).find(x=>x.id===id) || {};
           const d = (t.druck||{})[id] || {};
+          const istTf = t.tf ? id === t.tf : idx === 0;
           return `<tr>
             <td class="p-mono">${idx===0?t.nr:""}</td>
-            <td>${esc(tr.name||"?")}</td><td>${esc(tr.feuerwehr||"")}</td>
-            <td class="p-mono">${esc(tr.geraeteNr||"")}</td><td class="p-mono">${esc(tr.maskeNr||"")}</td>
-            <td class="p-mono">${esc(tr.lungenNr||"")}</td>
+            <td>${esc(tr.name||"?")}${istTf?` <b>(TF)</b>`:""}${tr.feuerwehr?` <span style="color:#666">(${esc(tr.feuerwehr)})</span>`:""}</td>
+            <td class="p-mono">${esc(tr.geraeteNr||"–")} / ${esc(tr.maskeNr||"–")} / ${esc(tr.lungenNr||"–")}</td>
             <td style="text-align:center">${tr.csa?"CSA":""}</td>
-            <td class="p-mono">${d.start?esc(d.start):""}</td><td class="p-mono">${d.end?esc(d.end):""}</td>
+            <td class="p-mono">${d.start?esc(d.start):""}</td>
+            <td class="p-mono">${d.ziel?esc(d.ziel):""}</td>
+            <td class="p-mono">${d.end?esc(d.end):""}</td>
+            <td class="p-mono">${idx===0&&rz?(rz.sofort?"sofort":rz.bar+(rz.dyn?"":" (vorl.)")):""}</td>
             <td>${idx===0?esc(t.abschnitt||"–")+(t.funkruf?" / "+esc(t.funkruf):""):""}</td>
             <td class="p-mono">${idx===0&&t.ausgerueckt?fmtZeit(t.ausgerueckt):""}</td>
             <td class="p-mono">${idx===0&&t.angeschlossen?fmtZeit(t.angeschlossen):""}</td>
+            <td class="p-mono">${idx===0&&t.zielZeit?fmtZeit(t.zielZeit):""}</td>
             <td class="p-mono">${idx===0&&t.rueckkehr?fmtZeit(t.rueckkehr):""}</td>
+            <td class="p-mono">${idx===0?dauer:""}</td>
           </tr>`;
         }).join("");
       }).join("")}
-    </tbody></table>` : "";
+    </tbody></table>
+    ${asTrupps.some(t => t.zusatz || (t.checks && (t.checks.drittel || t.checks.zweidrittel)) || t.reserve || t.erwartetMin) ? `
+    <table style="margin-top:8px"><thead><tr><th>Nr.</th><th>Auftrag / Bemerkung</th><th>Reserve</th><th>erw. Zeit</th><th>Druckkontrolle 1/3</th><th>Druckkontrolle 2/3</th></tr></thead><tbody>
+      ${asTrupps.map(t => {
+        const kd = (key) => (t.memberIds||[]).map(id => (t.druck||{})[id] && (t.druck[id][key]) ? esc((t.druck[id][key])) : null).filter(Boolean).join(" / ");
+        const k13 = kd("k13"), k23 = kd("k23");
+        const c13 = t.checks && t.checks.drittel ? fmtZeit(t.checks.drittel) : "";
+        const c23 = t.checks && t.checks.zweidrittel ? fmtZeit(t.checks.zweidrittel) : "";
+        if(!(t.zusatz || c13 || c23 || t.reserve || t.erwartetMin)) return "";
+        return `<tr>
+          <td class="p-mono">${t.nr}</td>
+          <td>${esc(t.zusatz||"–")}</td>
+          <td class="p-mono">${asReserve(t)} bar</td>
+          <td class="p-mono">${asErwartet(t)} min</td>
+          <td class="p-mono">${c13 ? c13 + (k13?" · "+k13+" bar":"") : "–"}</td>
+          <td class="p-mono">${c23 ? c23 + (k23?" · "+k23+" bar":"") : "–"}</td>
+        </tr>`;
+      }).join("")}
+    </tbody></table>
+    <p style="font-size:8.5pt;color:#444;margin-top:6px">Rückzugsdruck = (2·Startdruck + Reserve)/3, ab Zielmeldung dynamisch (Reserve + 2·(Start − Ziel)). Einsatzzeit ab Anschluss der Luftversorgung bzw. Ausrücken bis Rückkehr.</p>` : ""}</div></section>` : "";
+  // Detail-Kachel (gezoomter Luftbild-Ausschnitt) als eigene Bericht-Seite
+  const tileHtml = t => `<div class="p-map" style="aspect-ratio:${t.bgW}/${t.bgH}">
+      <div class="lg-canvas hasbg" style="background-image:url('${t.bg}');background-size:100% 100%">
+        ${lgShapesSvg(t.items || [], null)}
+        ${(t.items || []).filter(i => i.x != null && i.x >= -3 && i.x <= 103 && i.y >= -3 && i.y <= 103).map(lgMarkerHtml).join("")}
+      </div></div>`;
   const secLage = on("lagekarte") ? `
     ${(data.lage && data.lage.items && data.lage.items.length) ? `
     <section class="p-land">
-      <h2>Lagekarte${data.ende ? " (Stand Einsatzende)" : " (aktueller Stand)"}</h2>
+      <h2>Lagekarte${data.ende ? " (Stand Einsatzende)" : " (aktueller Stand)"}${(data.lage.tiles||[]).length ? " – Übersicht" : ""}</h2>
       ${printMapHtml(data.lage)}
       ${printLegendHtml(data.lage.items, data.einheiten)}
-    </section>` : ""}
+    </section>
+    ${(data.lage.tiles||[]).map(t => `
+    <section class="p-land">
+      <h2>Lagekarte – ${esc(t.label)}</h2>
+      ${tileHtml(t)}
+    </section>`).join("")}` : ""}
     ${(data.lage && (data.lage.snapshots||[]).length) ? [...data.lage.snapshots]
       .sort((a,b) => (a.zeit||"").localeCompare(b.zeit||""))
       .map(s => `
       <section class="p-land">
         <h2>Lagebild ${fmtZeit(s.zeit)} Uhr (${fmtDatum(s.zeit)})</h2>
-        ${printMapHtml(s)}
+        ${printMapHtml(s.bild ? { mode:"bild", bg:s.bild.bg, bgW:s.bild.bgW, bgH:s.bild.bgH, items:s.bild.items } : s)}
         ${printLegendHtml(s.items, data.einheiten)}
       </section>`).join("") : ""}` : "";
-  $("#printArea").innerHTML = `
+  return `
     ${runSrc}
-    <div class="p-head">
-      <div>
-        <div class="p-sub">${esc(state.config.ugName)} · Einsatzbericht · Kräfteübersicht${pEnde ? "" : " · Zwischenstand"}</div>
-        <h1>${esc(e.stichwort) || "Ohne Stichwort"}</h1>
-        <div>${esc(e.ort)}${e.objekt ? " · " + esc(e.objekt) : ""}</div>
-      </div>
-      <div class="p-mark">ELWIS</div>
-    </div>
+    ${reportHead(e, pEnde, opts)}
     ${secEinsatz}${secAbschnitte}${secKraefte}${secFunk}${secSkizze}${secBespr}${secFotos}${secListen}${secAtem}${secLage}
     <p class="p-sum">
       Gesamtstärke über den Einsatz: <span class="p-mono">${sAll.f+(data.fuehrung||[]).length}/${sAll.u}/${sAll.m}/${sAll.f+sAll.u+sAll.m+(data.fuehrung||[]).length}</span> · AGT: ${sAll.agt} · CSA: ${sAll.csa}
@@ -6551,13 +6882,242 @@ function doPrint(data, sel){
       <div class="p-sign">Ort, Datum</div>
       <div class="p-sign">Unterschrift Einsatzleiter</div>
     </div>
-    <p class="p-print-ts">Gedruckt am ${new Date().toLocaleString("de-DE")} · ELWIS – Kräfteerfassung (Prototyp) · ${esc(state.config.ugName)}</p>`;
-  window.print();
+    <p class="p-print-ts">Erstellt am ${new Date().toLocaleString("de-DE")} · ELWIS – Kräfteerfassung (Prototyp) · ${esc(state.config.ugName)}</p>`;
 }
+// Vor window.print() alle Bilder im Druckbereich fertig laden lassen – sonst drucken
+// große Base64-Fotos / Kartenhintergründe leer (Foto-Doku „fehlt" im PDF).
+function warteAufBilder(root){
+  const imgs = [...root.querySelectorAll("img")];
+  return Promise.all(imgs.map(img => (img.complete && img.naturalWidth)
+    ? Promise.resolve()
+    : new Promise(res => { img.onload = img.onerror = res; setTimeout(res, 4000); })));   // Timeout als Sicherung
+}
+function doPrint(data, sel){
+  $("#printArea").innerHTML = reportBodyHtml(data, sel);
+  warteAufBilder($("#printArea")).then(() => window.print());
+}
+/* Word-Export: kompletter Bericht als .doc (Word-kompatibles HTML) zum Nachbearbeiten.
+   Läuft vollständig offline – kein Server, keine Bibliothek. Word/LibreOffice öffnen und
+   editieren die Datei; die Lagekarte (Canvas/absolute Positionen) wird von Word nur
+   eingeschränkt dargestellt, alle Tabellen und Texte sind vollständig enthalten. */
+// Word-Seitenzahlfeld (PAGE/NUMPAGES) als bedingter Feldcode – Word ersetzt es
+// beim Öffnen durch die echte Zahl, andere Betrachter zeigen den Rückfallwert "1".
+function msoField(code){
+  return `<!--[if supportFields]><span style='mso-element:field-begin'></span>${code}<span style='mso-element:field-separator'></span><![endif]-->1<!--[if supportFields]><span style='mso-element:field-end'></span><![endif]-->`;
+}
+/* ---- Word-Grafik: Lagekarte & Komm-Skizze als PNG rasterisieren ----------------------
+   Word rendert weder absolute Positionen noch SVG zuverlässig. Wir zeichnen die betroffenen
+   DOM-Bereiche über einen SVG-<foreignObject> auf ein Canvas und betten ein PNG ein. Läuft
+   offline (kein CDN); die eingebettete Stilvorlage stammt aus app.css (inkl. @media-print-Regeln). */
+let _appCssText = null;
+async function appCssText(){
+  if(_appCssText != null) return _appCssText;
+  try{
+    const href = [...document.styleSheets].map(s => s.href).find(h => h && /app\.css(\?|$)/.test(h));
+    _appCssText = href ? await fetch(href).then(r => r.text()) : "";
+  }catch(_){ _appCssText = ""; }
+  return _appCssText;
+}
+// Die @media-print-Regeln aus app.css „auspacken" (ohne den @media-Wrapper), damit sie
+// außerhalb des Druckkontexts (Bildschirm/foreignObject) greifen.
+function printRulesInner(css){
+  const i = css.indexOf("@media print");
+  if(i < 0) return "";
+  const open = css.indexOf("{", i);
+  let depth = 0, j = open;
+  for(; j < css.length; j++){ const c = css[j]; if(c === "{") depth++; else if(c === "}"){ depth--; if(depth === 0) break; } }
+  return css.slice(open + 1, j);
+}
+// rotate=true dreht das Ergebnis um 90° (für breite Inhalte wie die Komm-Skizze, damit sie
+// auf einer Hochformat-Seite komplett sichtbar sind). Rückgabe {url, w, h} = Endmaße (logisch).
+async function nodeToPng(node, rotate){
+  const r = node.getBoundingClientRect();
+  const w = Math.max(1, Math.ceil(r.width)), h = Math.max(1, Math.ceil(r.height));
+  const xml = new XMLSerializer().serializeToString(node);
+  const base = await appCssText();
+  const css = base + "\n" + printRulesInner(base).replace(/#printArea/g, "#wx-shot") + "\n:root{color-scheme:light}";
+  // CSS in CDATA, sonst brechen rohe < / & in app.css den SVG-XML-Parser (→ Bild lädt nicht).
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}">`
+    + `<foreignObject width="100%" height="100%">`
+    + `<div xmlns="http://www.w3.org/1999/xhtml" id="wx-shot" style="width:${w}px;height:${h}px;background:#fff">`
+    + `<style><![CDATA[${css}]]></style>${xml}</div></foreignObject></svg>`;
+  const img = new Image();
+  await new Promise((res, rej) => { img.onload = res; img.onerror = () => rej(new Error("SVG-Bild")); img.src = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg); });
+  const scale = 2, c = document.createElement("canvas");
+  const ctx = c.getContext("2d");
+  if(rotate){
+    c.width = h * scale; c.height = w * scale;
+    ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, c.width, c.height);
+    ctx.translate(0, c.height); ctx.rotate(-Math.PI / 2);   // 90° GEGEN den Uhrzeigersinn
+    ctx.scale(scale, scale); ctx.drawImage(img, 0, 0);
+    return { url: c.toDataURL("image/png"), w: h, h: w };
+  }
+  c.width = w * scale; c.height = h * scale;
+  ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, c.width, c.height);
+  ctx.scale(scale, scale); ctx.drawImage(img, 0, 0);
+  return { url: c.toDataURL("image/png"), w, h };
+}
+// Lagekarte + Komm-Skizze im Word-Body durch gerenderte PNGs ersetzen. Bei Fehler bleibt der
+// ursprüngliche HTML-Body erhalten (Text/Legende gehen nie verloren).
+async function wordBodyMitGrafik(body){
+  const host = document.createElement("div");
+  host.id = "wx-host";
+  // Breiter Host, damit breite Inhalte (Atemschutz-Tabelle, Karte, Skizze) mit genug Auflösung
+  // rendern; die breiten werden anschließend fürs Hochformat gedreht.
+  host.style.cssText = "position:fixed;left:-99999px;top:0;width:1300px;background:#fff;z-index:-1";
+  host.innerHTML = body;
+  const st = document.createElement("style");
+  // Print-Regeln im Host aktiv machen; die Höhen-Klemmung der Karte (max-height:145mm für den
+  // Querformat-Druck) hier aufheben, sonst wird das rasterisierte Luftbild vertikal gestaucht.
+  st.textContent = printRulesInner(await appCssText()).replace(/#printArea/g, "#wx-host")
+    + "\n#wx-host .p-land .p-map{max-height:none!important;margin:0 auto!important}";
+  document.head.appendChild(st);
+  document.body.appendChild(host);
+  try{
+    await new Promise(res => setTimeout(res, 40));   // Layout settlen lassen
+    // A4-Hochformat, nutzbarer Inhaltsbereich (bei den Word-Rändern) in cm
+    const BOXW = 17.4, BOXH = 24.0;
+    for(const node of [...host.querySelectorAll(".p-map, .p-skizze, .p-atem")]){
+      try{
+        const r0 = node.getBoundingClientRect();
+        // Breite Inhalte (Komm-Skizze, Atemschutz-Tabelle) um 90° drehen → aufrecht auf die Hochformat-Seite
+        const rotate = (node.classList.contains("p-skizze") || node.classList.contains("p-atem")) && r0.width > r0.height;
+        const png = await nodeToPng(node, rotate);
+        const ar = png.w / png.h;
+        let wcm = BOXW, hcm = BOXW / ar;
+        if(hcm > BOXH){ hcm = BOXH; wcm = BOXH * ar; }
+        const img = document.createElement("img");
+        img.src = png.url;
+        // Word ignoriert CSS-cm auf <img> und nimmt sonst die native Pixelgröße (→ viel zu groß).
+        // Daher width/height als HTML-Attribute in px (96 dpi) setzen; cm-Style als Fallback.
+        const DPI = 37.795;
+        img.setAttribute("width", Math.round(wcm * DPI));
+        img.setAttribute("height", Math.round(hcm * DPI));
+        img.setAttribute("style", `width:${wcm.toFixed(1)}cm;height:${hcm.toFixed(1)}cm;display:block;margin:6px auto;border:1px solid #999`);
+        node.replaceWith(img);
+      }catch(err){ console.warn("[ELWIS] Word-Rasterisierung übersprungen:", err && err.message); }
+    }
+    // Fotos: Word ignoriert CSS → feste px-Größe (~8 cm breit, Seitenverhältnis erhalten), sonst riesig.
+    await warteAufBilder(host);
+    for(const im of [...host.querySelectorAll(".p-fotos img")]){
+      const nw = im.naturalWidth || 4, nh = im.naturalHeight || 3;
+      const wpx = 300, hpx = Math.round(wpx * nh / nw);
+      im.setAttribute("width", wpx); im.setAttribute("height", hpx);
+      im.setAttribute("style", `width:${(wpx/37.795).toFixed(1)}cm;height:${(hpx/37.795).toFixed(1)}cm;border:1px solid #999`);
+    }
+    return host.innerHTML;
+  } finally {
+    document.body.removeChild(host);
+    document.head.removeChild(st);
+  }
+}
+async function exportWord(data, sel){
+  const e = data.einsatz;
+  const pEnde = e.ende || data.ende;
+  let body = reportBodyHtml(data, sel, { word:true });
+  try{ body = await wordBodyMitGrafik(body); }
+  catch(err){ console.warn("[ELWIS] Word-Grafik fehlgeschlagen, nutze HTML:", err && err.message); }
+  const titel = (e.stichwort || "Einsatzbericht") + (e.ort ? " – " + e.ort : "");
+  const kopfText = `${esc(state.config.ugName)} · ${esc(e.stichwort) || "Einsatzbericht"}${pEnde ? "" : " · Zwischenstand"}`;
+  // Laufende Kopfzeile auf JEDER Seite (mso-header) – links Kontext, rechts der ELWIS-Kasten.
+  const header = `<div style='mso-element:header' id='eh1'>
+    <table class="w-run"><tr>
+      <td class="w-run-l">${kopfText}</td>
+      <td class="w-run-r"><span class="p-mark">ELWIS</span></td>
+    </tr></table></div>`;
+  // Laufende Fußzeile mit Seitenzahl (auf jeder Seite, inkl. Seite 1).
+  const footerInner = `<table class="w-run"><tr>
+      <td class="w-run-l">ELWIS – Einsatzbericht · ${esc(state.config.ugName)}</td>
+      <td class="w-run-r">Seite ${msoField("PAGE")} von ${msoField("NUMPAGES")}</td>
+    </tr></table>`;
+  const footer = `<div style='mso-element:footer' id='ef1'>${footerInner}</div>`;
+  // Erste Seite: KEIN laufender Kopf (der Titelblock im Body zeigt dieselben Daten schon groß)
+  // – vermeidet die Dopplung. Seitenzahl-Fuß bleibt aber auch auf Seite 1.
+  const firstHeader = `<div style='mso-element:header' id='fh1'><p style="margin:0;font-size:1pt">&nbsp;</p></div>`;
+  const firstFooter = `<div style='mso-element:footer' id='ff1'>${footerInner}</div>`;
+  const doc =
+    `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">
+<head><meta charset="utf-8"><title>${esc(titel)}</title>
+<!--[if gte mso 9]><xml><w:WordDocument><w:View>Print</w:View><w:Zoom>100</w:Zoom><w:DoNotOptimizeForBrowser/></w:WordDocument></xml><![endif]-->
+<style>${WORD_STYLE}</style></head>
+<body>
+<div class="Section1">
+${body}
+${firstHeader}
+${firstFooter}
+${header}
+${footer}
+</div>
+</body></html>`;
+  const blob = new Blob(["﻿" + doc], { type: "application/msword" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  const dt = new Date();
+  const stamp = `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,"0")}-${String(dt.getDate()).padStart(2,"0")}_${String(dt.getHours()).padStart(2,"0")}${String(dt.getMinutes()).padStart(2,"0")}`;
+  const safe = (e.stichwort || "Einsatzbericht").replace(/[^\w\-äöüÄÖÜß ]+/g, "").trim().replace(/\s+/g, "_") || "Einsatzbericht";
+  a.href = url; a.download = `${safe}_${stamp}.doc`;
+  document.body.appendChild(a); a.click();
+  setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 500);
+}
+/* Eingebettete Stilvorlage für den Word-Export – spiegelt die Druckregeln aus app.css
+   (dort im @media print), da Word das externe Stylesheet nicht anwendet. */
+const WORD_STYLE = `
+  /* Word-Abschnitt mit laufender Kopf-/Fußzeile (auf jeder Seite) + Seitenzahl. */
+  @page Section1{
+    size:21.0cm 29.7cm;
+    margin:2.2cm 1.3cm 1.7cm 1.3cm;
+    mso-header-margin:1.0cm; mso-footer-margin:0.9cm;
+    mso-header:eh1; mso-footer:ef1;
+    mso-first-header:fh1; mso-first-footer:ff1;
+    mso-title-page:yes;
+  }
+  div.Section1{page:Section1}
+  /* Karte/Skizze/Atemschutz jeweils auf eigener Seite starten (keine Überschrift-Waisen). */
+  .p-land{page-break-before:always}
+  body{font-family:"Segoe UI",Calibri,Arial,sans-serif;color:#000;font-size:9pt;line-height:1.25}
+  p{margin:0 0 4pt}
+  .p-run-src{display:none}
+  /* Titelkopf oben auf Seite 1 (Tabelle → ELWIS-Kasten sitzt zuverlässig oben rechts). */
+  .p-headw{width:100%;border-collapse:collapse;border-bottom:2pt solid #000;margin-bottom:10pt}
+  .p-headw td{border:none;padding:0 0 6pt;vertical-align:top}
+  .p-headw-l h1{font-size:16pt;margin:1pt 0}
+  .p-headw-l .p-sub{font-size:8pt;letter-spacing:.10em;text-transform:uppercase;color:#444}
+  .p-headw-r{text-align:right;white-space:nowrap;width:2.6cm}
+  .p-mark{border:1.5pt solid #000;padding:3pt 8pt;font-weight:800;font-family:Consolas,"Courier New",monospace;font-size:10pt}
+  /* Laufende Kopf-/Fußzeilen-Tabelle. */
+  .w-run{width:100%;border-collapse:collapse}
+  .w-run td{border:none;padding:0;font-size:8pt;color:#555}
+  .w-run-l{text-align:left;letter-spacing:.04em;vertical-align:middle}
+  .w-run-r{text-align:right;vertical-align:middle;white-space:nowrap}
+  #eh1 .w-run{border-bottom:1pt solid #000}
+  #eh1 .w-run td{padding-bottom:3pt}
+  #eh1 .p-mark{font-size:8.5pt;padding:1pt 5pt;border-width:1pt}
+  #ef1 .w-run{border-top:.75pt solid #999}
+  #ef1 .w-run td{padding-top:2pt}
+  h2{font-size:10pt;letter-spacing:.05em;text-transform:uppercase;border-bottom:1px solid #000;padding-bottom:2px;margin:12pt 0 4pt}
+  table{width:100%;border-collapse:collapse;font-size:8pt;margin-bottom:6pt}
+  th{text-align:left;font-size:7pt;letter-spacing:.03em;text-transform:uppercase;border-bottom:1px solid #000;padding:2pt 4pt;background:#eee}
+  td{border-bottom:.5px solid #999;padding:2pt 4pt;vertical-align:top}
+  .meta td{border-bottom:none;padding:1.5pt 4pt}
+  .meta td:first-child{font-weight:700;width:3.2cm}
+  .p-mono{font-family:Consolas,"Courier New",monospace}
+  .p-sum{margin-top:8pt;font-size:9.5pt;font-weight:700}
+  .p-foot{margin-top:26pt;font-size:9pt;color:#333}
+  .p-sign{border-top:1px solid #000;padding-top:4px;margin-top:24pt;width:45%;display:inline-block;margin-right:6%}
+  .p-print-ts{margin-top:12pt;font-size:8pt;color:#666}
+  .p-foto{margin:0 0 10pt}
+  .p-fotos img{max-width:48%;border:1px solid #999}
+  .p-foto-cap{font-size:9pt;color:#222;margin:2pt 0 8pt}
+  .p-map{border:1.5px solid #000;padding:4px;margin:6px 0}
+  .p-legend div{padding:1.5pt 0;font-size:8.5pt}
+  img{max-width:100%}
+`;
 /* Druck-Auswahl: vor dem Drucken wählen, welche Bereiche (= Navigationspunkte ohne Monitor)
    in den Bericht kommen – standardmäßig alle markiert. */
 function openPrintDialog(data){
   const bereiche = TABS.filter(t => t.id !== "monitor");
+  // Lagekarte hat georeferenzierte Elemente, aber KEIN Bild → würde nur schematisch gedruckt.
+  const karteOhneBild = !!(data.lage && (data.lage.items || []).some(i => Array.isArray(i.ll) || Array.isArray(i.llpoints)) && !data.lage.bg);
   const rows = bereiche.map(t => `
     <label class="print-pick">
       <input type="checkbox" data-psec="${t.id}" checked>
@@ -6576,21 +7136,28 @@ function openPrintDialog(data){
         <button type="button" class="btn btn-ghost" id="pick-none">Keine</button>
       </div>
       <div class="print-picks">${rows}</div>
+      ${karteOhneBild ? `<p class="hint" style="margin-top:12px;padding:10px 12px;border-radius:10px;background:var(--warn-bg);color:var(--warn);line-height:1.45">🛰 <strong>Lagekarte ohne Luftbild:</strong> Für ein echtes Kartenbild die Lagekarte vorher über „Ausschnitt einfangen“ (Tab Lagekarte) einfangen – sonst wird sie nur schematisch (Positionen ohne Luftbild) gedruckt.</p>` : ""}
     </div>
-    <div class="sheet-foot">
-      <button class="btn btn-primary" id="print-go" style="flex:1">Drucken</button>
+    <div class="sheet-foot" style="flex-wrap:wrap;gap:10px">
+      <button class="btn btn-ghost" id="print-word" style="flex:1;min-width:150px">Word (.doc) exportieren</button>
+      <button class="btn btn-primary" id="print-go" style="flex:1;min-width:150px">Drucken / PDF</button>
     </div>
   </div>`;
   document.querySelectorAll("[data-close]").forEach(el => el.addEventListener("click", closeEditor));
   const boxes = () => [...document.querySelectorAll("[data-psec]")];
+  const auswahl = () => { const sel = {}; boxes().forEach(b => sel[b.dataset.psec] = b.checked); return sel; };
   $("#pick-all").addEventListener("click", () => boxes().forEach(b => b.checked = true));
   $("#pick-none").addEventListener("click", () => boxes().forEach(b => b.checked = false));
   $("#print-go").addEventListener("click", () => {
-    const sel = {};
-    boxes().forEach(b => sel[b.dataset.psec] = b.checked);
+    const sel = auswahl();
     closeEditor();
     // kurzer Aufschub, damit das Fenster geschlossen ist, bevor der Druckdialog aufgeht
     setTimeout(() => doPrint(data, sel), 60);
+  });
+  $("#print-word").addEventListener("click", () => {
+    const sel = auswahl();
+    closeEditor();
+    setTimeout(() => { exportWord(data, sel).catch(err => modalInfo("Word-Export fehlgeschlagen: " + (err && err.message || err))); }, 60);
   });
 }
 
@@ -6646,11 +7213,20 @@ window.addEventListener("resize", () => {
   monResizeT = setTimeout(() => { if(state && state.view === "monitor") render(); }, 200);
 });
 
-/* ---------------- PWA: Service Worker registrieren ---------------- */
-if("serviceWorker" in navigator && (location.protocol === "https:" || location.hostname === "localhost")){
-  window.addEventListener("load", () => {
-    navigator.serviceWorker.register("./sw.js").catch(() => {});
-  });
+/* ---------------- PWA: Service Worker registrieren ----------------
+   Nur auf echtem HTTPS-Host (z. B. GitHub Pages). Auf localhost NICHT –
+   dort verursacht der Cache beim Entwickeln veraltete/kaputte Assets.
+   Vorhandene Alt-Registrierungen auf localhost werden aktiv entfernt. */
+const istLokal = location.hostname === "localhost" || location.hostname === "127.0.0.1";
+if("serviceWorker" in navigator){
+  if(istLokal){
+    navigator.serviceWorker.getRegistrations().then(rs => rs.forEach(r => r.unregister())).catch(() => {});
+    if(window.caches) caches.keys().then(ks => ks.forEach(k => caches.delete(k))).catch(() => {});
+  }else if(location.protocol === "https:"){
+    window.addEventListener("load", () => {
+      navigator.serviceWorker.register("./sw.js").catch(() => {});
+    });
+  }
 }
 
 /* ================================================================

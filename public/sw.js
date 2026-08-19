@@ -1,13 +1,14 @@
 /* ELWIS Service Worker – macht die App nach dem ersten Besuch offline nutzbar.
    Strategie: Precache der App-Dateien, danach stale-while-revalidate
    (aus dem Cache antworten, im Hintergrund aktualisieren). */
-const VERSION = "elwis-v112";
+const VERSION = "elwis-v136";
 const ASSETS = [
   "./",
   "./app.css",
   "./app.js",
   "./icon.svg",
   "./manifest.webmanifest",
+  "./demo-einsatz.json",
 ];
 
 self.addEventListener("install", (e) => {

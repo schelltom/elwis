@@ -352,6 +352,12 @@
   .arch .a-t{font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .arch .a-s{font-size:.78rem;color:var(--ink2)}
   .arch .btn{min-height:44px;padding:8px 14px;font-size:.85rem}
+  /* Reihenfolge der Einsatzabschnitte über Auf/Ab-Pfeile */
+  .ab-order{flex:none;display:flex;flex-direction:column;gap:2px}
+  .ab-ord-btn{width:36px;height:26px;display:grid;place-items:center;border:1px solid var(--line);
+    background:var(--surface);color:var(--ink2);border-radius:7px;font-size:.7rem;line-height:1;cursor:pointer}
+  .ab-ord-btn:disabled{opacity:.3;cursor:default}
+  .ab-ord-btn:not(:disabled):active{background:var(--surface2)}
   .addrow{display:flex;gap:8px;margin-top:12px}
   .addrow input{flex:1}
   .addrow .btn{flex:none}
@@ -665,6 +671,9 @@
   .lg-cmp-t{font-size:.8rem;font-weight:700;color:var(--ink2)}
   .lg-cmp-t span{font-weight:500;color:var(--ink3)}
   .lg-cmp-map{aspect-ratio:auto;height:min(56vh,480px)}
+  /* Vergleichskarte: alle Finger-Gesten an Leaflet geben (sonst scrollt im Vollbild der Dialog
+     statt zu zoomen/verschieben). touch-action:none auch auf dem inneren Leaflet-Container. */
+  .lg-cmp-map, .lg-cmp-map .leaflet-container{touch-action:none}
   @media (max-width:760px){.lg-cmp{grid-template-columns:1fr}.lg-cmp-map{height:44vh}}
   .lg-fullbtn{min-height:38px;padding:4px 12px;font-size:1.1rem;flex:none}
   .sheet:fullscreen{width:100vw;max-width:none;height:100vh;max-height:none;border-radius:0;top:0;left:0;transform:none;display:flex;flex-direction:column}
@@ -978,12 +987,18 @@
     #printArea .p-map{position:relative;width:100%;aspect-ratio:16/10;border:1.5px solid #000;
       border-radius:4px;overflow:hidden;break-inside:avoid;margin:6px 0 10px;background:#fff}
     #printArea .p-map .lg-canvas{position:absolute;inset:0}
+    /* Schematische Geo-Lagekarte (Online-Modus ohne Screenshot): neutraler Rasterhintergrund */
+    #printArea .p-map-schema .lg-canvas{background-color:#f4f3ef;
+      background-image:linear-gradient(#e4e2db 1px,transparent 1px),linear-gradient(90deg,#e4e2db 1px,transparent 1px);
+      background-size:8% 8%}
+    #printArea .p-map-note{position:absolute;left:6px;bottom:6px;font-size:7.5pt;color:#555;
+      background:rgba(255,255,255,.82);padding:2px 6px;border-radius:4px;max-width:70%}
     #printArea .p-legend{display:grid;grid-template-columns:1fr 1fr;gap:2px 24px;font-size:9.5pt}
     #printArea .p-legend div{display:flex;align-items:center;gap:8px;padding:2px 0}
     #printArea .p-fotos{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
-    #printArea .p-fotos figure{margin:0;break-inside:avoid}
+    #printArea .p-fotos .p-foto{margin:0;break-inside:avoid}
     #printArea .p-fotos img{width:100%;border:1px solid #999;border-radius:3px}
-    #printArea .p-fotos figcaption{font-size:8pt;color:#333;margin-top:2px}
+    #printArea .p-fotos .p-foto-cap{font-size:8.5pt;color:#333;margin-top:2px;line-height:1.3}
     /* Seitenkopf/-fuß + Seitenzahl über @page-Randboxen (kein position:fixed → keine Überlagerung
        des Inhalts). Kopftext kommt aus der versteckten Quelle .p-run-src via string-set. */
     @page{
@@ -1011,7 +1026,7 @@
     /* Lagekarte, Komm-Skizze und jedes Lagebild quer auf je eine eigene Seite –
        hochkant sind sie zu klein/abgeschnitten. Named Page + Umbruch je Block. */
     @page quer{ size:A4 landscape }
-    #printArea .p-land{ page:quer; break-before:page }
+    #printArea .p-land{ page:quer; break-before:page; page-break-before:always }
     #printArea .p-land:first-child{ break-before:avoid }
     #printArea .p-land > h2{ break-after:avoid; margin-top:0 }
     #printArea .p-land .p-map{ max-height:145mm; margin-inline:auto }
@@ -1201,10 +1216,17 @@
 .as-check input{width:20px;height:20px;flex:none;accent-color:var(--accent)}
 
 /* Atemschutz: Druck-Eingaben & Anzeige */
-.as-druckrow{display:flex;align-items:center;gap:12px;padding:6px 0;border-bottom:1px solid var(--line)}
+.as-druckrow{display:flex;align-items:center;gap:12px;padding:6px 0;border-bottom:1px solid var(--line);flex-wrap:wrap}
 .as-druckrow:last-child{border-bottom:none}
 .as-druckrow span{flex:1;min-width:0;font-weight:650}
-.as-druckrow input{width:120px;flex:none}
+.as-druckrow input[data-endd]{width:120px;flex:none}
+/* „kein weiterer Einsatz" je Person im Rückmelde-Dialog */
+.as-raus{flex:0 0 100%;display:flex;align-items:center;gap:8px;font-size:.82rem;font-weight:600;
+  color:var(--ink2);cursor:pointer;margin-top:2px}
+.as-raus input{width:18px;height:18px;flex:none;accent-color:var(--accent)}
+/* Geräteträger „außer Dienst" (kein weiterer Atemschutz-Einsatz) */
+.as-traeger.ausser{opacity:.6}
+.as-traeger.ausser .as-tr-name{text-decoration:line-through;text-decoration-color:var(--ink3)}
 .as-druck{display:inline-block;font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
   font-weight:700;font-size:.8rem;color:var(--thw);
   background:color-mix(in oklab,var(--thw) 12%,var(--surface));border-radius:5px;padding:1px 6px}

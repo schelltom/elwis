@@ -28,9 +28,18 @@ const STAGING = DIST + ".neu";   // frisch geladene Version wartet hier auf den 
 const ALT = DIST + ".alt";       // vorherige Version (Rückfall-Ebene)
 const DATEI = path.join(HIER, "elwis-daten.json");
 
+// Basispfad der App (muss zum `base` in astro.config.mjs passen). Der Build
+// erzeugt absolute Asset-Pfade wie /elwis/app.js (nötig für GitHub Pages).
+// Lokal liegt dist/ direkt an der Wurzel, darum entfernt der Server dieses
+// Präfix wieder, sonst landen die Assets im index.html-Fallback (HTML statt JS).
+const BASE = (process.env.ELWIS_BASE || "/elwis").replace(/\/+$/, "");
+
 // Quelle + Takt des Auto-Mirrors (per Umgebungsvariable überschreibbar)
 const GH_BASIS = (process.env.ELWIS_QUELLE || "https://schelltom.github.io/elwis/").replace(/\/?$/, "/");
 const UPDATE_INTERVALL = Math.max(1, Number(process.env.ELWIS_UPDATE_MIN || 5)) * 60 * 1000;
+// Auto-Mirror abschaltbar (ELWIS_MIRROR=0) – nötig fürs lokale Testen eines
+// eigenen Builds, den der Mirror sonst mit dem GitHub-Pages-Stand überschreibt.
+const MIRROR_AKTIV = process.env.ELWIS_MIRROR !== "0";
 
 const MIME = {
   ".html": "text/html; charset=utf-8", ".css": "text/css; charset=utf-8",
@@ -309,7 +318,10 @@ function lanUrls(){
 }
 
 const server = http.createServer((req, res) => {
-  const u = new URL(req.url, "http://x");
+  // Ungültige Anfrage-URLs (z. B. "//", Scanner) dürfen den Server nicht abstürzen lassen.
+  let u;
+  try{ u = new URL(req.url, "http://x"); }
+  catch(_){ res.writeHead(400); res.end("Ungültige Anfrage"); return; }
 
   /* --- API --- */
   if(u.pathname === "/api/info"){
@@ -393,6 +405,8 @@ const server = http.createServer((req, res) => {
     return;
   }
   let rel = decodeURIComponent(u.pathname);
+  // Basis-Präfix (/elwis) abstreifen – die App liegt lokal an der Wurzel.
+  if(BASE && (rel === BASE || rel.startsWith(BASE + "/"))) rel = rel.slice(BASE.length) || "/";
   if(rel === "/" || rel === "") rel = "/index.html";
   const datei = path.normalize(path.join(DIST, rel));
   if(!datei.startsWith(DIST)){ res.writeHead(403); res.end(); return; }
@@ -423,13 +437,17 @@ server.listen(PORT, () => {
   for(const url of lanUrls()) console.log(`  Im WLAN:    ${url}   ← Tablets hiermit verbinden`);
   console.log(`  Daten:      ${DATEI}`);
   console.log(`  App-Build:  ${appVorhanden() ? `${DIST} (Version ${versionVon(DIST) || "?"})` : "wird beim ersten Internet-Kontakt von GitHub geladen"}`);
-  console.log(`  Auto-Mirror: ${GH_BASIS}  (Prüfung alle ${Math.round(UPDATE_INTERVALL/60000)} Min)`);
+  console.log(`  Auto-Mirror: ${MIRROR_AKTIV ? `${GH_BASIS}  (Prüfung alle ${Math.round(UPDATE_INTERVALL/60000)} Min)` : "AUS (ELWIS_MIRROR=0)"}`);
   console.log("");
 
   // Auto-Mirror: gleich prüfen, dann im Takt. Neue Versionen werden geladen,
   // aber erst beim nächsten Neustart aktiv (Hinweis erscheint in der App).
-  pruefeAufUpdate();
-  setInterval(pruefeAufUpdate, UPDATE_INTERVALL);
-  // Bereitliegende Version zeitnah scharf schalten, sobald kein Gerät mehr verbunden ist.
-  setInterval(versucheLeerlaufAktivierung, 20000);
+  if(MIRROR_AKTIV){
+    pruefeAufUpdate();
+    setInterval(pruefeAufUpdate, UPDATE_INTERVALL);
+    // Bereitliegende Version zeitnah scharf schalten, sobald kein Gerät mehr verbunden ist.
+    setInterval(versucheLeerlaufAktivierung, 20000);
+  } else {
+    console.log("  Auto-Mirror: AUS (ELWIS_MIRROR=0) – lokaler Build wird ausgeliefert.");
+  }
 });
