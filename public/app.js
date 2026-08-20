@@ -275,7 +275,7 @@ const TABS = [
     icon:'<rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4.5V3h6v1.5"/><path d="M8.5 10h7M8.5 13.5h7M8.5 17h4.5"/>' },
   { id:"kraefte",  label:"Kräfte",
     icon:'<path d="M2.5 15V9.5A1.5 1.5 0 0 1 4 8h9.5v7"/><path d="M13.5 9.5H18l3.5 3.5v2h-8"/><circle cx="6.5" cy="17" r="2"/><circle cx="17" cy="17" r="2"/><path d="M8.5 17h6.5M2.5 15v2h2"/>' },
-  { id:"funk",     label:"Tagebuch",
+  { id:"funk",     label:"ETB",
     icon:'<circle cx="12" cy="7" r="2.2"/><path d="M12 9.2V21M8.5 21h7"/><path d="M7.2 2.6a7.4 7.4 0 0 0 0 8.8M16.8 2.6a7.4 7.4 0 0 1 0 8.8"/>' },
   { id:"skizze",   label:"Komm-Skizze", nurGross:true,
     icon:'<rect x="8.5" y="3" width="7" height="5" rx="1"/><rect x="2.5" y="16" width="7" height="5" rx="1"/><rect x="14.5" y="16" width="7" height="5" rx="1"/><path d="M12 8v4M6 16v-4h12v4"/>' },
@@ -360,6 +360,9 @@ function zustandAufbauen(stored){
   if(!state.lage.mode) state.lage.mode = state.lage.bg ? "bild" : "raster";
   if(!state.lage.mapLayer) state.lage.mapLayer = "luftbild";
   if(!Array.isArray(state.funk)) state.funk = [];
+  // Revisionssicherheit: Alt-Einträge bekommen eine nachgezogene Erfassungszeit,
+  // damit Zählung/Reihenfolge stabil bleiben (berichtigtId/stornoId markieren Meta-Einträge).
+  state.funk.forEach(f => { if(f && !f.erstelltAm && !f.berichtigtId && !f.stornoId) f.erstelltAm = f.zeit; });
   if(!Array.isArray(state.besprechungen)) state.besprechungen = [];
   if(!Array.isArray(state.anforderungen)) state.anforderungen = [];
   if(!Array.isArray(state.checks)) state.checks = [];
@@ -536,6 +539,28 @@ function modalConfirm(text, ok = "Ja", abbrechen = "Abbrechen"){
   return modal({ text, ok, abbrechen });
 }
 function modalInfo(text){ return modal({ text, ok: "OK" }); }
+/* Prompt mit einzeiligem Eingabefeld – liefert den (getrimmten) Text oder null bei Abbruch. */
+function modalPrompt(titel, text, placeholder = "", okLabel = "Stornieren"){
+  return new Promise(resolve => {
+    const host = $("#modalHost");
+    host.innerHTML = `
+    <div class="modal-backdrop"></div>
+    <div class="modal" role="alertdialog" aria-modal="true">
+      <h2>${esc(titel)}</h2>
+      <p>${esc(text)}</p>
+      <input id="mdPrompt" style="width:100%;box-sizing:border-box" placeholder="${esc(placeholder)}" autocomplete="off">
+      <div class="modal-btns">
+        <button class="btn btn-ghost" data-md="0">Abbrechen</button>
+        <button class="btn btn-primary" data-md="1">${esc(okLabel)}</button>
+      </div>
+    </div>`;
+    const inp = host.querySelector("#mdPrompt");
+    const fertig = ok => { const val = inp ? inp.value.trim() : ""; host.innerHTML = ""; resolve(ok ? val : null); };
+    host.querySelectorAll("[data-md]").forEach(b => b.addEventListener("click", () => fertig(b.dataset.md === "1")));
+    host.querySelector(".modal-backdrop").addEventListener("click", () => fertig(false));
+    if(inp){ inp.focus(); inp.addEventListener("keydown", e => { if(e.key === "Enter") fertig(true); }); }
+  });
+}
 
 /* QR-Code als Bild-Data-URL (Vendor-Lib qrcode) */
 function qrDataUrl(text){
@@ -1128,7 +1153,7 @@ function renderSettingsSheet(){
       <div class="field">
         <label for="cfg-elw">Standard-Empfänger Funkgespräche (ELW)</label>
         <input id="cfg-elw" class="mono" value="${esc(c.elwFunk||"")}" placeholder="z. B. Kater Weiden 1/12/1" autocomplete="off">
-        <p class="hint">Funkrufname des ELW – wird im Funktagebuch als Empfänger („An“) vorbelegt.</p>
+        <p class="hint">Funkrufname des ELW – wird im ETB als Empfänger („An“) vorbelegt.</p>
       </div>
       <div class="field">
         <label for="cfg-w3w">what3words API-Key</label>
@@ -2939,7 +2964,10 @@ function renderFkSheet(){
   });
 }
 
-/* ---------------- Ansicht: Funk (Einsatztagebuch) ---------------- */
+/* ---------------- Ansicht: ETB (Einsatztagebuch, Funk & Ereignisse) ----------------
+   Revisionssicher/append-only: Einträge werden nie überschrieben oder gelöscht.
+   Bearbeiten = Berichtigung (neuer Record berichtigtId), Löschen = Storno (stornoId).
+   Erfassungszeit (erstelltAm) + Gerät (erstelltVon) sind unveränderlich. */
 let editingFs = null; // { fs, isNew }
 function fsSuggestions(){
   // Fahrzeuge zuerst (ALLE erfassten – auch bereits abgerückte), dann Führungskräfte
@@ -2958,33 +2986,66 @@ const FS_EREIGNIS_PRESETS = ["Menschenrettung", "Feuer unter Kontrolle", "Feuer 
   "Nachforderung", "Einsatzabschnitt gebildet", "Lage erkundet", "Einsatzstelle übergeben"];
 let fsFilter = "alle";   // alle | ereignis | wichtig
 const fsTyp = f => f.typ || "funk";
+function fsGeraet(f){ return f && f.erstelltVon ? "Gerät …" + String(f.erstelltVon).slice(-4) : ""; }
+/* Append-only-Auflösung: Basiseinträge mit ihren Berichtigungen + Storno.
+   Berichtigungen/Stornos sind eigene funk-Records (berichtigtId/stornoId) und
+   werden NIE überschrieben oder gelöscht → sync-sicher (keine Tombstones).
+   effektiv = aktuell wirksame Fassung (letzte Berichtigung, sonst Basis). */
+function fsThreads(funk){
+  const korr = {}, storno = {}, basis = [];
+  (funk || []).forEach(f => {
+    if(f.berichtigtId){ (korr[f.berichtigtId] = korr[f.berichtigtId] || []).push(f); }
+    else if(f.stornoId){ storno[f.stornoId] = f; }
+    else basis.push(f);
+  });
+  return basis.map(b => {
+    const ks = (korr[b.id] || []).slice().sort((a,c) => (a.erstelltAm||a.zeit||"").localeCompare(c.erstelltAm||c.zeit||""));
+    const letzte = ks.length ? ks[ks.length - 1] : b;
+    const effektiv = { ...b, zeit:letzte.zeit, typ:letzte.typ, von:letzte.von, an:letzte.an, text:letzte.text, wichtig:letzte.wichtig };
+    return { basis:b, effektiv, korrekturen:ks, storno: storno[b.id] || null };
+  });
+}
 function renderFunk(){
-  const all = [...state.funk].sort((a,b) => (b.zeit||"").localeCompare(a.zeit||""));
-  const list = all.filter(f => fsFilter === "alle" ? true : fsFilter === "ereignis" ? fsTyp(f) !== "funk" : f.wichtig);
-  const ereignisN = state.funk.filter(f => fsTyp(f) !== "funk").length;
-  const rowHtml = f => {
+  const threads = fsThreads(state.funk).sort((a,b) => (b.effektiv.zeit||"").localeCompare(a.effektiv.zeit||""));
+  const sichtbar = threads.filter(t => fsFilter === "alle" ? true
+    : fsFilter === "ereignis" ? fsTyp(t.effektiv) !== "funk"
+    : (t.effektiv.wichtig && !t.storno));
+  const ereignisN = threads.filter(t => fsTyp(t.effektiv) !== "funk").length;
+  const wichtigN = threads.filter(t => t.effektiv.wichtig && !t.storno).length;
+  const subStil = "font-size:.8rem;color:var(--ink3);margin-top:3px";
+  const rowHtml = t => {
+    const f = t.effektiv, storno = t.storno;
     const head = fsTyp(f) === "funk"
       ? `<span class="fs-route"><strong>${esc(f.von)}</strong> → <strong>${esc(f.an)}</strong></span>`
       : `<span class="chip fs-typ fs-typ-${fsTyp(f)}">${esc(FS_TYPEN[fsTyp(f)] || "")}</span>`;
-    return `<button class="fs-item ${f.wichtig?"imp":""}" data-editfs="${esc(f.id)}">
+    const chips = `${f.wichtig && !storno ? `<span class="chip chip-imp">WICHTIG</span>` : ""}`
+      + `${t.korrekturen.length ? `<span class="chip" style="background:#e8eef7;color:#33507a">berichtigt</span>` : ""}`
+      + `${storno ? `<span class="chip" style="background:#f7e3e3;color:#8a2a2a">STORNIERT</span>` : ""}`;
+    const sub = t.korrekturen.map(k =>
+        `<div style="${subStil}">↳ Berichtigung ${fmtZeit(k.erstelltAm||k.zeit)}: ${esc(k.text)}</div>`).join("")
+      + (storno ? `<div style="${subStil}">↳ Storniert ${fmtZeit(storno.erstelltAm)}${storno.stornoGrund ? " – " + esc(storno.stornoGrund) : ""}</div>` : "");
+    const inner = `
       <div class="fs-head">
         <span class="fs-zeit mono">${istHeute(f.zeit) ? "" : fmtTagKurz(f.zeit) + " "}${fmtZeit(f.zeit)}</span>
         ${head}
-        ${f.wichtig ? `<span class="chip chip-imp">WICHTIG</span>` : ""}
+        ${chips}
       </div>
-      <div class="fs-text">${esc(f.text)}</div>
-    </button>`;
+      <div class="fs-text"${storno ? ` style="text-decoration:line-through;opacity:.6"` : ""}>${esc(f.text)}</div>
+      ${sub}`;
+    return storno
+      ? `<div class="fs-item storniert">${inner}</div>`
+      : `<button class="fs-item ${f.wichtig?"imp":""}" data-editfs="${esc(t.basis.id)}">${inner}</button>`;
   };
-  const items = list.length ? `<div class="fs-list">${list.map(rowHtml).join("")}</div>`
+  const items = sichtbar.length ? `<div class="fs-list">${sichtbar.map(rowHtml).join("")}</div>`
     : `<div class="empty"><p>${fsFilter === "alle"
         ? "Noch keine Einträge.<br>Funksprüche und wichtige Ereignisse landen hier – Zeitstempel kommt automatisch."
         : "Keine Einträge in diesem Filter."}</p></div>`;
   const presets = FS_EREIGNIS_PRESETS.map(x => `<button class="fs-ev" data-fsev="${esc(x)}">${esc(x)}</button>`).join("");
   return `
   <div class="statstrip" role="status">
-    <div class="stat"><div class="k">Einträge</div><div class="v mono">${state.funk.length}</div><div class="s">gesamt</div></div>
+    <div class="stat"><div class="k">Einträge</div><div class="v mono">${threads.length}</div><div class="s">gesamt</div></div>
     <div class="stat"><div class="k">Ereignisse</div><div class="v mono">${ereignisN}</div><div class="s">erfasst</div></div>
-    <div class="stat"><div class="k">Wichtig</div><div class="v mono">${state.funk.filter(f=>f.wichtig).length}</div><div class="s">markiert</div></div>
+    <div class="stat"><div class="k">Wichtig</div><div class="v mono">${wichtigN}</div><div class="s">markiert</div></div>
   </div>
   <div class="field" style="margin-bottom:10px"><label style="margin-bottom:6px">Ereignis schnell erfassen (ein Tipp = Zeitstempel)</label>
     <div class="fs-events">${presets}</div></div>
@@ -2994,7 +3055,7 @@ function renderFunk(){
     <button role="tab" data-fsfilter="ereignis" class="${fsFilter==="ereignis"?"active":""}">Ereignisse</button>
     <button role="tab" data-fsfilter="wichtig" class="${fsFilter==="wichtig"?"active":""}">Wichtig</button>
   </div>
-  ${state.funk.length ? `<button class="btn btn-ghost btn-block" id="btnPrintFs" style="margin-bottom:16px">Einsatztagebuch drucken</button>` : ""}
+  ${threads.length ? `<button class="btn btn-ghost btn-block" id="btnPrintFs" style="margin-bottom:16px">ETB drucken</button>` : ""}
   ${items}`;
 }
 function wireFunk(){
@@ -3004,49 +3065,64 @@ function wireFunk(){
   document.querySelectorAll("[data-editfs]").forEach(el =>
     el.addEventListener("click", () => openFsEditor(el.dataset.editfs)));
   document.querySelectorAll("[data-fsev]").forEach(b => b.addEventListener("click", () => {   // Ereignis-Schnellerfassung
-    state.funk.push({ id:uid(), zeit:new Date().toISOString(), typ:"ereignis", von:"", an:"", text:b.dataset.fsev, wichtig:true });
+    const jetzt = new Date().toISOString();
+    state.funk.push({ id:uid(), zeit:jetzt, erstelltAm:jetzt, erstelltVon:syncClientId(), typ:"ereignis", von:"", an:"", text:b.dataset.fsev, wichtig:true });
     markChange(); render();
   }));
   document.querySelectorAll("[data-fsfilter]").forEach(b => b.addEventListener("click", () => { fsFilter = b.dataset.fsfilter; render(); }));
 }
 function doPrintFunk(){
   const e = state.einsatz;
-  const sorted = [...state.funk].sort((a,b) => (a.zeit||"").localeCompare(b.zeit||""));
-  const mehrtaegig = new Set(sorted.map(f => new Date(f.zeit).toDateString())).size > 1;
+  const threads = fsThreads(state.funk).sort((a,b) =>
+    (a.basis.erstelltAm||a.basis.zeit||"").localeCompare(b.basis.erstelltAm||b.basis.zeit||""));
+  const mehrtaegig = new Set(threads.map(t => new Date(t.effektiv.zeit).toDateString())).size > 1;
+  const zt = z => (mehrtaegig ? fmtTagKurz(z) + " " : "") + fmtZeit(z);
+  const rows = threads.map((t, idx) => {
+    const f = t.effektiv, st = t.storno;
+    const strike = st ? ' style="text-decoration:line-through;color:#888"' : "";
+    let html = `
+      <tr>
+        <td class="p-mono">${idx+1}${f.wichtig && !st ? " !" : ""}</td>
+        <td class="p-mono">${zt(f.zeit)}</td>
+        <td>${esc(FS_TYPEN[f.typ||"funk"] || "")}</td>
+        <td>${esc(f.von)}</td>
+        <td>${esc(f.an)}</td>
+        <td${strike}>${f.wichtig && !st ? `<strong>${esc(f.text)}</strong>` : esc(f.text)}</td>
+      </tr>`;
+    t.korrekturen.forEach(k => { html += `
+      <tr><td></td><td class="p-mono">${zt(k.erstelltAm||k.zeit)}</td><td colspan="4"><em>Berichtigung:</em> ${esc(k.text)}</td></tr>`; });
+    if(st) html += `
+      <tr><td></td><td class="p-mono">${zt(st.erstelltAm)}</td><td colspan="4"><em>Storniert${st.stornoGrund ? " – " + esc(st.stornoGrund) : ""}</em></td></tr>`;
+    return html;
+  }).join("");
   $("#printArea").innerHTML = `
     <div class="p-head">
       <div>
-        <div class="p-sub">${esc(state.config.ugName)} · Einsatztagebuch (Funk & Ereignisse)</div>
+        <div class="p-sub">${esc(state.config.ugName)} · Einsatztagebuch (ETB)</div>
         <h1>${esc(e.stichwort) || "Ohne Stichwort"}</h1>
         <div>${esc(e.ort)}${e.beginn ? " · Alarm " + fmtDatum(e.beginn) + " " + fmtZeit(e.beginn) + " Uhr" : ""}</div>
       </div>
       <div class="p-mark">ELWIS</div>
     </div>
     <table><thead><tr><th>Nr.</th><th>Zeit</th><th>Art</th><th>Von</th><th>An</th><th>Inhalt</th></tr></thead><tbody>
-      ${sorted.map((f,idx) => `
-      <tr>
-        <td class="p-mono">${idx+1}${f.wichtig ? " !" : ""}</td>
-        <td class="p-mono">${mehrtaegig ? fmtTagKurz(f.zeit) + " " : ""}${fmtZeit(f.zeit)}</td>
-        <td>${esc(FS_TYPEN[f.typ||"funk"] || "")}</td>
-        <td>${esc(f.von)}</td>
-        <td>${esc(f.an)}</td>
-        <td>${f.wichtig ? `<strong>${esc(f.text)}</strong>` : esc(f.text)}</td>
-      </tr>`).join("")}
+      ${rows}
     </tbody></table>
     <div class="p-foot">
       <div class="p-sign">Ort, Datum</div>
       <div class="p-sign">Unterschrift</div>
     </div>
-    <p style="font-size:8pt;color:#666;margin-top:16px">Gedruckt am ${new Date().toLocaleString("de-DE")} · ELWIS – Kräfteerfassung (Prototyp) · ${esc(state.config.ugName)}</p>`;
+    <p style="font-size:8pt;color:#666;margin-top:16px">Nr. = Erfassungsreihenfolge (revisionssicher); Berichtigungen &amp; Stornos bleiben erhalten. Gedruckt am ${new Date().toLocaleString("de-DE")} · ELWIS – Kräfteerfassung (Prototyp) · ${esc(state.config.ugName)}</p>`;
   window.print();
 }
 function openFsEditor(id){
   if(id){
-    const f = state.funk.find(x => x.id === id);
-    if(!f) return;
-    editingFs = { fs: {...f}, isNew:false };
+    const th = fsThreads(state.funk).find(t => t.basis.id === id);
+    if(!th) return;
+    if(th.storno){ modalInfo("Dieser Eintrag ist storniert und kann nicht mehr bearbeitet werden."); return; }
+    // Editiert wird die AKTUELL wirksame Fassung; die Basis bleibt unverändert.
+    editingFs = { basisId:id, fs:{...th.effektiv}, orig:{...th.effektiv}, isNew:false };
   }else{
-    editingFs = { fs: { id:uid(), zeit:new Date().toISOString(), typ:"funk", von:"", an:state.config.elwFunk||"Kater Weiden 1/12/1",
+    editingFs = { basisId:null, fs:{ id:uid(), zeit:new Date().toISOString(), typ:"funk", von:"", an:state.config.elwFunk||"Kater Weiden 1/12/1",
       text:"", wichtig:false }, isNew:true };
   }
   renderFsSheet();
@@ -3057,20 +3133,20 @@ function renderFsSheet(){
   const sugg = fsSuggestions().map(x => `<option value="${esc(x)}">`).join("");
   $("#sheetHost").innerHTML = `
   <div class="sheet-backdrop" data-close="1"></div>
-  <div class="sheet" role="dialog" aria-modal="true" aria-label="${editingFs.isNew?"Eintrag erfassen":"Eintrag bearbeiten"}">
+  <div class="sheet" role="dialog" aria-modal="true" aria-label="${editingFs.isNew?"ETB-Eintrag erfassen":"ETB-Eintrag berichtigen"}">
     <div class="sheet-head">
-      <h2>${editingFs.isNew ? "Eintrag erfassen" : "Eintrag bearbeiten"}</h2>
+      <h2>${editingFs.isNew ? "ETB-Eintrag erfassen" : "Eintrag berichtigen"}</h2>
       <button class="sheet-close" data-close="1" aria-label="Schließen">×</button>
     </div>
     <div class="sheet-body">
       <div class="field">
         <div style="display:flex;gap:10px;flex-wrap:wrap">
-          <div style="width:190px"><label for="fs-datum">Datum</label>
+          <div style="width:190px"><label for="fs-datum">Ereignisdatum</label>
             <input id="fs-datum" type="date" class="mono" value="${fmtDateInput(f.zeit)}"></div>
-          <div style="width:150px"><label for="fs-zeit">Uhrzeit</label>
+          <div style="width:150px"><label for="fs-zeit">Ereigniszeit</label>
             <input id="fs-zeit" type="time" class="mono" step="60" value="${fmtZeit(f.zeit)==="–"?"":fmtZeit(f.zeit)}"></div>
         </div>
-        <p class="hint">Vorbelegt mit jetzt – bei Einsätzen über Mitternacht Datum anpassen.</p>
+        <p class="hint">Ereigniszeit – vorbelegt mit jetzt; bei Einsätzen über Mitternacht Datum anpassen.${(editingFs.isNew || !f.erstelltAm) ? "" : `<br><span class="mono">Erfasst ${fmtDatum(f.erstelltAm)} ${fmtZeit(f.erstelltAm)}${fsGeraet(f) ? " · " + esc(fsGeraet(f)) : ""} – unveränderlich</span>`}</p>
       </div>
       <div class="field"><label>Art des Eintrags</label>
         <div class="seg" id="fs-typ-seg" role="tablist" style="max-width:none">
@@ -3101,8 +3177,8 @@ function renderFsSheet(){
       </div>
     </div>
     <div class="sheet-foot">
-      ${editingFs.isNew ? "" : `<button class="btn btn-danger-ghost" id="fs-del">Löschen</button>`}
-      <button class="btn btn-primary" id="fs-save" style="flex:1">Speichern</button>
+      ${editingFs.isNew ? "" : `<button class="btn btn-danger-ghost" id="fs-del">Stornieren</button>`}
+      <button class="btn btn-primary" id="fs-save" style="flex:1">${editingFs.isNew ? "Speichern" : "Berichtigung speichern"}</button>
     </div>
   </div>`;
   document.querySelectorAll("[data-close]").forEach(el => el.addEventListener("click", closeEditor));
@@ -3123,8 +3199,11 @@ function renderFsSheet(){
   });
   const del = $("#fs-del");
   if(del) del.addEventListener("click", () => {
-    modalConfirm("Diesen Funkspruch wirklich löschen?").then(ok => { if(!ok) return;
-      state.funk = state.funk.filter(x => x.id !== f.id);
+    // Append-only: kein Hard-Delete. Storno bleibt als eigener Eintrag im ETB.
+    modalPrompt("Eintrag stornieren", "Der Eintrag bleibt im ETB sichtbar (durchgestrichen) und wird als storniert gekennzeichnet. Grund (optional):", "z. B. Doppelerfassung").then(grund => {
+      if(grund === null) return;   // Abbruch
+      state.funk.push({ id:uid(), erstelltAm:new Date().toISOString(), erstelltVon:syncClientId(),
+        stornoId: editingFs.basisId, stornoGrund: grund });
       markChange(); closeEditor(); render();
     });
   });
@@ -3142,8 +3221,19 @@ function renderFsSheet(){
     f.an = $("#fs-an").value.trim();
     f.text = $("#fs-text").value.trim();
     if(!f.text){ $("#fs-text").focus(); return; }   // Text ist bei jedem Eintrag Pflicht
-    const idx = state.funk.findIndex(x => x.id === f.id);
-    if(idx >= 0) state.funk[idx] = f; else state.funk.push(f);
+    if(editingFs.isNew){
+      f.erstelltAm = new Date().toISOString();
+      f.erstelltVon = syncClientId();
+      state.funk.push(f);
+    }else{
+      // Append-only: Änderung wird als Berichtigung angehängt, Original bleibt unverändert.
+      const o = editingFs.orig || {};
+      const unveraendert = o.zeit===f.zeit && (o.typ||"funk")===(f.typ||"funk") &&
+        (o.von||"")===(f.von||"") && (o.an||"")===(f.an||"") && (o.text||"")===(f.text||"") && !!o.wichtig===!!f.wichtig;
+      if(unveraendert){ closeEditor(); return; }   // nichts geändert → keine leere Berichtigung
+      state.funk.push({ id:uid(), erstelltAm:new Date().toISOString(), erstelltVon:syncClientId(),
+        berichtigtId: editingFs.basisId, zeit:f.zeit, typ:f.typ, von:f.von, an:f.an, text:f.text, wichtig:f.wichtig });
+    }
     markChange(); closeEditor(); render();
   });
 }
@@ -4312,8 +4402,9 @@ function renderMonitor(){
       <span class="fk-f">${esc(f.funktion)}${f.einheit?` · ${esc(f.einheit)}`:""}</span>
     </div>`).join("");
 
-  const fsMonRows = [...state.funk].sort((a,b) => (b.zeit||"").localeCompare(a.zeit||""))
-    .slice(0, 6).map(f => `
+  const fsMonRows = fsThreads(state.funk).filter(t => !t.storno)
+    .sort((a,b) => (b.effektiv.zeit||"").localeCompare(a.effektiv.zeit||""))
+    .slice(0, 6).map(t => { const f = t.effektiv; return `
     <div class="fsm">
       <div class="fsm-top">
         ${f.wichtig ? `<span class="imp-dot" title="Wichtig"></span>` : ""}
@@ -4321,7 +4412,7 @@ function renderMonitor(){
         <span>${(f.typ||"funk") === "funk" ? esc(f.von) + " → " + esc(f.an) : esc(FS_TYPEN[f.typ] || "Ereignis")}</span>
       </div>
       <div class="fsm-text">${esc(f.text)}</div>
-    </div>`).join("");
+    </div>`; }).join("");
 
   // Abschnitts-Kacheln: Stärke, Erreichbarkeit, Fahrzeuge ausgeschrieben & alphabetisch
   const abCard = (title, units, opts) => {
@@ -4388,7 +4479,7 @@ function renderMonitor(){
   const visible = specialKey ? [] : cardsData.slice(pg.start, pg.start + pg.count);
   const abCards = visible.map(c => abCard(c.title, c.units, c.opts)).join("");
   const pagerLabel = isLagePage ? "Lagekarte" : isSkizzePage ? "Komm-Skizze"
-    : isFunkPage ? "Funk & Checklisten" : isAsPage ? "Atemschutz-Trupps"
+    : isFunkPage ? "ETB & Checklisten" : isAsPage ? "Atemschutz-Trupps"
     : `${pg.start+1}–${pg.start+pg.count} von ${cardsData.length}`;
   const abPager = totalPages > 1 ? `
     <div class="ab-pager" title="${monAbPaused ? "Rotation angehalten" : "Wechselt alle 30 Sekunden"}">
@@ -4525,7 +4616,7 @@ function renderMonitor(){
         }).join("");
         return `
       <div class="mon-grid" style="grid-template-columns:1fr 1fr">
-        <div class="panel"><h3>Letzte Funksprüche</h3>${fsMonRows || `<p class="hint">Noch keine erfasst.</p>`}</div>
+        <div class="panel"><h3>Letzte ETB-Einträge</h3>${fsMonRows || `<p class="hint">Noch keine erfasst.</p>`}</div>
         <div class="panel"><h3>Checklisten</h3>${checksListe || `<p class="hint">Noch keine Checkliste.</p>`}</div>
       </div>`;
       })()
@@ -4650,7 +4741,7 @@ function openMonHideSheet(){
       <div class="field"><label>Rotierende Seiten</label>
         ${row("Lagekarte", hp.karte, "p:karte")}
         ${row("Komm-Skizze", hp.skizze, "p:skizze")}
-        ${row("Funk & Checklisten", hp.funkchecks, "p:funkchecks")}
+        ${row("ETB & Checklisten", hp.funkchecks, "p:funkchecks")}
         ${row("Atemschutz-Trupps", hp.as, "p:as")}
       </div>
       <div class="field"><label>Einsatzabschnitte</label>
@@ -6781,22 +6872,36 @@ function reportBodyHtml(data, sel, opts){
         <td class="p-mono">${a.eingetroffen ? fmtZeit(a.eingetroffen) : "–"}</td>
       </tr>`).join("")}
     </tbody></table>` : "<p>Keine.</p>"}` : "";
-  const secFunk = on("funk") ? `
-    <h2>Funksprüche / Einsatztagebuch (${(data.funk||[]).length})</h2>
-    ${(data.funk||[]).length ? (() => {
-      const sorted = [...data.funk].sort((a,b) => (a.zeit||"").localeCompare(b.zeit||""));
+  const secFunk = on("funk") ? (() => {
+    const threads = fsThreads(data.funk).sort((a,b) =>
+      (a.basis.erstelltAm||a.basis.zeit||"").localeCompare(b.basis.erstelltAm||b.basis.zeit||""));
+    return `
+    <h2>Einsatztagebuch (ETB) (${threads.length})</h2>
+    ${threads.length ? (() => {
       // Datum nur anzeigen, wenn das Tagebuch über einen Tageswechsel geht
-      const mehrtaegig = new Set(sorted.map(f => new Date(f.zeit).toDateString())).size > 1;
-      return `<table><thead><tr><th>Nr.</th><th>Zeit</th><th>Von</th><th>An</th><th>Inhalt</th></tr></thead><tbody>
-      ${sorted.map((f,idx) => `
+      const mehrtaegig = new Set(threads.map(t => new Date(t.effektiv.zeit).toDateString())).size > 1;
+      const zt = z => (mehrtaegig ? fmtTagKurz(z) + " " : "") + fmtZeit(z);
+      const rows = threads.map((t,idx) => {
+        const f = t.effektiv, st = t.storno;
+        const strike = st ? ' style="text-decoration:line-through;color:#888"' : "";
+        let html = `
       <tr>
-        <td class="p-mono">${idx+1}${f.wichtig ? " !" : ""}</td>
-        <td class="p-mono">${mehrtaegig ? fmtTagKurz(f.zeit) + " " : ""}${fmtZeit(f.zeit)}</td>
+        <td class="p-mono">${idx+1}${f.wichtig && !st ? " !" : ""}</td>
+        <td class="p-mono">${zt(f.zeit)}</td>
         <td>${esc(f.von)}</td>
         <td>${esc(f.an)}</td>
-        <td>${f.wichtig ? `<strong>${esc(f.text)}</strong>` : esc(f.text)}</td>
-      </tr>`).join("")}
-    </tbody></table>`;})() : "<p>Keine erfasst.</p>"}` : "";
+        <td${strike}>${f.wichtig && !st ? `<strong>${esc(f.text)}</strong>` : esc(f.text)}</td>
+      </tr>`;
+        t.korrekturen.forEach(k => { html += `
+      <tr><td></td><td class="p-mono">${zt(k.erstelltAm||k.zeit)}</td><td colspan="3"><em>Berichtigung:</em> ${esc(k.text)}</td></tr>`; });
+        if(st) html += `
+      <tr><td></td><td class="p-mono">${zt(st.erstelltAm)}</td><td colspan="3"><em>Storniert${st.stornoGrund ? " – " + esc(st.stornoGrund) : ""}</em></td></tr>`;
+        return html;
+      }).join("");
+      return `<table><thead><tr><th>Nr.</th><th>Zeit</th><th>Von</th><th>An</th><th>Inhalt</th></tr></thead><tbody>
+      ${rows}
+    </tbody></table>`;})() : "<p>Keine erfasst.</p>"}`;
+  })() : "";
   const secSkizze = on("skizze") ? `
     <section class="p-land">
       <h2>Komm-Skizze</h2>
