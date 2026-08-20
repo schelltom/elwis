@@ -441,9 +441,55 @@ async function ladeZustand(){
   return {};
 }
 function uid(){ return Date.now().toString(36) + Math.random().toString(36).slice(2,7); }
-// Wie früher als JSON-String ablegen (identische Semantik, aber ohne localStorage-Limit)
-function save(){ if(state) idbSet("state", JSON.stringify(state)).catch(e => console.warn("[ELWIS] Speichern (IndexedDB) fehlgeschlagen:", e)); }
-function markChange(){ if(!state.wlan) state.pending++; save(); }
+// Wie früher als JSON-String ablegen (identische Semantik, aber ohne localStorage-Limit).
+// Entprellt: rasche Änderungen (z. B. Tippen) werden gesammelt und höchstens ~alle
+// 800 ms geschrieben, statt den mehrere MB großen Voll-Serialisierungslauf bei JEDEM
+// markChange() auszulösen. saveNow() schreibt sofort (z. B. beim Verlassen der Seite).
+let _saveT = null, _saveDirty = false;
+function saveNow(){
+  if(_saveT){ clearTimeout(_saveT); _saveT = null; }
+  if(!state || !_saveDirty) return;
+  _saveDirty = false;
+  try{ idbSet("state", JSON.stringify(state)).catch(e => console.warn("[ELWIS] Speichern (IndexedDB) fehlgeschlagen:", e)); }
+  catch(e){ console.warn("[ELWIS] Zustand serialisieren fehlgeschlagen:", e); }
+}
+function save(){ if(!state) return; _saveDirty = true; if(!_saveT) _saveT = setTimeout(saveNow, 800); }
+
+/* Persistenten Speicher anfordern – sonst darf der Browser die IndexedDB unter
+   Speicherdruck einfach verwerfen (Datenverlust im Einsatz). Best effort, still. */
+async function speicherPersistierbarMachen(){
+  try{
+    if(navigator.storage && navigator.storage.persist &&
+       !(await navigator.storage.persisted())) await navigator.storage.persist();
+  }catch(e){ /* nicht unterstützt – kein Beinbruch */ }
+}
+/* Grober Füllstand 0..1 des Origin-Speichers (null = unbekannt). */
+async function speicherFuellstand(){
+  try{
+    if(navigator.storage && navigator.storage.estimate){
+      const { usage, quota } = await navigator.storage.estimate();
+      if(quota) return usage / quota;
+    }
+  }catch(e){}
+  return null;
+}
+/* Wachhund: warnt EINMAL, sobald der Speicher knapp wird – BEVOR Bilder still
+   verworfen werden. Wird aus markChange() aufgerufen, daher stark gedrosselt. */
+let _spWarnT = 0, _spWarnGezeigt = false;
+function speicherWachhund(){
+  const t = Date.now();
+  if(_spWarnGezeigt || t - _spWarnT < 20000) return;
+  _spWarnT = t;
+  speicherFuellstand().then(f => {
+    if(f != null && f > 0.85 && !_spWarnGezeigt){
+      _spWarnGezeigt = true;
+      modalInfo("Lokaler Speicher wird knapp (" + Math.round(f * 100) + " % belegt). "
+        + "Bitte den Einsatz jetzt über „Einsatz exportieren“ sichern und ggf. alte "
+        + "Archiveinträge/Fotos löschen – sonst können Bilder verloren gehen.");
+    }
+  });
+}
+function markChange(){ if(!state.wlan) state.pending++; save(); speicherWachhund(); }
 function pfx(org){ return state.config.prefixes[org] ?? ""; }
 /* Funkrufname normalisieren: führendes Gattungswort (z. B. „Feuerwehr"/„FF") durch das je
    Organisation konfigurierte Präfix ersetzen – „Feuerwehr Schirmitz" → „Florian Schirmitz". */
@@ -7199,8 +7245,8 @@ window.matchMedia("(min-width:900px)").addEventListener("change", () => {
 
 // Sicherheitsnetz: IndexedDB-Schreibvorgänge sind async – beim Verlassen/Schließen der
 // Seite den letzten Stand noch anstoßen, damit die letzte Eingabe nicht verloren geht.
-document.addEventListener("visibilitychange", () => { if(document.visibilityState === "hidden") save(); });
-window.addEventListener("pagehide", () => save());
+document.addEventListener("visibilitychange", () => { if(document.visibilityState === "hidden") saveNow(); });
+window.addEventListener("pagehide", () => saveNow());
 // Nach Vollbild-Wechsel die (Snapshot-/Vergleichs-)Karten neu vermessen
 document.addEventListener("fullscreenchange", () => {
   setTimeout(() => { [lgSnapObj, lgCmpA, lgCmpB].forEach(m => { if(m){ try{ m.invalidateSize(); }catch(e){} } }); }, 150);
@@ -7548,6 +7594,7 @@ function zeigeAppVersion(){
 
 /* ---------------- Start: Zustand laden, dann rendern ---------------- */
 async function boot(){
+  speicherPersistierbarMachen();   // Browser soll die DB nicht wegräumen (best effort, nicht blockierend)
   const stored = await ladeZustand();
   zustandAufbauen(stored);
   const spUg = $("#splashUg"); if(spUg) spUg.textContent = state.config.ugName || "";  // Splash mit echtem Namen
