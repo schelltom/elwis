@@ -3067,6 +3067,7 @@ function wireFunk(){
   document.querySelectorAll("[data-fsev]").forEach(b => b.addEventListener("click", () => {   // Ereignis-Schnellerfassung
     const jetzt = new Date().toISOString();
     state.funk.push({ id:uid(), zeit:jetzt, erstelltAm:jetzt, erstelltVon:syncClientId(), typ:"ereignis", von:"", an:"", text:b.dataset.fsev, wichtig:true });
+    fsFilter = "alle";   // neuen Eintrag garantiert sichtbar machen (nicht durch aktiven Filter verstecken)
     markChange(); render();
   }));
   document.querySelectorAll("[data-fsfilter]").forEach(b => b.addEventListener("click", () => { fsFilter = b.dataset.fsfilter; render(); }));
@@ -3225,6 +3226,7 @@ function renderFsSheet(){
       f.erstelltAm = new Date().toISOString();
       f.erstelltVon = syncClientId();
       state.funk.push(f);
+      fsFilter = "alle";   // neuen Eintrag garantiert sichtbar machen (nicht durch aktiven Filter verstecken)
     }else{
       // Append-only: Änderung wird als Berichtigung angehängt, Original bleibt unverändert.
       const o = editingFs.orig || {};
