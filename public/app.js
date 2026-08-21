@@ -548,7 +548,7 @@ function modalPrompt(titel, text, placeholder = "", okLabel = "Stornieren"){
     <div class="modal" role="alertdialog" aria-modal="true">
       <h2>${esc(titel)}</h2>
       <p>${esc(text)}</p>
-      <input id="mdPrompt" style="width:100%;box-sizing:border-box" placeholder="${esc(placeholder)}" autocomplete="off">
+      <input id="mdPrompt" style="margin:0 0 18px" placeholder="${esc(placeholder)}" autocomplete="off">
       <div class="modal-btns">
         <button class="btn btn-ghost" data-md="0">Abbrechen</button>
         <button class="btn btn-primary" data-md="1">${esc(okLabel)}</button>
@@ -3178,7 +3178,7 @@ function renderFsSheet(){
     </div>
     <div class="sheet-foot">
       ${editingFs.isNew ? "" : `<button class="btn btn-danger-ghost" id="fs-del">Stornieren</button>`}
-      <button class="btn btn-primary" id="fs-save" style="flex:1">${editingFs.isNew ? "Speichern" : "Berichtigung speichern"}</button>
+      <button class="btn btn-primary" id="fs-save" style="flex:1">Speichern</button>
     </div>
   </div>`;
   document.querySelectorAll("[data-close]").forEach(el => el.addEventListener("click", closeEditor));
