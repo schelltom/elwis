@@ -4642,15 +4642,23 @@ function renderMonitor(){
               ${rz?`<div class="as-mon-sub">Rückzug ${rz.sofort?"sofort":rz.bar+" bar"}</div>`:""}
             </div></div>`;
         };
-        const frei = asFreieTraeger().length;
+        // Erste Spalte: einzeln registrierte (freie) Träger. Sobald ein Träger einem Trupp
+        // zugeteilt wird, verschwindet er hier und erscheint als Trupp in den Status-Spalten.
+        const frei = asFreieTraeger();
+        const freiKachel = tr => `<div class="as-mon-kachel st-registriert">
+            <div class="as-mon-info"><div class="as-mon-mit">${esc(tr.name||"?")}${tr.csa?" · CSA":""}</div>
+              ${tr.feuerwehr?`<div class="as-mon-sub">${esc(tr.feuerwehr)}</div>`:""}
+            </div></div>`;
         return `
       <div class="mon-grid" style="grid-template-columns:1fr">
         <div class="panel">
           <div class="as-mon-head">
-            <h3 style="margin:0">Atemschutz-Trupps (${state.asTrupps.length})</h3>
-            <div class="as-mon-reg"><span class="as-mon-reg-v mono">${frei}</span> registriert, noch keinem Trupp zugeteilt</div>
+            <h3 style="margin:0">Atemschutz (${state.asTrupps.length} Trupp${state.asTrupps.length===1?"":"s"})</h3>
+            <div class="as-mon-reg"><span class="as-mon-reg-v mono">${frei.length}</span> Träger registriert, noch keinem Trupp zugeteilt</div>
           </div>
           <div class="as-mon-cols">
+            <div class="as-mon-col"><div class="as-mon-coltitel">Registriert <span class="mono">(${frei.length})</span></div>
+              ${frei.length ? frei.map(freiKachel).join("") : `<p class="hint" style="margin:4px 0">—</p>`}</div>
             ${spalten.map(sp => { const trs = state.asTrupps.filter(t => t.status===sp.key);
               return `<div class="as-mon-col"><div class="as-mon-coltitel">${sp.titel} <span class="mono">(${trs.length})</span></div>
                 ${trs.map(kachel).join("") || `<p class="hint" style="margin:4px 0">—</p>`}</div>`; }).join("")}
