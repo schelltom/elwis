@@ -691,6 +691,25 @@ function lgSectorLatLngs(ll, bearingDeg, reachM, halfAngleDeg){
   }
   return pts;
 }
+// Kreis als Geo-Polygon (für Bericht/Word und die Bounding-Box beim Luftbild-Einfangen).
+function lgCirclePolyLL(ll, radiusM){
+  const pts = [];
+  for(let a = 0; a < 360; a += 12) pts.push(geoDestPoint(ll[0], ll[1], a, radiusM));
+  return pts;
+}
+// Alle geo-relevanten Punkte der Lage-Elemente inkl. Kreis-Umfang & Sektor-Bogen (L.latLng[]).
+function lgItemsGeoPts(items){
+  const pts = [];
+  for(const i of (items || [])){
+    if(Array.isArray(i.ll)) pts.push(L.latLng(i.ll[0], i.ll[1]));
+    if(Array.isArray(i.llpoints)) for(const p of i.llpoints) pts.push(L.latLng(p.lat, p.lng));
+    if(i.type === "circle" && Array.isArray(i.ll) && i.radiusM > 0)
+      for(const ll of lgCirclePolyLL(i.ll, i.radiusM)) pts.push(L.latLng(ll[0], ll[1]));
+    if(i.type === "sector" && Array.isArray(i.ll) && i.reachM > 0)
+      for(const ll of lgSectorLatLngs(i.ll, i.bearingDeg, i.reachM, i.halfAngleDeg)) pts.push(L.latLng(ll[0], ll[1]));
+  }
+  return pts;
+}
 // Windpfeil (zeigt nach Norden/oben, wird per Rotation in die Zugrichtung gedreht)
 const LG_WIND_ARROW_SVG = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2 L18.5 20 L12 15.5 L5.5 20 Z" fill="currentColor"/></svg>`;
 // Kleines Keil-Symbol für die Legende
@@ -4940,12 +4959,14 @@ function symTile(s, small){
   return `<span class="lg-sym ${s.circle ? "circle" : ""}" style="--sc:${s.color};${small ? "transform:scale(.85)" : ""}">${inner}</span>`;
 }
 function lgShapesSvg(items, draw){
-  items = items.filter(i => i.type === "line" || i.type === "area");
+  const istForm = i => ["line","area","arrow","circle","sector"].includes(i.type);
+  const gefuellt = i => i.type === "area" || i.type === "circle" || i.type === "sector";
+  items = items.filter(istForm);
   const shape = i => {
-    if(!Array.isArray(i.points)) return "";   // Geo-Flächen (Kartenmodus) hier überspringen
+    if(!Array.isArray(i.points)) return "";   // Geo-Formen ohne projizierte Punkte überspringen
     const pts = i.points.map(p => `${p.x},${p.y}`).join(" ");
     const col = lgColorCss(i.color);
-    return i.type === "area"
+    return gefuellt(i)
       ? `<polygon data-shape="${esc(i.id)}" points="${pts}" style="fill:${col};fill-opacity:.22;stroke:${col}"></polygon>`
       : `<polyline data-shape="${esc(i.id)}" points="${pts}" style="stroke:${col}"></polyline>`;
   };
@@ -4956,7 +4977,7 @@ function lgShapesSvg(items, draw){
       + draw.points.map(p => `<circle class="tmp-dot" cx="${p.x}" cy="${p.y}" r="1.1"></circle>`).join("");
   }
   const svg = `<svg class="lg-shapes" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
-    ${items.filter(i => i.type === "line" || i.type === "area").map(shape).join("")}${tmp}
+    ${items.map(shape).join("")}${tmp}
   </svg>`;
   // Beschriftung verknüpfter Abschnittsflächen (HTML-Overlay, damit Text nicht verzerrt)
   const labels = items.filter(i => i.type === "area" && i.abschnittId && Array.isArray(i.points)).map(i => {
@@ -5272,6 +5293,11 @@ function lgProjItemsTo(items, minX, maxX, minY, maxY){
     const j = { ...i };
     if(Array.isArray(i.ll)){ const q = P(L.latLng(i.ll[0], i.ll[1])); j.x = prX(q.x); j.y = prY(q.y); }
     if(Array.isArray(i.llpoints)) j.points = i.llpoints.map(p => { const q = P(L.latLng(p.lat, p.lng)); return { x: prX(q.x), y: prY(q.y) }; });
+    // Kreis/Sektor (Ausbreitungskeil) als projiziertes Polygon → im Bericht/Word zeichenbar
+    if(i.type === "circle" && Array.isArray(i.ll) && i.radiusM > 0)
+      j.points = lgCirclePolyLL(i.ll, i.radiusM).map(ll => { const q = P(L.latLng(ll[0], ll[1])); return { x: prX(q.x), y: prY(q.y) }; });
+    if(i.type === "sector" && Array.isArray(i.ll) && i.reachM > 0)
+      j.points = lgSectorLatLngs(i.ll, i.bearingDeg, i.reachM, i.halfAngleDeg).map(ll => { const q = P(L.latLng(ll[0], ll[1])); return { x: prX(q.x), y: prY(q.y) }; });
     return j;
   });
 }
@@ -5286,11 +5312,7 @@ async function lgLuftbildEinfangen(setBusy, fitAll){
   let minX, maxX, minY, maxY, W, H;
   if(fitAll){
     // Auto: Ausschnitt um ALLE Elemente (+ Rand), auf 16:10 aufgezogen (ohne Verzerrung).
-    const geoPts = [];
-    for(const i of items0){
-      if(Array.isArray(i.ll)) geoPts.push(L.latLng(i.ll[0], i.ll[1]));
-      if(Array.isArray(i.llpoints)) for(const p of i.llpoints) geoPts.push(L.latLng(p.lat, p.lng));
-    }
+    const geoPts = lgItemsGeoPts(items0);
     const bounds = geoPts.length ? L.latLngBounds(geoPts).pad(0.18) : (lgMapObj && lgMapObj.getBounds());
     if(!bounds){ modalInfo("Kein Kartenausschnitt vorhanden – erst Elemente einzeichnen oder Karte öffnen."); return; }
     const sw = P(bounds.getSouthWest()), ne = P(bounds.getNorthEast());
@@ -5369,6 +5391,37 @@ async function lgFreeze(){
   state.lage.snapshots.push(s);
   markChange();
   return s;
+}
+/* Für den Bericht: einem Lagebild ohne eingefangenes Luftbild (s.bild/s.bg fehlen) nachträglich
+   ein DOP-Luftbild um seine eigenen Geo-Symbole (16:10-BBox) besorgen. Nur online möglich.
+   Liefert true, wenn ein Bild ergänzt wurde. */
+async function lgSnapBildBackfill(s){
+  if(!s || s.bild || s.bg) return false;              // hat schon ein Bild
+  if(navigator.onLine === false || typeof L === "undefined") return false;
+  const items0 = s.items || [];
+  const geoPts = lgItemsGeoPts(items0);
+  if(!geoPts.length) return false;                    // keine Geo-Elemente → nichts einzufangen
+  const P = ll => L.CRS.EPSG3857.project(ll);
+  const bounds = L.latLngBounds(geoPts).pad(0.18);
+  const sw = P(bounds.getSouthWest()), ne = P(bounds.getNorthEast());
+  let minX = sw.x, maxX = ne.x, minY = sw.y, maxY = ne.y;
+  const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2;
+  let hw = (maxX - minX) / 2, hh = (maxY - minY) / 2;
+  if(hw < 120) hw = 120; if(hh < 75) hh = 75;
+  const A = 16 / 10;
+  if(hw / hh < A) hw = hh * A; else hh = hw / A;
+  minX = cx - hw; maxX = cx + hw; minY = cy - hh; maxY = cy + hh;
+  const W = 1600, H = 1000;
+  let bg; try{ bg = await lgWmsDop(minX, minY, maxX, maxY, W, H); }catch(e){ return false; }
+  s.bild = { bg, bgW: W, bgH: H, items: lgProjItemsTo(items0, minX, maxX, minY, maxY) };
+  return true;
+}
+/* Alle Lagebilder eines Berichts (data.lage.snapshots) vor dem Druck mit Luftbild versorgen. */
+async function backfillSnapshotBilder(data){
+  const snaps = (data && data.lage && data.lage.snapshots) || [];
+  let geaendert = false;
+  for(const s of snaps){ if(await lgSnapBildBackfill(s)) geaendert = true; }
+  if(geaendert){ try{ markChange(); }catch(e){} }
 }
 /* ---------------- Ansicht: Komm-Skizze (Kommunikationsskizze) ---------------- */
 function renderSkizzeView(){
@@ -6721,6 +6774,11 @@ function lgGeoProject(items){
     const j = {...i};
     if(Array.isArray(i.ll)){ j.x = prX(i.ll[1]); j.y = prY(i.ll[0]); }
     if(Array.isArray(i.llpoints)) j.points = i.llpoints.map(p => ({ x:prX(p.lng), y:prY(p.lat) }));
+    // Kreis/Sektor (Ausbreitungskeil) als projiziertes Polygon (schematische Karte)
+    if(i.type === "circle" && Array.isArray(i.ll) && i.radiusM > 0)
+      j.points = lgCirclePolyLL(i.ll, i.radiusM).map(ll => ({ x:prX(ll[1]), y:prY(ll[0]) }));
+    if(i.type === "sector" && Array.isArray(i.ll) && i.reachM > 0)
+      j.points = lgSectorLatLngs(i.ll, i.bearingDeg, i.reachM, i.halfAngleDeg).map(ll => ({ x:prX(ll[1]), y:prY(ll[0]) }));
     return j;
   });
 }
@@ -6740,7 +6798,7 @@ function printMapHtml(lage){
   return `<div class="p-map${geoSchema ? " p-map-schema" : ""}"${aspect}>
     <div class="lg-canvas ${lage.bg ? "hasbg" : ""}" ${lage.bg ? `style="background-image:url('${lage.bg}');background-size:100% 100%"` : ""}>
       ${lgShapesSvg(items, null)}
-      ${items.filter(i => i.x != null).map(lgMarkerHtml).join("")}
+      ${items.filter(i => i.x != null && i.type !== "circle" && i.type !== "sector").map(lgMarkerHtml).join("")}
     </div>
     ${geoSchema ? `<div class="p-map-note">Schematische Lagekarte – Positionen aus GPS, ohne Luftbild. Für ein echtes Kartenbild in der Lagekarte oben „🛰 Luftbild einfangen" nutzen.</div>` : ""}
   </div>`;
@@ -7011,7 +7069,7 @@ function reportBodyHtml(data, sel, opts){
   const tileHtml = t => `<div class="p-map" style="aspect-ratio:${t.bgW}/${t.bgH}">
       <div class="lg-canvas hasbg" style="background-image:url('${t.bg}');background-size:100% 100%">
         ${lgShapesSvg(t.items || [], null)}
-        ${(t.items || []).filter(i => i.x != null && i.x >= -3 && i.x <= 103 && i.y >= -3 && i.y <= 103).map(lgMarkerHtml).join("")}
+        ${(t.items || []).filter(i => i.x != null && i.type !== "circle" && i.type !== "sector" && i.x >= -3 && i.x <= 103 && i.y >= -3 && i.y <= 103).map(lgMarkerHtml).join("")}
       </div></div>`;
   const secLage = on("lagekarte") ? `
     ${(data.lage && data.lage.items && data.lage.items.length) ? `
@@ -7055,7 +7113,8 @@ function warteAufBilder(root){
     ? Promise.resolve()
     : new Promise(res => { img.onload = img.onerror = res; setTimeout(res, 4000); })));   // Timeout als Sicherung
 }
-function doPrint(data, sel){
+async function doPrint(data, sel){
+  await backfillSnapshotBilder(data);   // Lagebilder ohne eingefangenes Luftbild vor dem Druck nachziehen
   $("#printArea").innerHTML = reportBodyHtml(data, sel);
   warteAufBilder($("#printArea")).then(() => window.print());
 }
@@ -7139,7 +7198,7 @@ async function wordBodyMitGrafik(body){
   try{
     await new Promise(res => setTimeout(res, 40));   // Layout settlen lassen
     // A4-Hochformat, nutzbarer Inhaltsbereich (bei den Word-Rändern) in cm
-    const BOXW = 17.4, BOXH = 24.0;
+    const BOXW = 17.4, BOXH = 21.5;   // etwas unter der Seitenhöhe, damit Überschrift + Bild zusammen auf EINE Seite passen
     for(const node of [...host.querySelectorAll(".p-map, .p-skizze, .p-atem")]){
       try{
         const r0 = node.getBoundingClientRect();
@@ -7236,7 +7295,8 @@ const WORD_STYLE = `
   }
   div.Section1{page:Section1}
   /* Karte/Skizze/Atemschutz jeweils auf eigener Seite starten (keine Überschrift-Waisen). */
-  .p-land{page-break-before:always}
+  .p-land{page-break-before:always;page-break-inside:avoid}
+  .p-land h2{page-break-after:avoid}
   body{font-family:"Segoe UI",Calibri,Arial,sans-serif;color:#000;font-size:9pt;line-height:1.25}
   p{margin:0 0 4pt}
   .p-run-src{display:none}
