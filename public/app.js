@@ -1570,6 +1570,8 @@ function toggleBereitstellung(){
     const weiter = () => {
       e.bereitstellung = false;
       if(ea){
+        // automatisch angelegten Ansprechpartner (Führungskraft) mit entfernen
+        if(ea.leiterFkId){ const fk = state.fuehrung.find(f => f.id === ea.leiterFkId); if(fk && fk.autoAb) state.fuehrung = state.fuehrung.filter(f => f.id !== ea.leiterFkId); }
         state.abschnitte = state.abschnitte.filter(a => !a.br);
         state.einheiten.forEach(u => { if(u.abschnitt === ea.id) u.abschnitt = ""; });
       }
@@ -2834,7 +2836,6 @@ function renderAbSheet(){
    und erscheint in FK-Liste/Skizze/Bericht. Verknüpfung über a.leiterFkId; automatisch angelegte
    FK tragen autoAb=true (nur die werden auto-aktualisiert/-entfernt, manuelle bleiben unangetastet). */
 function syncAbschnittsleiterFk(a){
-  if(a.br) return;   // Bereitstellungsraum bekommt keinen Auto-Leiter
   const ap = (a.ansprechpartner || "").trim();
   const vorhanden = a.leiterFkId ? state.fuehrung.find(f => f.id === a.leiterFkId) : null;
   if(!ap){
