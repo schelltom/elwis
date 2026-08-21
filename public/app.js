@@ -2971,15 +2971,16 @@ function renderFkSheet(){
    Erfassungszeit (erstelltAm) + Gerät (erstelltVon) sind unveränderlich. */
 let editingFs = null; // { fs, isNew }
 function fsSuggestions(){
-  // Fahrzeuge zuerst (ALLE erfassten – auch bereits abgerückte), dann Führungskräfte
-  // (mit Funkrufname), dann Abschnitte/Leitstelle. Aktive vor abgerückten Einheiten.
+  // Für Von/An im ETB: ZUERST alle Führungskräfte (Funkrufname + Name) und die
+  // Leit-/Kommandostellen – das sind die typischen Gesprächspartner. Danach Abschnitte
+  // und alle erfassten Fahrzeuge (aktive vor abgerückten).
   const s = [];
   const add = v => { v = (v||"").trim(); if(v && !s.includes(v)) s.push(v); };
+  state.fuehrung.forEach(f => { add(f.funkrufname); add(f.name); });
+  [state.config.elwFunk, "Leitstelle", "ELW", state.config.ugName].forEach(add);
+  state.abschnitte.forEach(a => { add(a.ansprechpartner); add(a.name); });
   aktive().forEach(u => add(fullName(u)));
   state.einheiten.filter(u => u.abgerueckt).forEach(u => add(fullName(u)));
-  state.fuehrung.forEach(f => { add(f.funkrufname); add(f.name); });
-  state.abschnitte.forEach(a => { add(a.ansprechpartner); add(a.name); });
-  ["Leitstelle", "ELW", state.config.elwFunk, state.config.ugName].forEach(add);
   return s;
 }
 const FS_TYPEN = { funk:"Funk", ereignis:"Ereignis", befehl:"Befehl", lage:"Lagemeldung" };
