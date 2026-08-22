@@ -540,7 +540,7 @@ function modalConfirm(text, ok = "Ja", abbrechen = "Abbrechen"){
 }
 function modalInfo(text){ return modal({ text, ok: "OK" }); }
 /* Prompt mit einzeiligem Eingabefeld – liefert den (getrimmten) Text oder null bei Abbruch. */
-function modalPrompt(titel, text, placeholder = "", okLabel = "Stornieren"){
+function modalPrompt(titel, text, placeholder = "", okLabel = "Stornieren", value = ""){
   return new Promise(resolve => {
     const host = $("#modalHost");
     host.innerHTML = `
@@ -548,7 +548,7 @@ function modalPrompt(titel, text, placeholder = "", okLabel = "Stornieren"){
     <div class="modal" role="alertdialog" aria-modal="true">
       <h2>${esc(titel)}</h2>
       <p>${esc(text)}</p>
-      <input id="mdPrompt" style="margin:0 0 18px" placeholder="${esc(placeholder)}" autocomplete="off">
+      <input id="mdPrompt" style="margin:0 0 18px" placeholder="${esc(placeholder)}" value="${esc(value)}" autocomplete="off">
       <div class="modal-btns">
         <button class="btn btn-ghost" data-md="0">Abbrechen</button>
         <button class="btn btn-primary" data-md="1">${esc(okLabel)}</button>
@@ -5190,7 +5190,8 @@ function renderLagekarte(){
       </div>
       ${lgEinsatzAdresse() ? `<button class="btn btn-ghost" id="lgToAddr" style="min-height:42px;padding:6px 14px;font-size:.85rem">⌖ Einsatzadresse</button>` : ""}
       <button class="btn btn-ghost" id="lgLuftbild" style="min-height:42px;padding:6px 14px;font-size:.85rem" title="Aktuell sichtbaren Kartenausschnitt als Luftbild-Hintergrund einfangen – erscheint im Bericht/PDF/Word">🛰 Ausschnitt einfangen</button>
-      <button class="btn btn-ghost" id="lgLuftbildAll" style="min-height:42px;padding:6px 12px;font-size:.85rem" title="Luftbild automatisch um alle eingezeichneten Elemente einfangen">alle Elemente</button>` : ""}
+      <button class="btn btn-ghost" id="lgLuftbildAll" style="min-height:42px;padding:6px 12px;font-size:.85rem" title="Luftbild automatisch um alle eingezeichneten Elemente einfangen">alle Elemente</button>
+      <button class="btn btn-ghost" id="lgAddTile" style="min-height:42px;padding:6px 12px;font-size:.85rem" title="Aktuell sichtbaren Kartenausschnitt als eigene Detailseite für den Bericht aufnehmen (beliebig oft)">➕ Ausschnitt aufnehmen</button>` : ""}
     </div>
     <div class="lg-toolbar">${tools}</div>
     ${lgSubmenu && LG_SUBMENUS[lgSubmenu] ? `
@@ -5233,6 +5234,20 @@ function renderLagekarte(){
       <input type="file" id="lgBgFile" accept="image/*" style="display:none">
     </div>
   </div>
+  ${(state.lage.tiles||[]).length ? `
+  <div class="card">
+    <h2>Detail-Ausschnitte für den Bericht (${state.lage.tiles.length})</h2>
+    ${state.lage.tiles.map((t, idx) => `
+    <div class="arch">
+      <div class="a-main">
+        <div class="a-t">${esc(t.label || ("Ausschnitt " + (idx+1)))}</div>
+        <div class="a-s">${(t.items||[]).filter(i => i.x != null || Array.isArray(i.points)).length} Symbole</div>
+      </div>
+      <button class="btn btn-ghost" data-tileren="${idx}">Umbenennen</button>
+      <button class="btn btn-danger-ghost" data-tiledel="${idx}" aria-label="Ausschnitt löschen">✕</button>
+    </div>`).join("")}
+    <p class="hint">Jeder Ausschnitt wird eine eigene Detailseite im Bericht (PDF + Word). Im Kartenmodus näher zoomen/verschieben und „➕ Ausschnitt aufnehmen" drücken, um weitere hinzuzufügen.</p>
+  </div>` : ""}
   ${(state.lage.snapshots||[]).length ? `
   <div class="card">
     <h2>Lagebilder (eingefrorene Stände)</h2>
@@ -5342,32 +5357,32 @@ async function lgLuftbildEinfangen(setBusy, fitAll){
   const projOv = lgProjItemsTo(cur, minX, maxX, minY, maxY);
   cur.forEach((i, idx) => { const j = projOv[idx]; if(j){ if(j.x != null){ i.x = j.x; i.y = j.y; } if(j.points) i.points = j.points; } });
   state.lage.bg = dataUrl; state.lage.bgW = W; state.lage.bgH = H; state.lage.mode = "bild";
-  // --- Dichte prüfen → Detail-Kacheln (gezoomte Ausschnitte) ---
-  const m3857 = markerLL.map(ll => P(L.latLng(ll[0], ll[1])));
-  const ovM = m3857.map(q => ({ x: (q.x - minX) / (maxX - minX) * 100, y: (maxY - q.y) / (maxY - minY) * 100 }));
-  let minGap = Infinity;
-  for(let a = 0; a < ovM.length; a++) for(let b = a + 1; b < ovM.length; b++)
-    minGap = Math.min(minGap, Math.hypot(ovM[a].x - ovM[b].x, ovM[a].y - ovM[b].y));
-  const dicht = ovM.length >= 2 && (minGap < 12 || ovM.length > 8);   // Überlappung oder viele Symbole
-  const tiles = [];
-  if(dicht){
-    const G = ovM.length > 8 ? 3 : 2;
-    const cw = (maxX - minX) / G, ch = (maxY - minY) / G;
-    let nr = 0;
-    for(let r = 0; r < G; r++) for(let c = 0; c < G; c++){
-      const tMinX = minX + c * cw, tMaxX = minX + (c + 1) * cw, tMaxY = maxY - r * ch, tMinY = maxY - (r + 1) * ch;
-      if(!m3857.some(q => q.x >= tMinX && q.x <= tMaxX && q.y >= tMinY && q.y <= tMaxY)) continue;   // leere Zelle überspringen
-      nr++;
-      if(setBusy) setBusy("🛰 Ausschnitt " + nr + " …");
-      let bg; try{ bg = await lgWmsDop(tMinX, tMinY, tMaxX, tMaxY, 1600, 1000); }catch(e){ continue; }
-      tiles.push({ bg, bgW: 1600, bgH: 1000, label: "Ausschnitt " + nr, items: lgProjItemsTo(state.lage.items || [], tMinX, tMaxX, tMinY, tMaxY) });
-    }
-  }
-  state.lage.tiles = tiles;
-  try{ markChange(); }catch(e){ state.lage.bg = ""; state.lage.tiles = []; modalInfo("Bild zu groß für den lokalen Speicher."); return; }
+  // Detail-Ausschnitte werden MANUELL aufgenommen (Knopf ➕ Ausschnitt aufnehmen) –
+  // bestehende manuelle Ausschnitte bleiben erhalten (keine automatische Rasterung mehr).
+  if(!Array.isArray(state.lage.tiles)) state.lage.tiles = [];
+  try{ markChange(); }catch(e){ state.lage.bg = ""; modalInfo("Bild zu groß für den lokalen Speicher."); return; }
   render();
-  modalInfo("Luftbild eingefangen" + (tiles.length ? " + " + tiles.length + " Detail-Ausschnitte (dichte Symbole)" : "") +
-    ". Erscheint im Bericht (PDF) und im Word-Export.\nZum Weiterzeichnen oben wieder auf „Karte (online)“ umschalten.");
+  modalInfo("Übersichts-Luftbild eingefangen. Erscheint im Bericht (PDF) und im Word-Export.\n"
+    + "Für Detailseiten im Kartenmodus näher zoomen und ➕ Ausschnitt aufnehmen nutzen; zum Weiterzeichnen wieder auf Karte (online) umschalten.");
+}
+// Aktuell sichtbaren Kartenausschnitt als eigene Detailseite (Tile) für den Bericht aufnehmen.
+async function lgAddAusschnitt(setBusy){
+  if(!lgMapObj){ modalInfo("Karte ist nicht geöffnet – oben Modus Karte (online) wählen und den Ausschnitt einstellen."); return; }
+  if(navigator.onLine === false){ modalInfo("Gerät muss online sein, um das Luftbild einzufangen."); return; }
+  const P = ll => L.CRS.EPSG3857.project(ll);
+  const b = lgMapObj.getBounds(), size = lgMapObj.getSize();
+  const sw = P(b.getSouthWest()), ne = P(b.getNorthEast());
+  const W = Math.max(600, Math.min(1920, Math.round(size.x)));
+  const H = Math.max(1, Math.round(W * (ne.y - sw.y) / (ne.x - sw.x)));
+  if(setBusy) setBusy("🛰 lädt …");
+  let bg; try{ bg = await lgWmsDop(sw.x, sw.y, ne.x, ne.y, W, H); }
+  catch(err){ modalInfo("Ausschnitt einfangen fehlgeschlagen: " + (err.message || err) + ".\nGerät muss online sein."); return; }
+  if(!Array.isArray(state.lage.tiles)) state.lage.tiles = [];
+  state.lage.tiles.push({ id:uid(), bg, bgW:W, bgH:H, label:"Ausschnitt " + (state.lage.tiles.length + 1),
+    items: lgProjItemsTo(state.lage.items || [], sw.x, ne.x, sw.y, ne.y) });
+  try{ markChange(); }catch(e){ state.lage.tiles.pop(); modalInfo("Bild zu groß für den lokalen Speicher – ggf. alte Ausschnitte/Fotos löschen."); return; }
+  render();
+  modalInfo("Ausschnitt aufgenommen – erscheint als eigene Detailseite im Bericht (PDF + Word).");
 }
 async function lgFreeze(){
   const s = { id:uid(), zeit:new Date().toISOString(),
@@ -6068,6 +6083,23 @@ function wireLagekarte(){
       .finally(() => { btn.textContent = t0; if(lgLb) lgLb.disabled = false; if(lgLbAll) lgLbAll.disabled = false; }); };
   if(lgLb) lgLb.addEventListener("click", () => einfangen(lgLb, false));
   if(lgLbAll) lgLbAll.addEventListener("click", () => einfangen(lgLbAll, true));
+  const lgAdd = $("#lgAddTile");
+  if(lgAdd) lgAdd.addEventListener("click", () => { const t0 = lgAdd.textContent; lgAdd.disabled = true; lgAdd.textContent = "🛰 lädt …";
+    lgAddAusschnitt(t => { lgAdd.textContent = t; }).finally(() => { lgAdd.textContent = t0; lgAdd.disabled = false; }); });
+  document.querySelectorAll("[data-tiledel]").forEach(b => b.addEventListener("click", () => {
+    const idx = +b.dataset.tiledel;
+    modalConfirm(`Detail-Ausschnitt „${(state.lage.tiles[idx]||{}).label || ("Ausschnitt " + (idx+1))}“ löschen?`).then(ok => { if(!ok) return;
+      state.lage.tiles.splice(idx, 1);
+      state.lage.tiles.forEach((t, i) => { if(!t.label || /^Ausschnitt \d+$/.test(t.label)) t.label = "Ausschnitt " + (i+1); });   // Standard-Nummern nachziehen
+      markChange(); render(); });
+  }));
+  document.querySelectorAll("[data-tileren]").forEach(b => b.addEventListener("click", () => {
+    const idx = +b.dataset.tileren; const t = state.lage.tiles[idx]; if(!t) return;
+    modalPrompt("Ausschnitt umbenennen", "Bezeichnung für die Detailseite im Bericht:", "", "Speichern", t.label || ("Ausschnitt " + (idx+1))).then(name => {
+      if(name === null) return;
+      t.label = name.trim() || ("Ausschnitt " + (idx+1));
+      markChange(); render(); });
+  }));
   document.querySelectorAll("[data-lgsnap]").forEach(b =>
     b.addEventListener("click", () => openLgSnapshot(b.dataset.lgsnap)));
   document.querySelectorAll("[data-lgsnapsel]").forEach(cb =>
