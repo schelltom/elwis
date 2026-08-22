@@ -5189,8 +5189,7 @@ function renderLagekarte(){
         <button data-lglayer="strasse" class="${state.lage.mapLayer==="strasse"?"active":""}">Straße</button>
       </div>
       ${lgEinsatzAdresse() ? `<button class="btn btn-ghost" id="lgToAddr" style="min-height:42px;padding:6px 14px;font-size:.85rem">⌖ Einsatzadresse</button>` : ""}
-      <button class="btn btn-ghost" id="lgLuftbild" style="min-height:42px;padding:6px 14px;font-size:.85rem" title="Aktuell sichtbaren Kartenausschnitt als Luftbild-Hintergrund einfangen – erscheint im Bericht/PDF/Word">🛰 Ausschnitt einfangen</button>
-      <button class="btn btn-ghost" id="lgLuftbildAll" style="min-height:42px;padding:6px 12px;font-size:.85rem" title="Luftbild automatisch um alle eingezeichneten Elemente einfangen">alle Elemente</button>
+      <button class="btn btn-ghost" id="lgLuftbildAll" style="min-height:42px;padding:6px 12px;font-size:.85rem" title="Übersichts-Luftbild automatisch um alle eingezeichneten Elemente einfangen (für den Bericht) – Modus bleibt Karte (online)">🛰 Übersicht einfangen (alle Elemente)</button>
       <button class="btn btn-ghost" id="lgAddTile" style="min-height:42px;padding:6px 12px;font-size:.85rem" title="Aktuell sichtbaren Kartenausschnitt als eigene Detailseite für den Bericht aufnehmen (beliebig oft)">➕ Ausschnitt aufnehmen</button>` : ""}
     </div>
     <div class="lg-toolbar">${tools}</div>
@@ -5243,6 +5242,8 @@ function renderLagekarte(){
         <div class="a-t">${esc(t.label || ("Ausschnitt " + (idx+1)))}</div>
         <div class="a-s">${(t.items||[]).filter(i => i.x != null || Array.isArray(i.points)).length} Symbole</div>
       </div>
+      <button class="btn btn-ghost ab-ord-btn" data-tileup="${idx}" ${idx===0?"disabled":""} aria-label="Nach oben">▲</button>
+      <button class="btn btn-ghost ab-ord-btn" data-tiledown="${idx}" ${idx===state.lage.tiles.length-1?"disabled":""} aria-label="Nach unten">▼</button>
       <button class="btn btn-ghost" data-tileren="${idx}">Umbenennen</button>
       <button class="btn btn-danger-ghost" data-tiledel="${idx}" aria-label="Ausschnitt löschen">✕</button>
     </div>`).join("")}
@@ -5356,14 +5357,16 @@ async function lgLuftbildEinfangen(setBusy, fitAll){
   const cur = state.lage.items || [];
   const projOv = lgProjItemsTo(cur, minX, maxX, minY, maxY);
   cur.forEach((i, idx) => { const j = projOv[idx]; if(j){ if(j.x != null){ i.x = j.x; i.y = j.y; } if(j.points) i.points = j.points; } });
-  state.lage.bg = dataUrl; state.lage.bgW = W; state.lage.bgH = H; state.lage.mode = "bild";
+  // Nur den Hintergrund für den Bericht setzen – Modus bleibt „Karte (online)", damit man
+  // sofort weiterarbeiten und weitere Ausschnitte aufnehmen kann (kein Wechsel in „Bild").
+  state.lage.bg = dataUrl; state.lage.bgW = W; state.lage.bgH = H;
   // Detail-Ausschnitte werden MANUELL aufgenommen (Knopf ➕ Ausschnitt aufnehmen) –
   // bestehende manuelle Ausschnitte bleiben erhalten (keine automatische Rasterung mehr).
   if(!Array.isArray(state.lage.tiles)) state.lage.tiles = [];
   try{ markChange(); }catch(e){ state.lage.bg = ""; modalInfo("Bild zu groß für den lokalen Speicher."); return; }
   render();
-  modalInfo("Übersichts-Luftbild eingefangen. Erscheint im Bericht (PDF) und im Word-Export.\n"
-    + "Für Detailseiten im Kartenmodus näher zoomen und ➕ Ausschnitt aufnehmen nutzen; zum Weiterzeichnen wieder auf Karte (online) umschalten.");
+  modalInfo("Übersichts-Luftbild eingefangen (erscheint im Bericht/PDF/Word). Du bleibst im Kartenmodus.\n"
+    + "Für Detailseiten näher zoomen und ➕ Ausschnitt aufnehmen.");
 }
 // Aktuell sichtbaren Kartenausschnitt als eigene Detailseite (Tile) für den Bericht aufnehmen.
 async function lgAddAusschnitt(setBusy){
@@ -5378,8 +5381,13 @@ async function lgAddAusschnitt(setBusy){
   let bg; try{ bg = await lgWmsDop(sw.x, sw.y, ne.x, ne.y, W, H); }
   catch(err){ modalInfo("Ausschnitt einfangen fehlgeschlagen: " + (err.message || err) + ".\nGerät muss online sein."); return; }
   if(!Array.isArray(state.lage.tiles)) state.lage.tiles = [];
-  state.lage.tiles.push({ id:uid(), bg, bgW:W, bgH:H, label:"Ausschnitt " + (state.lage.tiles.length + 1),
-    items: lgProjItemsTo(state.lage.items || [], sw.x, ne.x, sw.y, ne.y) });
+  // Nur Symbole aufnehmen, die tatsächlich im Ausschnitt liegen (Marker im Rahmen bzw.
+  // Formen mit mindestens einem Punkt im Rahmen); außerhalb liegende weglassen.
+  const projT = lgProjItemsTo(state.lage.items || [], sw.x, ne.x, sw.y, ne.y);
+  const imRahmen = (x, y) => x >= -2 && x <= 102 && y >= -2 && y <= 102;
+  const drin = projT.filter(j => (j.x != null && imRahmen(j.x, j.y)) ||
+    (Array.isArray(j.points) && j.points.some(p => imRahmen(p.x, p.y))));
+  state.lage.tiles.push({ id:uid(), bg, bgW:W, bgH:H, label:"Ausschnitt " + (state.lage.tiles.length + 1), items: drin });
   try{ markChange(); }catch(e){ state.lage.tiles.pop(); modalInfo("Bild zu groß für den lokalen Speicher – ggf. alte Ausschnitte/Fotos löschen."); return; }
   render();
   modalInfo("Ausschnitt aufgenommen – erscheint als eigene Detailseite im Bericht (PDF + Word).");
@@ -6077,12 +6085,10 @@ function wireLagekarte(){
     if(btn){ btn.disabled = false; btn.textContent = t0; }
     render();
   });
-  const lgLb = $("#lgLuftbild"), lgLbAll = $("#lgLuftbildAll");
-  const einfangen = (btn, fitAll) => { const t0 = btn.textContent; btn.disabled = true; if(lgLb) lgLb.disabled = true; if(lgLbAll) lgLbAll.disabled = true;
-    btn.textContent = "🛰 lädt …"; lgLuftbildEinfangen(t => { btn.textContent = t; }, fitAll)
-      .finally(() => { btn.textContent = t0; if(lgLb) lgLb.disabled = false; if(lgLbAll) lgLbAll.disabled = false; }); };
-  if(lgLb) lgLb.addEventListener("click", () => einfangen(lgLb, false));
-  if(lgLbAll) lgLbAll.addEventListener("click", () => einfangen(lgLbAll, true));
+  const lgLbAll = $("#lgLuftbildAll");
+  if(lgLbAll) lgLbAll.addEventListener("click", () => { const t0 = lgLbAll.textContent; lgLbAll.disabled = true;
+    lgLbAll.textContent = "🛰 lädt …"; lgLuftbildEinfangen(t => { lgLbAll.textContent = t; }, true)
+      .finally(() => { lgLbAll.textContent = t0; lgLbAll.disabled = false; }); });
   const lgAdd = $("#lgAddTile");
   if(lgAdd) lgAdd.addEventListener("click", () => { const t0 = lgAdd.textContent; lgAdd.disabled = true; lgAdd.textContent = "🛰 lädt …";
     lgAddAusschnitt(t => { lgAdd.textContent = t; }).finally(() => { lgAdd.textContent = t0; lgAdd.disabled = false; }); });
@@ -6100,6 +6106,12 @@ function wireLagekarte(){
       t.label = name.trim() || ("Ausschnitt " + (idx+1));
       markChange(); render(); });
   }));
+  const tileSwap = (i, j) => { const a = state.lage.tiles; if(!a[i] || !a[j]) return;
+    [a[i], a[j]] = [a[j], a[i]];
+    a.forEach((t, k) => { if(!t.label || /^Ausschnitt \d+$/.test(t.label)) t.label = "Ausschnitt " + (k+1); });   // Standard-Nummern nachziehen
+    markChange(); render(); };
+  document.querySelectorAll("[data-tileup]").forEach(b => b.addEventListener("click", () => { const i = +b.dataset.tileup; tileSwap(i, i-1); }));
+  document.querySelectorAll("[data-tiledown]").forEach(b => b.addEventListener("click", () => { const i = +b.dataset.tiledown; tileSwap(i, i+1); }));
   document.querySelectorAll("[data-lgsnap]").forEach(b =>
     b.addEventListener("click", () => openLgSnapshot(b.dataset.lgsnap)));
   document.querySelectorAll("[data-lgsnapsel]").forEach(cb =>
