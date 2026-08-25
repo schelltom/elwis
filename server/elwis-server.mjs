@@ -125,6 +125,11 @@ function aktiveGeraete(){
 /* ---------------- Merge-Logik ---------------- */
 function mergeSync(body){
   let geaendert = false;
+  // Client-Zeitstempel (_m) NICHT blind vertrauen: ein Gerät mit falsch gestellter (Zukunfts-)
+  // Uhr würde sonst jeden Merge dauerhaft „gewinnen". Auf jetzt + kleine Toleranz clampen.
+  const CLAMP_TOLERANZ_MS = 5 * 60 * 1000;
+  const jetztM = Date.now();
+  const clampM = m => Math.min(Number(m) || 0, jetztM + CLAMP_TOLERANZ_MS);
 
   // Einsatz-Identität: neuerer Einsatz ersetzt den alten komplett.
   // body.ersetzen = bewusste Aktion am Client (Verwerfen / Neuer Einsatz / Beenden /
@@ -151,6 +156,7 @@ function mergeSync(body){
 
   // Einzelobjekte (Stammdaten, Kartenhintergrund)
   for(const [k, v] of Object.entries(body.singletons || {})){
+    if(v) v._m = clampM(v._m);
     const alt = stand.singletons[k];
     if(!alt || (v._m || 0) > (alt._m || 0)){
       stand.singletons[k] = v;
@@ -164,7 +170,8 @@ function mergeSync(body){
     const tomb = stand.tombstones[name] = stand.tombstones[name] || {};
     for(const rec of recs || []){
       if(!rec || !rec.id) continue;
-      const t = rec._m || 0;
+      rec._m = clampM(rec._m);
+      const t = rec._m;
       if(tomb[rec.id] && tomb[rec.id] >= t) continue;       // schon (später) gelöscht
       const alt = col[rec.id];
       if(!alt || t > (alt._m || 0)){ col[rec.id] = rec; geaendert = true; }
@@ -175,7 +182,8 @@ function mergeSync(body){
   for(const [name, ids] of Object.entries(body.tombstones || {})){
     const col = stand.collections[name] = stand.collections[name] || {};
     const tomb = stand.tombstones[name] = stand.tombstones[name] || {};
-    for(const [id, t] of Object.entries(ids || {})){
+    for(const [id, t0] of Object.entries(ids || {})){
+      const t = clampM(t0);
       if((tomb[id] || 0) >= t) continue;
       tomb[id] = t;
       if(col[id] && (col[id]._m || 0) <= t){ delete col[id]; }

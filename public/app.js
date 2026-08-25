@@ -3048,20 +3048,35 @@ function fsThreads(funk){
     else if(f.stornoId){ storno[f.stornoId] = f; }
     else basis.push(f);
   });
-  return basis.map(b => {
+  const basisIds = new Set(basis.map(b => b.id));
+  const threads = basis.map(b => {
     const ks = (korr[b.id] || []).slice().sort((a,c) => (a.erstelltAm||a.zeit||"").localeCompare(c.erstelltAm||c.zeit||""));
     const letzte = ks.length ? ks[ks.length - 1] : b;
     const effektiv = { ...b, zeit:letzte.zeit, typ:letzte.typ, von:letzte.von, an:letzte.an, text:letzte.text, wichtig:letzte.wichtig };
     return { basis:b, effektiv, korrekturen:ks, storno: storno[b.id] || null };
   });
+  // Verwaiste Berichtigungen/Stornos (Basis-Eintrag fehlt – z. B. nach Import/Sync) NIE verwerfen,
+  // sondern als markierte Zeile zeigen (sonst fiele eine Korrektur/Stornierung revisionswidrig heraus).
+  for(const [bid, ks] of Object.entries(korr)){
+    if(basisIds.has(bid)) continue;
+    for(const k of ks) threads.push({ basis:k, effektiv:{ ...k }, korrekturen:[], storno:null, waise:"Berichtigung" });
+  }
+  for(const [bid, st] of Object.entries(storno)){
+    if(basisIds.has(bid)) continue;
+    threads.push({ basis:st, effektiv:{ id:st.id, zeit:st.erstelltAm||st.zeit, erstelltAm:st.erstelltAm, erstelltVon:st.erstelltVon,
+      typ:"ereignis", von:"", an:"", text:"Stornierung" + (st.stornoGrund ? ": " + st.stornoGrund : ""), wichtig:false },
+      korrekturen:[], storno:null, waise:"Storno" });
+  }
+  return threads;
 }
 function renderFunk(){
   const threads = fsThreads(state.funk).sort((a,b) => (b.effektiv.zeit||"").localeCompare(a.effektiv.zeit||""));
+  const echte = threads.filter(t => !t.waise);
   const sichtbar = threads.filter(t => fsFilter === "alle" ? true
     : fsFilter === "ereignis" ? fsTyp(t.effektiv) !== "funk"
     : (t.effektiv.wichtig && !t.storno));
-  const ereignisN = threads.filter(t => fsTyp(t.effektiv) !== "funk").length;
-  const wichtigN = threads.filter(t => t.effektiv.wichtig && !t.storno).length;
+  const ereignisN = echte.filter(t => fsTyp(t.effektiv) !== "funk").length;
+  const wichtigN = echte.filter(t => t.effektiv.wichtig && !t.storno).length;
   const subStil = "font-size:.8rem;color:var(--ink3);margin-top:3px";
   const rowHtml = t => {
     const f = t.effektiv, storno = t.storno;
@@ -3070,7 +3085,8 @@ function renderFunk(){
       : `<span class="chip fs-typ fs-typ-${fsTyp(f)}">${esc(FS_TYPEN[fsTyp(f)] || "")}</span>`;
     const chips = `${f.wichtig && !storno ? `<span class="chip chip-imp">WICHTIG</span>` : ""}`
       + `${t.korrekturen.length ? `<span class="chip" style="background:#e8eef7;color:#33507a">berichtigt</span>` : ""}`
-      + `${storno ? `<span class="chip" style="background:#f7e3e3;color:#8a2a2a">STORNIERT</span>` : ""}`;
+      + `${storno ? `<span class="chip" style="background:#f7e3e3;color:#8a2a2a">STORNIERT</span>` : ""}`
+      + `${t.waise ? `<span class="chip" style="background:#f4e6c8;color:#7a5a10">verwaiste ${esc(t.waise)}</span>` : ""}`;
     const sub = t.korrekturen.map(k =>
         `<div style="${subStil}">↳ Berichtigung ${fmtZeit(k.erstelltAm||k.zeit)}: ${esc(k.text)}</div>`).join("")
       + (storno ? `<div style="${subStil}">↳ Storniert ${fmtZeit(storno.erstelltAm)}${storno.stornoGrund ? " – " + esc(storno.stornoGrund) : ""}</div>` : "");
@@ -3082,8 +3098,8 @@ function renderFunk(){
       </div>
       <div class="fs-text"${storno ? ` style="text-decoration:line-through;opacity:.6"` : ""}>${esc(f.text)}</div>
       ${sub}`;
-    return storno
-      ? `<div class="fs-item storniert">${inner}</div>`
+    return (storno || t.waise)
+      ? `<div class="fs-item${storno ? " storniert" : ""}">${inner}</div>`
       : `<button class="fs-item ${f.wichtig?"imp":""}" data-editfs="${esc(t.basis.id)}">${inner}</button>`;
   };
   const items = sichtbar.length ? `<div class="fs-list">${sichtbar.map(rowHtml).join("")}</div>`
@@ -3093,7 +3109,7 @@ function renderFunk(){
   const presets = FS_EREIGNIS_PRESETS.map(x => `<button class="fs-ev" data-fsev="${esc(x)}">${esc(x)}</button>`).join("");
   return `
   <div class="statstrip" role="status">
-    <div class="stat"><div class="k">Einträge</div><div class="v mono">${threads.length}</div><div class="s">gesamt</div></div>
+    <div class="stat"><div class="k">Einträge</div><div class="v mono">${echte.length}</div><div class="s">gesamt</div></div>
     <div class="stat"><div class="k">Ereignisse</div><div class="v mono">${ereignisN}</div><div class="s">erfasst</div></div>
     <div class="stat"><div class="k">Wichtig</div><div class="v mono">${wichtigN}</div><div class="s">markiert</div></div>
   </div>
@@ -3138,7 +3154,7 @@ function doPrintFunk(){
         <td>${esc(FS_TYPEN[f.typ||"funk"] || "")}</td>
         <td>${esc(f.von)}</td>
         <td>${esc(f.an)}</td>
-        <td${strike}>${f.wichtig && !st ? `<strong>${esc(f.text)}</strong>` : esc(f.text)}</td>
+        <td${strike}>${t.waise ? `<em>(verwaiste ${esc(t.waise)})</em> ` : ""}${f.wichtig && !st ? `<strong>${esc(f.text)}</strong>` : esc(f.text)}</td>
       </tr>`;
     t.korrekturen.forEach(k => { html += `
       <tr><td></td><td class="p-mono">${zt(k.erstelltAm||k.zeit)}</td><td colspan="4"><em>Berichtigung:</em> ${esc(k.text)}</td></tr>`; });
@@ -4454,7 +4470,7 @@ function renderMonitor(){
       <span class="fk-f">${esc(f.funktion)}${f.einheit?` · ${esc(f.einheit)}`:""}</span>
     </div>`).join("");
 
-  const fsMonRows = fsThreads(state.funk).filter(t => !t.storno)
+  const fsMonRows = fsThreads(state.funk).filter(t => !t.storno && !t.waise)
     .sort((a,b) => (b.effektiv.zeit||"").localeCompare(a.effektiv.zeit||""))
     .slice(0, 6).map(t => { const f = t.effektiv; return `
     <div class="fsm">
@@ -7034,7 +7050,7 @@ function reportBodyHtml(data, sel, opts){
         <td class="p-mono">${zt(f.zeit)}</td>
         <td>${esc(f.von)}</td>
         <td>${esc(f.an)}</td>
-        <td${strike}>${f.wichtig && !st ? `<strong>${esc(f.text)}</strong>` : esc(f.text)}</td>
+        <td${strike}>${t.waise ? `<em>(verwaiste ${esc(t.waise)})</em> ` : ""}${f.wichtig && !st ? `<strong>${esc(f.text)}</strong>` : esc(f.text)}</td>
       </tr>`;
         t.korrekturen.forEach(k => { html += `
       <tr><td></td><td class="p-mono">${zt(k.erstelltAm||k.zeit)}</td><td colspan="3"><em>Berichtigung:</em> ${esc(k.text)}</td></tr>`; });
