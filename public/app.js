@@ -458,6 +458,37 @@ function saveNow(){
 }
 function save(){ if(!state) return; _saveDirty = true; if(!_saveT) _saveT = setTimeout(saveNow, 800); }
 
+/* Sofort persistieren und Erfolg (true/false) zurückmelden – für async-Kontexte. Umgeht die
+   Entprellung, damit ein Speicher-voll-Fehler NICHT still verschluckt wird. */
+async function saveJetzt(){
+  if(!state) return true;
+  if(_saveT){ clearTimeout(_saveT); _saveT = null; }
+  _saveDirty = false;
+  if(!state.wlan) state.pending++;
+  try{ await idbSet("state", JSON.stringify(state)); speicherWachhund(); return true; }
+  catch(e){ console.warn("[ELWIS] Sofort-Speichern fehlgeschlagen:", e); return false; }
+}
+/* Großen Anhang (Foto/Luftbild/Ausschnitt/Lagebild) SOFORT sichern und QuotaExceeded SICHTBAR
+   machen. Ersetzt die früheren try{markChange()}catch-Fallbacks, die seit der Entprellung von
+   save() tot waren (markChange schreibt asynchron). rollback() macht den Anhang bei Fehler rückgängig. */
+function anhangSichern(rollback, warnText, onOk){
+  if(!state) return;
+  if(!state.wlan) state.pending++;
+  if(_saveT){ clearTimeout(_saveT); _saveT = null; }
+  _saveDirty = false;
+  const misslungen = () => {
+    try{ rollback(); }catch(_){}
+    save(); render();
+    modalInfo(warnText || "Lokaler Speicher voll – der Anhang wurde NICHT gespeichert. Bitte alte Fotos/Ausschnitte/Lagebilder löschen oder den Einsatz exportieren.");
+  };
+  let payload;
+  try{ payload = JSON.stringify(state); }
+  catch(e){ console.warn("[ELWIS] Serialisieren fehlgeschlagen:", e); misslungen(); return; }
+  idbSet("state", payload)
+    .then(() => { renderHeader(); speicherWachhund(); if(onOk) onOk(); })
+    .catch(e => { console.warn("[ELWIS] Anhang speichern fehlgeschlagen:", e); misslungen(); });
+}
+
 /* Persistenten Speicher anfordern – sonst darf der Browser die IndexedDB unter
    Speicherdruck einfach verwerfen (Datenverlust im Einsatz). Best effort, still. */
 async function speicherPersistierbarMachen(){
@@ -1674,11 +1705,8 @@ function importEinsatz(file){
       }
       state.einsatzId = uid(); state.einsatzStart = new Date().toISOString();
       einsatzErsetzenErzwingen();   // importierten Einsatz erzwungen zur Server-Wahrheit machen
-      try{ markChange(); }catch(err){
-        state.fotos = []; state.lage.bg = "";
-        markChange();
-        modalInfo("Import gelungen, aber Fotos/Kartenhintergrund passten nicht in den lokalen Speicher und wurden weggelassen.");
-      }
+      anhangSichern(() => { state.fotos = []; state.lage.bg = ""; },
+        "Import gelungen, aber Fotos/Kartenhintergrund passten nicht in den lokalen Speicher und wurden weggelassen.");
       render();
     }catch(err){
       modalInfo("Datei konnte nicht gelesen werden – ist das ein ELWIS-Export (.json)?");
@@ -1751,7 +1779,7 @@ function renderFotodoku(){
 function fotoSpeichern(file, onDone){
   resizeImage(file, 1600, data => {
     state.fotos.push({ id:uid(), zeit:new Date().toISOString(), data, notiz:"" });
-    try{ markChange(); }catch(err){ state.fotos.pop(); modalInfo("Speicher voll – bitte alte Fotos löschen."); }
+    anhangSichern(() => state.fotos.pop(), "Speicher voll – das Foto wurde nicht gespeichert. Bitte alte Fotos löschen oder den Einsatz exportieren.");
     if(onDone) onDone();
   });
 }
@@ -1791,9 +1819,10 @@ async function fotoDokuKamera(){
     c.width = video.videoWidth; c.height = video.videoHeight;
     c.getContext("2d").drawImage(video, 0, 0, c.width, c.height);
     state.fotos.push({ id:uid(), zeit:new Date().toISOString(), data:c.toDataURL("image/jpeg", .72), notiz:"" });
-    try{ markChange(); }catch(err){ state.fotos.pop(); modalInfo("Speicher voll – bitte alte Fotos löschen."); return; }
-    n++; countEl.textContent = n + (n === 1 ? " Foto" : " Fotos") + " aufgenommen";
-    shotBtn.classList.add("flash"); setTimeout(() => shotBtn.classList.remove("flash"), 160);
+    anhangSichern(() => state.fotos.pop(), "Speicher voll – das Foto wurde nicht gespeichert. Bitte alte Fotos löschen.", () => {
+      n++; countEl.textContent = n + (n === 1 ? " Foto" : " Fotos") + " aufgenommen";
+      shotBtn.classList.add("flash"); setTimeout(() => shotBtn.classList.remove("flash"), 160);
+    });
   });
 }
 function wireFotodoku(){
@@ -1878,11 +1907,11 @@ async function endeEinsatz(){
   state.funk = []; state.besprechungen = [];
   state.anforderungen = []; state.checks = []; state.fotos = [];
   state.asTraeger = []; state.asTrupps = [];
-  try{ markChange(); }catch(err){
+  if(!(await saveJetzt())){
     // Speicher voll: Bilder aus dem Archiveintrag entfernen und erneut versuchen
     entry.fotos = []; entry.lage.bg = ""; entry.lage.snapshots = [];
-    try{ markChange(); modalInfo("Archiviert – Fotos/Kartenbilder passten nicht in den lokalen Speicher und wurden im Archiv weggelassen (vorher exportieren sichert alles)."); }
-    catch(e2){ state.archiv.pop(); markChange(); modalInfo("Lokaler Speicher voll – Einsatz konnte nicht archiviert werden. Bitte erst exportieren oder alte Archiveinträge löschen."); return; }
+    if(await saveJetzt()){ modalInfo("Archiviert – Fotos/Kartenbilder passten nicht in den lokalen Speicher und wurden im Archiv weggelassen (vorher exportieren sichert alles)."); }
+    else{ state.archiv.pop(); await saveJetzt(); modalInfo("Lokaler Speicher voll – Einsatz konnte nicht archiviert werden. Bitte erst exportieren oder alte Archiveinträge löschen."); return; }
   }
   render();
   if(await modalConfirm("Einsatz archiviert. Bericht jetzt drucken?", "Drucken", "Später")) openPrintDialog(entry);
@@ -5270,7 +5299,7 @@ function renderLagekarte(){
 function setLgBg(data){
   state.lage.bg = data;
   state.lage.mode = "bild";
-  try{ markChange(); }catch(err){ modalInfo("Bild zu groß für den lokalen Speicher."); state.lage.bg = ""; }
+  anhangSichern(() => { state.lage.bg = ""; state.lage.mode = "raster"; }, "Bild zu groß für den lokalen Speicher.");
   render();
 }
 /* Strg+V / Cmd+V auf der Lagekarte: Bild aus der Zwischenablage als Hintergrund */
@@ -5363,7 +5392,7 @@ async function lgLuftbildEinfangen(setBusy, fitAll){
   // Detail-Ausschnitte werden MANUELL aufgenommen (Knopf ➕ Ausschnitt aufnehmen) –
   // bestehende manuelle Ausschnitte bleiben erhalten (keine automatische Rasterung mehr).
   if(!Array.isArray(state.lage.tiles)) state.lage.tiles = [];
-  try{ markChange(); }catch(e){ state.lage.bg = ""; modalInfo("Bild zu groß für den lokalen Speicher."); return; }
+  if(!(await saveJetzt())){ state.lage.bg = ""; render(); modalInfo("Übersichts-Luftbild zu groß für den lokalen Speicher – bitte alte Fotos/Lagebilder löschen oder den Einsatz exportieren."); return; }
   render();
   modalInfo("Übersichts-Luftbild eingefangen (erscheint im Bericht/PDF/Word). Du bleibst im Kartenmodus.\n"
     + "Für Detailseiten näher zoomen und ➕ Ausschnitt aufnehmen.");
@@ -5388,7 +5417,7 @@ async function lgAddAusschnitt(setBusy){
   const drin = projT.filter(j => (j.x != null && imRahmen(j.x, j.y)) ||
     (Array.isArray(j.points) && j.points.some(p => imRahmen(p.x, p.y))));
   state.lage.tiles.push({ id:uid(), bg, bgW:W, bgH:H, label:"Ausschnitt " + (state.lage.tiles.length + 1), items: drin });
-  try{ markChange(); }catch(e){ state.lage.tiles.pop(); modalInfo("Bild zu groß für den lokalen Speicher – ggf. alte Ausschnitte/Fotos löschen."); return; }
+  if(!(await saveJetzt())){ state.lage.tiles.pop(); render(); modalInfo("Ausschnitt zu groß für den lokalen Speicher – ggf. alte Ausschnitte/Fotos löschen."); return; }
   render();
   modalInfo("Ausschnitt aufgenommen – erscheint als eigene Detailseite im Bericht (PDF + Word).");
 }
@@ -5412,7 +5441,8 @@ async function lgFreeze(){
     }catch(e){ /* offline/Fehler → Bericht rendert schematisch, kein Abbruch */ }
   }
   state.lage.snapshots.push(s);
-  markChange();
+  anhangSichern(() => { state.lage.snapshots = state.lage.snapshots.filter(x => x.id !== s.id); },
+    "Lagebild zu groß für den lokalen Speicher – bitte alte Lagebilder/Fotos löschen oder den Einsatz exportieren.");
   return s;
 }
 /* Für den Bericht: einem Lagebild ohne eingefangenes Luftbild (s.bild/s.bg fehlen) nachträglich
@@ -6196,7 +6226,7 @@ function wireLagekarte(){
     resizeImage(file, 1920, data => {
       state.lage.bg = data;
       state.lage.mode = "bild";
-      try{ markChange(); }catch(err){ modalInfo("Bild zu groß für den lokalen Speicher – bitte kleineres Foto wählen."); state.lage.bg = ""; }
+      anhangSichern(() => { state.lage.bg = ""; state.lage.mode = "raster"; }, "Bild zu groß für den lokalen Speicher – bitte kleineres Foto wählen.");
       render();
     });
   });
@@ -7445,16 +7475,30 @@ function render(){
   main.classList.toggle("w-tablet", state.view === "kraefte");
   main.classList.toggle("w-desk", ["einsatz","funk","bespr","listen","skizze"].includes(state.view));
   $("#footNote").style.display = state.view === "monitor" ? "none" : "";
-  if(state.view === "einsatz"){ main.innerHTML = renderEinsatz(); wireEinsatz(); }
-  else if(state.view === "kraefte"){ main.innerHTML = renderKraefte(); wireKraefte(); }
-  else if(state.view === "funk"){ main.innerHTML = renderFunk(); wireFunk(); }
-  else if(state.view === "bespr"){ main.innerHTML = renderBespr(); wireBespr(); }
-  else if(state.view === "fotodoku"){ main.innerHTML = renderFotodoku(); wireFotodoku(); }
-  else if(state.view === "listen"){ main.innerHTML = renderListen(); wireListen(); }
-  else if(state.view === "atemschutz"){ main.innerHTML = renderAtemschutz(); wireAtemschutz(); }
-  else if(state.view === "skizze"){ main.innerHTML = renderSkizzeView(); }
-  else if(state.view === "lagekarte"){ main.innerHTML = renderLagekarte(); wireLagekarte(); }
-  else { main.innerHTML = renderMonitor(); wireMonitor(); }
+  // Error-Boundary: eine fehlerhafte Ansicht (z. B. Altdaten/fehlendes Feld, auch aus einem
+  // Sync-render()) darf nicht die ganze App lahmlegen – Fallback statt halbtotem DOM.
+  try{
+    if(state.view === "einsatz"){ main.innerHTML = renderEinsatz(); wireEinsatz(); }
+    else if(state.view === "kraefte"){ main.innerHTML = renderKraefte(); wireKraefte(); }
+    else if(state.view === "funk"){ main.innerHTML = renderFunk(); wireFunk(); }
+    else if(state.view === "bespr"){ main.innerHTML = renderBespr(); wireBespr(); }
+    else if(state.view === "fotodoku"){ main.innerHTML = renderFotodoku(); wireFotodoku(); }
+    else if(state.view === "listen"){ main.innerHTML = renderListen(); wireListen(); }
+    else if(state.view === "atemschutz"){ main.innerHTML = renderAtemschutz(); wireAtemschutz(); }
+    else if(state.view === "skizze"){ main.innerHTML = renderSkizzeView(); }
+    else if(state.view === "lagekarte"){ main.innerHTML = renderLagekarte(); wireLagekarte(); }
+    else { main.innerHTML = renderMonitor(); wireMonitor(); }
+  }catch(e){
+    console.error("[ELWIS] Render-Fehler in Ansicht '" + state.view + "':", e);
+    main.innerHTML = `<div class="card"><h2>Anzeige-Fehler</h2>
+      <p>Diese Ansicht konnte nicht aufgebaut werden. Deine Daten sind gesichert – wechsle die Ansicht oder lade neu.</p>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:8px">
+        <button class="btn btn-primary" id="errEinsatz">Zur Einsatz-Ansicht</button>
+        <button class="btn btn-ghost" id="errReload">App neu laden</button>
+      </div></div>`;
+    const be = $("#errEinsatz"); if(be) be.addEventListener("click", () => { state.view = "einsatz"; render(); });
+    const br = $("#errReload"); if(br) br.addEventListener("click", () => location.reload());
+  }
 }
 // Der erste Render passiert async in boot() (unten), sobald der Zustand aus
 // IndexedDB geladen ist.
@@ -7468,6 +7512,31 @@ window.matchMedia("(min-width:900px)").addEventListener("change", () => {
 // Seite den letzten Stand noch anstoßen, damit die letzte Eingabe nicht verloren geht.
 document.addEventListener("visibilitychange", () => { if(document.visibilityState === "hidden") saveNow(); });
 window.addEventListener("pagehide", () => saveNow());
+
+// Globales Auffangnetz: nicht abgefangene Fehler/Promise-Ablehnungen dürfen die App nicht
+// still verrecken lassen. Dezenter, einmaliger Hinweis mit „Neu laden" (Daten bleiben in IndexedDB).
+let _fehlerBannerGezeigt = false;
+function zeigeFehlerBanner(){
+  if(_fehlerBannerGezeigt) return;
+  _fehlerBannerGezeigt = true;
+  try{ saveNow(); }catch(_){}
+  const bar = document.createElement("div");
+  bar.id = "errBanner";
+  bar.setAttribute("role", "alert");
+  bar.style.cssText = "position:fixed;left:0;right:0;bottom:0;z-index:9999;display:flex;gap:12px;align-items:center;justify-content:center;flex-wrap:wrap;padding:10px 14px;background:#8a2a2a;color:#fff;font-size:.9rem";
+  bar.innerHTML = `<span>Es ist ein unerwarteter Fehler aufgetreten. Deine Daten sind gespeichert.</span>
+    <button type="button" style="background:#fff;color:#8a2a2a;border:0;border-radius:8px;padding:6px 12px;font-weight:700;cursor:pointer">App neu laden</button>
+    <button type="button" aria-label="Schließen" style="background:transparent;color:#fff;border:0;font-size:1.1rem;cursor:pointer">×</button>`;
+  const btns = bar.querySelectorAll("button");
+  btns[0].addEventListener("click", () => location.reload());
+  btns[1].addEventListener("click", () => { bar.remove(); _fehlerBannerGezeigt = false; });
+  document.body.appendChild(bar);
+}
+window.addEventListener("error", e => {
+  if(e && e.target && e.target !== window && e.target.tagName) return;   // Ressourcen-Ladefehler (Bild o. Ä.) ignorieren
+  console.error("[ELWIS] Laufzeitfehler:", e.error || e.message); zeigeFehlerBanner();
+});
+window.addEventListener("unhandledrejection", e => { console.error("[ELWIS] Unbehandelte Promise-Ablehnung:", e.reason); zeigeFehlerBanner(); });
 // Nach Vollbild-Wechsel die (Snapshot-/Vergleichs-)Karten neu vermessen
 document.addEventListener("fullscreenchange", () => {
   setTimeout(() => { [lgSnapObj, lgCmpA, lgCmpB].forEach(m => { if(m){ try{ m.invalidateSize(); }catch(e){} } }); }, 150);
