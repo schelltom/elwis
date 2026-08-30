@@ -1,5 +1,5 @@
 {
-  "name": "elwis",
+  "name": "lotse112",
   "type": "module",
   "version": "0.1.0",
   "engines": {
@@ -10,7 +10,7 @@
     "build": "astro build",
     "preview": "astro preview",
     "astro": "astro",
-    "server": "node server/elwis-server.mjs"
+    "server": "node server/lotse112-server.mjs"
   },
   "dependencies": {
     "astro": "^7.0.6"

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /* ================================================================
-   ELWIS ELW-Server – Sync-Zentrale fürs Einsatzstellen-WLAN
+   LOTSE112 ELW-Server – Sync-Zentrale fürs Einsatzstellen-WLAN
    ----------------------------------------------------------------
    - Liefert die gebaute App (dist/) an alle Geräte im WLAN aus
      → Tablets öffnen einfach http://<elw-adresse>:8474/
@@ -8,7 +8,7 @@
      (last-write-wins je Datensatz, Löschungen über Tombstones)
    - Persistiert den Stand in server/elwis-daten.json
    - Null Abhängigkeiten: nur Node (>= 18) nötig.  Start:
-         node server/elwis-server.mjs        (oder: npm run server)
+         node server/lotse112-server.mjs        (oder: npm run server)
    ================================================================ */
 import http from "node:http";
 import fs from "node:fs";
@@ -409,7 +409,7 @@ const server = http.createServer((req, res) => {
   /* --- Statische App (dist/) --- */
   if(!appVorhanden()){
     res.writeHead(503, { "Content-Type": "text/plain; charset=utf-8" });
-    res.end("ELWIS: App noch nicht geladen. Der Server holt sie beim ersten Internet-Kontakt automatisch von GitHub – bitte gleich neu laden.");
+    res.end("LOTSE112: App noch nicht geladen. Der Server holt sie beim ersten Internet-Kontakt automatisch von GitHub – bitte gleich neu laden.");
     return;
   }
   let rel = decodeURIComponent(u.pathname);
@@ -439,7 +439,7 @@ aktiviereBereitgestellte();
 server.listen(PORT, () => {
   console.log("");
   console.log("  ┌─────────────────────────────────────────────┐");
-  console.log("  │  ELWIS ELW-Server läuft                     │");
+  console.log("  │  LOTSE112 ELW-Server läuft                     │");
   console.log("  └─────────────────────────────────────────────┘");
   console.log(`  Lokal:      http://localhost:${PORT}/`);
   for(const url of lanUrls()) console.log(`  Im WLAN:    ${url}   ← Tablets hiermit verbinden`);

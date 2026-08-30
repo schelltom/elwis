@@ -440,7 +440,7 @@ async function ladeZustand(){
       try{ await idbSet("state", alt); localStorage.removeItem(STORE_KEY); }catch(e){}
       return JSON.parse(alt);
     }
-  }catch(e){ console.warn("[ELWIS] IndexedDB nicht verfügbar – Daten werden nicht dauerhaft gespeichert:", e); }
+  }catch(e){ console.warn("[LOTSE112] IndexedDB nicht verfügbar – Daten werden nicht dauerhaft gespeichert:", e); }
   return {};
 }
 function uid(){ return Date.now().toString(36) + Math.random().toString(36).slice(2,7); }
@@ -453,8 +453,8 @@ function saveNow(){
   if(_saveT){ clearTimeout(_saveT); _saveT = null; }
   if(!state || !_saveDirty) return;
   _saveDirty = false;
-  try{ idbSet("state", JSON.stringify(state)).catch(e => console.warn("[ELWIS] Speichern (IndexedDB) fehlgeschlagen:", e)); }
-  catch(e){ console.warn("[ELWIS] Zustand serialisieren fehlgeschlagen:", e); }
+  try{ idbSet("state", JSON.stringify(state)).catch(e => console.warn("[LOTSE112] Speichern (IndexedDB) fehlgeschlagen:", e)); }
+  catch(e){ console.warn("[LOTSE112] Zustand serialisieren fehlgeschlagen:", e); }
 }
 function save(){ if(!state) return; _saveDirty = true; if(!_saveT) _saveT = setTimeout(saveNow, 800); }
 
@@ -466,7 +466,7 @@ async function saveJetzt(){
   _saveDirty = false;
   if(!state.wlan) state.pending++;
   try{ await idbSet("state", JSON.stringify(state)); speicherWachhund(); return true; }
-  catch(e){ console.warn("[ELWIS] Sofort-Speichern fehlgeschlagen:", e); return false; }
+  catch(e){ console.warn("[LOTSE112] Sofort-Speichern fehlgeschlagen:", e); return false; }
 }
 /* Großen Anhang (Foto/Luftbild/Ausschnitt/Lagebild) SOFORT sichern und QuotaExceeded SICHTBAR
    machen. Ersetzt die früheren try{markChange()}catch-Fallbacks, die seit der Entprellung von
@@ -483,10 +483,10 @@ function anhangSichern(rollback, warnText, onOk){
   };
   let payload;
   try{ payload = JSON.stringify(state); }
-  catch(e){ console.warn("[ELWIS] Serialisieren fehlgeschlagen:", e); misslungen(); return; }
+  catch(e){ console.warn("[LOTSE112] Serialisieren fehlgeschlagen:", e); misslungen(); return; }
   idbSet("state", payload)
     .then(() => { renderHeader(); speicherWachhund(); if(onOk) onOk(); })
-    .catch(e => { console.warn("[ELWIS] Anhang speichern fehlgeschlagen:", e); misslungen(); });
+    .catch(e => { console.warn("[LOTSE112] Anhang speichern fehlgeschlagen:", e); misslungen(); });
 }
 
 /* Persistenten Speicher anfordern – sonst darf der Browser die IndexedDB unter
@@ -902,10 +902,10 @@ function lgPrintFoerder(line){
           <h1>${esc(e.stichwort) || "Wasserförderung"}</h1>
           <div>${esc(e.ort)}${line.text ? " · " + esc(line.text) : ""}</div>
         </div>
-        <div class="p-mark">ELWIS</div>
+        <div class="p-mark">LOTSE112</div>
       </div>
       ${lgFoerderUebersichtHtml(line)}
-      <p style="font-size:8pt;color:#666;margin-top:16px">Anhalt nach Faustformel – keine hydraulische Berechnung. Gedruckt am ${new Date().toLocaleString("de-DE")} · ELWIS · ${esc(state.config.ugName)}</p>
+      <p style="font-size:8pt;color:#666;margin-top:16px">Anhalt nach Faustformel – keine hydraulische Berechnung. Gedruckt am ${new Date().toLocaleString("de-DE")} · LOTSE112 · ${esc(state.config.ugName)}<br>${DRUCK_HINWEIS}</p>
     </section>`;
   window.print();
 }
@@ -1075,14 +1075,89 @@ function dauerStr(vonIso, bisIso){
   return `${Math.floor(min/60)}:${String(min%60).padStart(2,"0")} h`;
 }
 
+/* ---------------- Rechtliches (inhaltsgleich mit lotse112.de/nutzungsbedingungen) ----------------
+   Kurzhinweis beim ersten Start, Volltext in den Einstellungen, Fußzeile in jedem Ausdruck. */
+const RECHTS_STAND = "August 2026";
+const DRUCK_HINWEIS = "Erstellt mit LOTSE112 – Unterstützungswerkzeug; die fachliche Verantwortung liegt beim Ersteller.";
+const RECHTS_VOLL = `
+  <p>Diese Bedingungen regeln die Nutzung der Website sowie der Anwendungen <b>LOTSE112 Einsatzleitung</b> und <b>LOTSE112 Geräte</b> (zusammen „LOTSE112“), bereitgestellt von Thomas Schell, Weiden i.d.OPf. (Kontakt: <a href="mailto:lotse112@gmail.com">lotse112@gmail.com</a>).</p>
+  <h3>1. Leistungsgegenstand</h3>
+  <p>LOTSE112 wird derzeit <b>unentgeltlich</b> und im jeweils aktuellen Stand („wie besehen“ / „as is“) zur Verfügung gestellt. Es besteht kein Anspruch auf einen bestimmten Funktionsumfang, auf Weiterentwicklung, auf Fehlerbehebung oder auf Unterstützung. Ein Nutzungsvertrag mit einklagbaren Leistungspflichten kommt durch die Bereitstellung nicht zustande.</p>
+  <h3>2. Keine Zusicherung von Eigenschaften</h3>
+  <p>Es wird keine Gewähr dafür übernommen, dass LOTSE112 fehlerfrei arbeitet, jederzeit verfügbar ist, für einen bestimmten Zweck geeignet ist oder bestimmten rechtlichen, normativen oder behördlichen Anforderungen entspricht. Die mitgelieferten Prüfkataloge, Vorlagen, Checklisten, Berechnungen (z. B. zur Wasserförderung) und taktischen Darstellungen sind <b>Hilfsmittel ohne Gewähr</b> auf Richtigkeit, Vollständigkeit oder Aktualität.</p>
+  <h3>3. Fachliche Verantwortung</h3>
+  <p>LOTSE112 ist ein <b>Unterstützungswerkzeug</b> zur Organisation und Dokumentation. Die fachliche Verantwortung bleibt vollständig bei der nutzenden Feuerwehr und den jeweils zuständigen Personen:</p>
+  <ul>
+    <li>für die ordnungsgemäße Durchführung von Geräteprüfungen, die Auswahl von Prüfkriterien und Fristen sowie die Einhaltung der geltenden Vorschriften;</li>
+    <li>für alle Entscheidungen und Maßnahmen im Einsatz, einschließlich Kräftedisposition, Lagebeurteilung und Wasserförderung.</li>
+  </ul>
+  <p>Ergebnisse von LOTSE112 sind vor der Verwendung eigenverantwortlich zu prüfen.</p>
+  <h3>4. Haftung</h3>
+  <p>Die Haftung des Anbieters – gleich aus welchem Rechtsgrund – ist auf <b>Vorsatz und grobe Fahrlässigkeit</b> beschränkt. Für einfache Fahrlässigkeit wird nicht gehaftet, soweit nicht wesentliche Vertragspflichten betroffen sind.</p>
+  <p>Unberührt bleibt die zwingende gesetzliche Haftung, insbesondere für Schäden aus der Verletzung des Lebens, des Körpers oder der Gesundheit sowie nach dem Produkthaftungsgesetz.</p>
+  <p>Für den Verlust von Daten haftet der Anbieter nur, soweit der Verlust bei ordnungsgemäßer und regelmäßiger Datensicherung durch den Nutzer nicht eingetreten wäre.</p>
+  <h3>5. Verfügbarkeit und Einstellung des Betriebs</h3>
+  <p>Es besteht <b>kein Anspruch auf Verfügbarkeit</b>. Der Betrieb der Website und die Bereitstellung von Aktualisierungen können jederzeit, auch ohne Vorankündigung und ohne Angabe von Gründen, eingeschränkt oder eingestellt werden.</p>
+  <p>Die Anwendungen speichern ihre Daten lokal auf dem Gerät des Nutzers und funktionieren nach dem ersten Aufruf offline weiter. Der Nutzer ist selbst dafür verantwortlich, seine Daten regelmäßig über die vorhandene Export-/Backup-Funktion zu sichern, damit sie bei Geräteverlust, Browserwechsel oder Einstellung des Dienstes erhalten bleiben.</p>
+  <h3>6. Marken und Urheberrecht</h3>
+  <p>„LOTSE112“ sowie „LOTSE112 Einsatzleitung“ und „LOTSE112 Geräte“ werden als Marken des Anbieters verwendet. Inhalte und Gestaltung sind urheberrechtlich geschützt.</p>
+  <h3>7. Änderungen</h3>
+  <p>Diese Nutzungsbedingungen können mit Wirkung für die Zukunft angepasst werden. Maßgeblich ist die zum Zeitpunkt der Nutzung veröffentlichte Fassung.</p>
+  <h3>8. Anwendbares Recht</h3>
+  <p>Es gilt das Recht der Bundesrepublik Deutschland unter Ausschluss des UN-Kaufrechts.</p>
+  <p style="opacity:.65">Stand: ${RECHTS_STAND} · inhaltsgleich mit lotse112.de/nutzungsbedingungen</p>`;
+function zeigeRechtstext(){
+  return modal({ titel: "Nutzungsbedingungen & Haftung",
+    html: `<div class="rechts-scroll">${RECHTS_VOLL}</div>`, ok: "Schließen" });
+}
+function ersterStartRechtshinweis(){
+  let ok = false;
+  try{ ok = localStorage.getItem("lotse112-rechtshinweis") === "1"; }catch(e){}
+  if(ok) return;
+  modal({
+    titel: "Bevor es losgeht",
+    html: `<div class="rechts-kurz">
+      <p><b>LOTSE112 Einsatzleitung ist ein Unterstützungswerkzeug</b> zur Organisation und Dokumentation – ohne Gewähr für Richtigkeit, Vollständigkeit oder Verfügbarkeit.</p>
+      <p>Die fachliche Verantwortung für alle Einsatzentscheidungen, Berechnungen und die Einhaltung der Vorschriften bleibt bei der Einsatzleitung bzw. der Wehr.</p>
+      <p>Alle Daten liegen ausschließlich lokal auf diesem Gerät. <b>Bitte regelmäßig selbst exportieren/sichern.</b></p>
+      <p style="opacity:.7">Vollständige Nutzungsbedingungen: Einstellungen › Rechtliches.</p>
+    </div>`,
+    ok: "Verstanden"
+  }).then(() => { try{ localStorage.setItem("lotse112-rechtshinweis", "1"); }catch(e){} });
+}
+
 /* ---------------- Splashscreen ---------------- */
+/* Der Splash bleibt im DOM (nur .out = ausgeblendet) und lässt sich über die
+   Wortmarke oben links jederzeit wieder aufrufen. */
+function splashBinden(sp, ersterStart){
+  const go = () => {
+    sp.classList.add("out");
+    if(ersterStart) setTimeout(ersterStartRechtshinweis, 450);
+  };
+  const t = setTimeout(go, 5000);
+  sp.addEventListener("click", () => { clearTimeout(t); go(); });
+}
+function splashZeigen(){
+  const alt = document.getElementById("splash");
+  if(!alt) return;
+  const sp = alt.cloneNode(true);              // frischer Knoten → CSS-Animationen laufen neu
+  sp.classList.remove("out");
+  const su = sp.querySelector("#splashUg"); if(su) su.textContent = state.config.ugName || "";
+  alt.replaceWith(sp);
+  void sp.offsetWidth;
+  splashBinden(sp, false);
+}
 (function(){
   const sp = $("#splash");
   $("#splashUg").textContent = state.config.ugName || "";
-  const go = () => { sp.classList.add("out"); setTimeout(()=>sp.remove(), 500); };
-  const t = setTimeout(go, 5000);
-  sp.addEventListener("click", () => { clearTimeout(t); go(); });
+  splashBinden(sp, true);
 })();
+/* Wortmarke oben links (Kopfzeile + Schiene) → Startbildschirm erneut zeigen */
+document.querySelectorAll(".brand, .rail-brand").forEach(el => {
+  el.style.cursor = "pointer";
+  el.setAttribute("title", "Startbildschirm anzeigen");
+  el.addEventListener("click", splashZeigen);
+});
 
 /* ---------------- Kopfzeile / Sync ---------------- */
 function renderHeader(){
@@ -1138,7 +1213,7 @@ function openMenu(){
           <path d="M32 28v22M21 50h22"></path><path d="M20.5 12a16 16 0 0 0 0 20M43.5 12a16 16 0 0 1 0 20"></path>
           <circle cx="32" cy="21" r="5.5" fill="#fff" stroke="none"></circle></svg>
       </div>
-      <h2><span class="n-elw">ELW</span><span class="n-is">IS</span></h2>
+      <h2><span class="n-elw">LOTSE</span><span class="n-is">112</span></h2>
     </div>
     ${tabs.map(t => `
       <button data-tab="${t.id}" class="${state.view===t.id?"active":""}">
@@ -1174,13 +1249,13 @@ function renderSettingsSheet(){
         <div class="cfg-qr">
           <img src="${qrDataUrl(SYNC.urls[0])}" alt="QR-Code zum Verbinden" width="176" height="176">
           <div>
-            <p class="hint" style="margin:0 0 8px">Mit der Tablet-Kamera scannen – ELWIS öffnet sich im ELW-WLAN und verbindet sich automatisch mit dem Einsatz.</p>
+            <p class="hint" style="margin:0 0 8px">Mit der Tablet-Kamera scannen – LOTSE112 öffnet sich im ELW-WLAN und verbindet sich automatisch mit dem Einsatz.</p>
             ${SYNC.urls.map(u => `<div class="mono" style="font-size:.82rem">${esc(u)}</div>`).join("")}
           </div>
         </div>
       </div>` : `
       <div class="field"><label style="margin-bottom:6px">Tablet verbinden</label>
-        <p class="hint" style="margin:0">Der QR-Code zum Verbinden erscheint hier, sobald ELWIS über den ELW-Server läuft (<span class="mono">npm run server</span>) – die Tablets landen dann im gleichen WLAN und synchronisieren automatisch.</p>
+        <p class="hint" style="margin:0">Der QR-Code zum Verbinden erscheint hier, sobald LOTSE112 über den ELW-Server läuft (<span class="mono">npm run server</span>) – die Tablets landen dann im gleichen WLAN und synchronisieren automatisch.</p>
       </div>`}
       ${SYNC.aktiv ? `
       <div class="field"><label style="margin-bottom:6px">Datensicherung / Wiederherstellung</label>
@@ -1292,6 +1367,10 @@ function renderSettingsSheet(){
         </div>
         <p class="hint">Name + Funkrufnummer. Neue Fahrzeuge werden bei der Erfassung automatisch aufgenommen. Mit ✕ entfernen.</p>
       </div>
+      <div class="field"><label style="margin-bottom:10px">Rechtliches</label>
+        <button type="button" class="btn btn-ghost btn-block" id="cfg-rechts">Nutzungsbedingungen &amp; Haftung</button>
+        <p class="hint">Vollständiger Text – im App-Paket gespeichert, auch offline verfügbar. Inhaltsgleich mit lotse112.de/nutzungsbedingungen.</p>
+      </div>
     </div>
     <div class="sheet-foot" style="flex-wrap:wrap">
       <button class="btn btn-primary btn-block" id="cfg-save" style="flex:1">Speichern</button>
@@ -1313,6 +1392,7 @@ function renderSettingsSheet(){
     });
   };
   document.querySelectorAll("[data-close]").forEach(el => el.addEventListener("click", closeEditor));
+  $("#cfg-rechts").addEventListener("click", zeigeRechtstext);
   document.querySelectorAll("[data-theme-opt]").forEach(b => b.addEventListener("click", () => {
     state.config.theme = b.dataset.themeOpt;
     document.querySelectorAll("[data-theme-opt]").forEach(x => x.classList.toggle("active", x.dataset.themeOpt===state.config.theme));
@@ -1664,7 +1744,7 @@ function exportEinsatz(){
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
   const stw = (state.einsatz.stichwort || "einsatz").replace(/[^\wäöüÄÖÜß-]+/g, "_").slice(0, 40);
-  a.download = `ELWIS_${stw}_${fmtDateInput(new Date().toISOString())}.json`;
+  a.download = `LOTSE112_${stw}_${fmtDateInput(new Date().toISOString())}.json`;
   document.body.appendChild(a); a.click(); a.remove();
   URL.revokeObjectURL(a.href);
 }
@@ -1673,7 +1753,7 @@ function importEinsatz(file){
   rd.onload = async () => {
     try{
       const d = JSON.parse(rd.result);
-      if(!d || d.elwis !== 1 || !d.einsatz) throw new Error("kein ELWIS-Export");
+      if(!d || d.elwis !== 1 || !d.einsatz) throw new Error("kein LOTSE112-Export");
       const wer = [d.einsatz.stichwort || "ohne Stichwort", d.ugName ? `(${d.ugName})` : "",
         d.exportiert ? `– exportiert ${fmtDatum(d.exportiert)} ${fmtZeit(d.exportiert)} Uhr` : ""].join(" ");
       if(!(await modalConfirm(`Einsatz „${wer}“ importieren?\nDer aktuell erfasste Einsatz wird ersetzt (Archiv und Einstellungen bleiben).`))) return;
@@ -1709,7 +1789,7 @@ function importEinsatz(file){
         "Import gelungen, aber Fotos/Kartenhintergrund passten nicht in den lokalen Speicher und wurden weggelassen.");
       render();
     }catch(err){
-      modalInfo("Datei konnte nicht gelesen werden – ist das ein ELWIS-Export (.json)?");
+      modalInfo("Datei konnte nicht gelesen werden – ist das ein LOTSE112-Export (.json)?");
     }
   };
   rd.readAsText(file);
@@ -3169,7 +3249,7 @@ function doPrintFunk(){
         <h1>${esc(e.stichwort) || "Ohne Stichwort"}</h1>
         <div>${esc(e.ort)}${e.beginn ? " · Alarm " + fmtDatum(e.beginn) + " " + fmtZeit(e.beginn) + " Uhr" : ""}</div>
       </div>
-      <div class="p-mark">ELWIS</div>
+      <div class="p-mark">LOTSE112</div>
     </div>
     <table><thead><tr><th>Nr.</th><th>Zeit</th><th>Art</th><th>Von</th><th>An</th><th>Inhalt</th></tr></thead><tbody>
       ${rows}
@@ -3178,7 +3258,7 @@ function doPrintFunk(){
       <div class="p-sign">Ort, Datum</div>
       <div class="p-sign">Unterschrift</div>
     </div>
-    <p style="font-size:8pt;color:#666;margin-top:16px">Nr. = Erfassungsreihenfolge (revisionssicher); Berichtigungen &amp; Stornos bleiben erhalten. Gedruckt am ${new Date().toLocaleString("de-DE")} · ELWIS – Kräfteerfassung (Prototyp) · ${esc(state.config.ugName)}</p>`;
+    <p style="font-size:8pt;color:#666;margin-top:16px">Nr. = Erfassungsreihenfolge (revisionssicher); Berichtigungen &amp; Stornos bleiben erhalten. Gedruckt am ${new Date().toLocaleString("de-DE")} · LOTSE112 – Kräfteerfassung (Prototyp) · ${esc(state.config.ugName)}<br>${DRUCK_HINWEIS}</p>`;
   window.print();
 }
 function openFsEditor(id){
@@ -4265,7 +4345,7 @@ function doPrintAtemschutz(){
         <h1>${esc(e.stichwort) || "Ohne Stichwort"}</h1>
         <div>${esc(e.ort)}${e.beginn ? " · Alarm " + fmtDatum(e.beginn) + " " + fmtZeit(e.beginn) + " Uhr" : ""}</div>
       </div>
-      <div class="p-mark">ELWIS</div>
+      <div class="p-mark">LOTSE112</div>
     </div>
     <table class="meta">
       <tr><td>Gerätetyp</td><td>${esc(AS_GERAETETYP)} (Pressluftatmer)</td></tr>
@@ -4283,7 +4363,7 @@ function doPrintAtemschutz(){
       <div class="p-sign">Ort, Datum</div>
       <div class="p-sign">Atemschutzüberwachung</div>
     </div>
-    <p style="font-size:8pt;color:#666;margin-top:16px">Gedruckt am ${new Date().toLocaleString("de-DE")} · ELWIS – Kräfteerfassung (Prototyp) · ${esc(state.config.ugName)}</p>`;
+    <p style="font-size:8pt;color:#666;margin-top:16px">Gedruckt am ${new Date().toLocaleString("de-DE")} · LOTSE112 – Kräfteerfassung (Prototyp) · ${esc(state.config.ugName)}<br>${DRUCK_HINWEIS}</p>`;
   window.print();
 }
 
@@ -4578,7 +4658,7 @@ function renderMonitor(){
     <div class="monitor">
       <div class="mon-head">
         <div class="mon-title">
-          <div class="eyebrow"><span style="color:var(--accent)">ELW</span><span style="color:var(--ink)">IS</span> · ${esc(state.config.ugName)} · Kräfteübersicht</div>
+          <div class="eyebrow"><span style="color:var(--accent)">LOTSE</span><span style="color:var(--ink)">112</span> · ${esc(state.config.ugName)} · Kräfteübersicht</div>
           <h2>${esc(e.stichwort) || "Kein Einsatz angelegt"}</h2>
           <div class="ort">${esc(e.ort)}</div>
           ${e.leiter ? `<div class="mon-el">EL: ${esc(e.leiter)}</div>` : ""}
@@ -6922,16 +7002,16 @@ function doPrintLagekarte(){
           <h1>${esc(e.stichwort) || "Ohne Stichwort"}</h1>
           <div>${esc(e.ort)}${e.beginn ? " · Alarm " + fmtDatum(e.beginn) + " " + fmtZeit(e.beginn) + " Uhr" : ""}</div>
         </div>
-        <div class="p-mark">ELWIS</div>
+        <div class="p-mark">LOTSE112</div>
       </div>
       ${printMapHtml(state.lage)}
       ${printLegendHtml(state.lage.items, state.einheiten)}
-      <p style="font-size:8pt;color:#666;margin-top:16px">Gedruckt am ${new Date().toLocaleString("de-DE")} · ELWIS – Lagekarte · ${esc(state.config.ugName)}</p>
+      <p style="font-size:8pt;color:#666;margin-top:16px">Gedruckt am ${new Date().toLocaleString("de-DE")} · LOTSE112 – Lagekarte · ${esc(state.config.ugName)}<br>${DRUCK_HINWEIS}</p>
     </section>`;
   warteAufBilder($("#printArea")).then(() => window.print());
 }
 /* Berichtskopf: im PDF ein Flex-Block (float rendert der Browser sauber),
-   im Word-Export eine Tabelle – nur so sitzt der ELWIS-Kasten zuverlässig oben rechts. */
+   im Word-Export eine Tabelle – nur so sitzt der LOTSE112-Kasten zuverlässig oben rechts. */
 function reportHead(e, pEnde, opts){
   const sub = `${esc(state.config.ugName)} · Einsatzbericht · Kräfteübersicht${pEnde ? "" : " · Zwischenstand"}`;
   const titel = esc(e.stichwort) || "Ohne Stichwort";
@@ -6939,7 +7019,7 @@ function reportHead(e, pEnde, opts){
   if(opts && opts.word){
     return `<table class="p-headw"><tr>
       <td class="p-headw-l"><div class="p-sub">${sub}</div><h1>${titel}</h1><div>${ort}</div></td>
-      <td class="p-headw-r"><span class="p-mark">ELWIS</span></td>
+      <td class="p-headw-r"><span class="p-mark">LOTSE112</span></td>
     </tr></table>`;
   }
   return `<div class="p-head">
@@ -6948,7 +7028,7 @@ function reportHead(e, pEnde, opts){
         <h1>${titel}</h1>
         <div>${ort}</div>
       </div>
-      <div class="p-mark">ELWIS</div>
+      <div class="p-mark">LOTSE112</div>
     </div>`;
 }
 function reportBodyHtml(data, sel, opts){
@@ -7193,7 +7273,7 @@ function reportBodyHtml(data, sel, opts){
       <div class="p-sign">Ort, Datum</div>
       <div class="p-sign">Unterschrift Einsatzleiter</div>
     </div>
-    <p class="p-print-ts">Erstellt am ${new Date().toLocaleString("de-DE")} · ELWIS – Kräfteerfassung (Prototyp) · ${esc(state.config.ugName)}</p>`;
+    <p class="p-print-ts">Erstellt am ${new Date().toLocaleString("de-DE")} · LOTSE112 – Kräfteerfassung (Prototyp) · ${esc(state.config.ugName)}<br>${DRUCK_HINWEIS}</p>`;
 }
 // Vor window.print() alle Bilder im Druckbereich fertig laden lassen – sonst drucken
 // große Base64-Fotos / Kartenhintergründe leer (Foto-Doku „fehlt" im PDF).
@@ -7307,7 +7387,7 @@ async function wordBodyMitGrafik(body){
         img.setAttribute("height", Math.round(hcm * DPI));
         img.setAttribute("style", `width:${wcm.toFixed(1)}cm;height:${hcm.toFixed(1)}cm;display:block;margin:6px auto;border:1px solid #999`);
         node.replaceWith(img);
-      }catch(err){ console.warn("[ELWIS] Word-Rasterisierung übersprungen:", err && err.message); }
+      }catch(err){ console.warn("[LOTSE112] Word-Rasterisierung übersprungen:", err && err.message); }
     }
     // Fotos: Word ignoriert CSS → feste px-Größe (~8 cm breit, Seitenverhältnis erhalten), sonst riesig.
     await warteAufBilder(host);
@@ -7328,18 +7408,18 @@ async function exportWord(data, sel){
   const pEnde = e.ende || data.ende;
   let body = reportBodyHtml(data, sel, { word:true });
   try{ body = await wordBodyMitGrafik(body); }
-  catch(err){ console.warn("[ELWIS] Word-Grafik fehlgeschlagen, nutze HTML:", err && err.message); }
+  catch(err){ console.warn("[LOTSE112] Word-Grafik fehlgeschlagen, nutze HTML:", err && err.message); }
   const titel = (e.stichwort || "Einsatzbericht") + (e.ort ? " – " + e.ort : "");
   const kopfText = `${esc(state.config.ugName)} · ${esc(e.stichwort) || "Einsatzbericht"}${pEnde ? "" : " · Zwischenstand"}`;
-  // Laufende Kopfzeile auf JEDER Seite (mso-header) – links Kontext, rechts der ELWIS-Kasten.
+  // Laufende Kopfzeile auf JEDER Seite (mso-header) – links Kontext, rechts der LOTSE112-Kasten.
   const header = `<div style='mso-element:header' id='eh1'>
     <table class="w-run"><tr>
       <td class="w-run-l">${kopfText}</td>
-      <td class="w-run-r"><span class="p-mark">ELWIS</span></td>
+      <td class="w-run-r"><span class="p-mark">LOTSE112</span></td>
     </tr></table></div>`;
   // Laufende Fußzeile mit Seitenzahl (auf jeder Seite, inkl. Seite 1).
   const footerInner = `<table class="w-run"><tr>
-      <td class="w-run-l">ELWIS – Einsatzbericht · ${esc(state.config.ugName)}</td>
+      <td class="w-run-l">LOTSE112 – Einsatzbericht · ${esc(state.config.ugName)} · ${DRUCK_HINWEIS}</td>
       <td class="w-run-r">Seite ${msoField("PAGE")} von ${msoField("NUMPAGES")}</td>
     </tr></table>`;
   const footer = `<div style='mso-element:footer' id='ef1'>${footerInner}</div>`;
@@ -7390,7 +7470,7 @@ const WORD_STYLE = `
   body{font-family:"Segoe UI",Calibri,Arial,sans-serif;color:#000;font-size:9pt;line-height:1.25}
   p{margin:0 0 4pt}
   .p-run-src{display:none}
-  /* Titelkopf oben auf Seite 1 (Tabelle → ELWIS-Kasten sitzt zuverlässig oben rechts). */
+  /* Titelkopf oben auf Seite 1 (Tabelle → LOTSE112-Kasten sitzt zuverlässig oben rechts). */
   .p-headw{width:100%;border-collapse:collapse;border-bottom:2pt solid #000;margin-bottom:10pt}
   .p-headw td{border:none;padding:0 0 6pt;vertical-align:top}
   .p-headw-l h1{font-size:16pt;margin:1pt 0}
@@ -7505,7 +7585,7 @@ function render(){
     else if(state.view === "lagekarte"){ main.innerHTML = renderLagekarte(); wireLagekarte(); }
     else { main.innerHTML = renderMonitor(); wireMonitor(); }
   }catch(e){
-    console.error("[ELWIS] Render-Fehler in Ansicht '" + state.view + "':", e);
+    console.error("[LOTSE112] Render-Fehler in Ansicht '" + state.view + "':", e);
     main.innerHTML = `<div class="card"><h2>Anzeige-Fehler</h2>
       <p>Diese Ansicht konnte nicht aufgebaut werden. Deine Daten sind gesichert – wechsle die Ansicht oder lade neu.</p>
       <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:8px">
@@ -7550,9 +7630,9 @@ function zeigeFehlerBanner(){
 }
 window.addEventListener("error", e => {
   if(e && e.target && e.target !== window && e.target.tagName) return;   // Ressourcen-Ladefehler (Bild o. Ä.) ignorieren
-  console.error("[ELWIS] Laufzeitfehler:", e.error || e.message); zeigeFehlerBanner();
+  console.error("[LOTSE112] Laufzeitfehler:", e.error || e.message); zeigeFehlerBanner();
 });
-window.addEventListener("unhandledrejection", e => { console.error("[ELWIS] Unbehandelte Promise-Ablehnung:", e.reason); zeigeFehlerBanner(); });
+window.addEventListener("unhandledrejection", e => { console.error("[LOTSE112] Unbehandelte Promise-Ablehnung:", e.reason); zeigeFehlerBanner(); });
 // Nach Vollbild-Wechsel die (Snapshot-/Vergleichs-)Karten neu vermessen
 document.addEventListener("fullscreenchange", () => {
   setTimeout(() => { [lgSnapObj, lgCmpA, lgCmpB].forEach(m => { if(m){ try{ m.invalidateSize(); }catch(e){} } }); }, 150);
@@ -7582,7 +7662,7 @@ if("serviceWorker" in navigator){
 }
 
 /* ================================================================
-   Echter Sync mit dem ELW-Server (server/elwis-server.mjs)
+   Echter Sync mit dem ELW-Server (server/lotse112-server.mjs)
    ----------------------------------------------------------------
    Läuft die App vom ELW-Server (gleiche Adresse), wird der Sync
    automatisch aktiv: alle 3 s werden lokale Änderungen gepusht und
@@ -7751,7 +7831,7 @@ function syncPill(){
   }
   const fn = $("#footNote");
   if(fn && SYNC.urls.length){
-    fn.textContent = "ELWIS-Sync aktiv · Tablets im gleichen WLAN verbinden über: " + SYNC.urls.join("  ·  ");
+    fn.textContent = "LOTSE112-Sync aktiv · Tablets im gleichen WLAN verbinden über: " + SYNC.urls.join("  ·  ");
   }
 }
 const _origRenderHeader = renderHeader;

@@ -1,4 +1,4 @@
-# ELWIS – ELW-Informationssystem
+# LOTSE112 – Einsatzleitung
 
 Kräfteerfassung, Lagekarte, Funktagebuch, Lagebesprechungen, Checklisten und
 Einsatzmonitor für die Einsatzstelle – als offline-fähige Web-App (PWA).
@@ -56,10 +56,10 @@ Der Server zeigt beim Start die WLAN-Adresse an (z. B. `http://192.168.178.20:84
 
 ## Architektur
 
-- Astro (statisch) – alle Daten liegen lokal im Browser (localStorage);
+- Astro (statisch) – alle Daten liegen lokal im Browser (IndexedDB);
   GitHub Pages dient für Installation/Updates, im Einsatz liefert der ELW-Server die App aus
 - PWA: Service Worker (`public/sw.js`) macht die App nach dem ersten Besuch offline nutzbar
 - Der klickbare Prototyp (Design-Vorlage/Spezifikation) liegt unter `prototyp/prototyp.html`
 - Planung, Architektur-Entscheidungen und Roadmap: `PLANUNG.md`
 
-Geplant: QR-Code am Monitor für die Tablet-Kopplung, IndexedDB-Datenschicht – siehe PLANUNG.md.
+Geplant: QR-Code am Monitor für die Tablet-Kopplung – siehe PLANUNG.md.

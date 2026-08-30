@@ -1,4 +1,4 @@
-<title>ELWIS – Kräfteerfassung (Prototyp)</title>
+<title>LOTSE112 – Kräfteerfassung (Prototyp)</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23D93A32'/%3E%3Cg stroke='white' stroke-width='5' stroke-linecap='round' fill='none'%3E%3Cpath d='M32 28v22M21 50h22'/%3E%3Cpath d='M20.5 12a16 16 0 0 0 0 20M43.5 12a16 16 0 0 1 0 20'/%3E%3C/g%3E%3Ccircle cx='32' cy='21' r='5.5' fill='white'/%3E%3C/svg%3E">
 <style>
   :root{
@@ -160,6 +160,7 @@
   .brand h1{font-size:1rem;font-weight:800;margin:0;line-height:1.2;white-space:nowrap;letter-spacing:.02em}
   .n-elw{color:var(--accent)}
   .n-is{color:var(--ink)} /* „weiß“ auf dunklen Flächen, dunkel im Hellmodus – sonst unsichtbar */
+  .brand .claim{font-size:.72rem;font-weight:700;color:var(--accent);letter-spacing:.08em;text-transform:uppercase;line-height:1.2}
   .brand .sub{font-size:.72rem;color:var(--ink3);letter-spacing:.06em;text-transform:uppercase}
   .topbar-right{margin-left:auto;display:flex;align-items:center;gap:8px}
   .iconbtn{width:44px;height:44px;border-radius:10px;display:grid;place-items:center;color:var(--ink2)}
@@ -729,8 +730,8 @@
       <circle cx="32" cy="21" r="5.5" fill="#fff" stroke="none"/>
     </svg>
   </div>
-  <h1><span class="p-elw">ELW</span><span class="p-is">IS</span></h1>
-  <div class="tag">ELW-Informationssystem</div>
+  <h1><span class="p-elw">LOTSE</span><span class="p-is">112</span></h1>
+  <div class="tag">Einsatzleitung</div>
   <div class="ug" id="splashUg">UG-Weiden</div>
   <div class="load" aria-hidden="true"><i></i></div>
   <div class="skip">Tippen zum Überspringen</div>
@@ -746,7 +747,8 @@
         </svg>
       </div>
       <div>
-        <h1><span class="n-elw">ELW</span><span class="n-is">IS</span></h1>
+        <h1><span class="n-elw">LOTSE</span><span class="n-is">112</span></h1>
+        <div class="claim">Einsatzleitung</div>
         <div class="sub" id="appSub">UG-Weiden</div>
       </div>
     </div>
@@ -1236,7 +1238,7 @@ function exportEinsatz(){
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
   const stw = (state.einsatz.stichwort || "einsatz").replace(/[^\wäöüÄÖÜß-]+/g, "_").slice(0, 40);
-  a.download = `ELWIS_${stw}_${fmtDateInput(new Date().toISOString())}.json`;
+  a.download = `LOTSE112_${stw}_${fmtDateInput(new Date().toISOString())}.json`;
   document.body.appendChild(a); a.click(); a.remove();
   URL.revokeObjectURL(a.href);
 }
@@ -1245,7 +1247,7 @@ function importEinsatz(file){
   rd.onload = () => {
     try{
       const d = JSON.parse(rd.result);
-      if(!d || d.elwis !== 1 || !d.einsatz) throw new Error("kein ELWIS-Export");
+      if(!d || d.elwis !== 1 || !d.einsatz) throw new Error("kein LOTSE112-Export");
       const wer = [d.einsatz.stichwort || "ohne Stichwort", d.ugName ? `(${d.ugName})` : "",
         d.exportiert ? `– exportiert ${fmtDatum(d.exportiert)} ${fmtZeit(d.exportiert)} Uhr` : ""].join(" ");
       if(!confirm(`Einsatz „${wer}“ importieren?\nDer aktuell erfasste Einsatz wird ersetzt (Archiv und Einstellungen bleiben).`)) return;
@@ -1267,7 +1269,7 @@ function importEinsatz(file){
       }
       render();
     }catch(err){
-      alert("Datei konnte nicht gelesen werden – ist das ein ELWIS-Export (.json)?");
+      alert("Datei konnte nicht gelesen werden – ist das ein LOTSE112-Export (.json)?");
     }
   };
   rd.readAsText(file);
@@ -1939,7 +1941,7 @@ function doPrintFunk(){
         <h1>${esc(e.stichwort) || "Ohne Stichwort"}</h1>
         <div>${esc(e.ort)}${e.beginn ? " · Alarm " + fmtDatum(e.beginn) + " " + fmtZeit(e.beginn) + " Uhr" : ""}</div>
       </div>
-      <div class="p-mark">ELWIS</div>
+      <div class="p-mark">LOTSE112</div>
     </div>
     <table><thead><tr><th>Nr.</th><th>Zeit</th><th>Von</th><th>An</th><th>Inhalt</th></tr></thead><tbody>
       ${sorted.map((f,idx) => `
@@ -1955,7 +1957,7 @@ function doPrintFunk(){
       <div class="p-sign">Ort, Datum</div>
       <div class="p-sign">Unterschrift</div>
     </div>
-    <p style="font-size:8pt;color:#666;margin-top:16px">Gedruckt am ${new Date().toLocaleString("de-DE")} · ELWIS – Kräfteerfassung (Prototyp) · ${esc(state.config.ugName)}</p>`;
+    <p style="font-size:8pt;color:#666;margin-top:16px">Gedruckt am ${new Date().toLocaleString("de-DE")} · LOTSE112 – Kräfteerfassung (Prototyp) · ${esc(state.config.ugName)}</p>`;
   window.print();
 }
 function openFsEditor(id){
@@ -2380,7 +2382,7 @@ function renderMonitor(){
     <div class="monitor">
       <div class="mon-head">
         <div>
-          <div class="eyebrow"><span style="color:var(--accent)">ELW</span><span style="color:var(--ink)">IS</span> · ${esc(state.config.ugName)} · Kräfteübersicht</div>
+          <div class="eyebrow"><span style="color:var(--accent)">LOTSE</span><span style="color:var(--ink)">112</span> · ${esc(state.config.ugName)} · Kräfteübersicht</div>
           <h2>${esc(e.stichwort) || "Kein Einsatz angelegt"}</h2>
           <div class="ort">${esc(e.ort)}${e.leiter ? " · EL: " + esc(e.leiter) : ""}</div>
         </div>
@@ -3294,7 +3296,7 @@ function doPrint(data){
         <h1>${esc(e.stichwort) || "Ohne Stichwort"}</h1>
         <div>${esc(e.ort)}</div>
       </div>
-      <div class="p-mark">ELWIS</div>
+      <div class="p-mark">LOTSE112</div>
     </div>
     <table class="meta">
       <tr><td>Alarmzeit</td><td>${e.beginn ? fmtDatum(e.beginn)+" "+fmtZeit(e.beginn)+" Uhr" : "–"}</td></tr>
@@ -3384,7 +3386,7 @@ function doPrint(data){
       <div class="p-sign">Ort, Datum</div>
       <div class="p-sign">Unterschrift Einsatzleiter</div>
     </div>
-    <p style="font-size:8pt;color:#666;margin-top:16px">Gedruckt am ${new Date().toLocaleString("de-DE")} · ELWIS – Kräfteerfassung (Prototyp) · ${esc(state.config.ugName)}</p>`;
+    <p style="font-size:8pt;color:#666;margin-top:16px">Gedruckt am ${new Date().toLocaleString("de-DE")} · LOTSE112 – Kräfteerfassung (Prototyp) · ${esc(state.config.ugName)}</p>`;
   window.print();
 }
 

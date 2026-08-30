@@ -13,7 +13,7 @@ import { fileURLToPath } from 'node:url';
  */
 function manifestIntegration() {
   return {
-    name: 'elwis-manifest',
+    name: 'lotse112-manifest',
     hooks: {
       'astro:build:done': ({ dir }) => {
         const distDir = fileURLToPath(dir);
@@ -41,14 +41,14 @@ function manifestIntegration() {
 
         const manifest = { version, erstellt: new Date().toISOString(), dateien };
         writeFileSync(path.join(distDir, 'manifest.json'), JSON.stringify(manifest));
-        console.log(`[elwis-manifest] ${dateien.length} Dateien, Version ${version}`);
+        console.log(`[lotse112-manifest] ${dateien.length} Dateien, Version ${version}`);
       },
     },
   };
 }
 
 /**
- * ELWIS liegt auf GitHub Pages unter https://schelltom.github.io/elwis/.
+ * LOTSE112 liegt auf GitHub Pages unter https://schelltom.github.io/elwis/.
  * `base` sorgt dafür, dass alle Pfade unter dem Unterordner funktionieren –
  * in der App selbst werden deshalb nur relative Pfade ("./app.js") verwendet.
  */

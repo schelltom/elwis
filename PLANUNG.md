@@ -1,7 +1,7 @@
-# „ELWIS“ – Kräfteerfassung Einsatzstelle – Planung
+# „LOTSE112“ – Kräfteerfassung Einsatzstelle – Planung
 
-Arbeitstitel/Produktname: **ELWIS** – das ELW-Informationssystem
-Frühere Ideen „Status 4“, „KLAR“ und „KOMPASS“ wurden verworfen. Namenskonflikt prüfen: „ELWIS“ ist auch der Wasserstraßen-Infodienst des Bundes.
+Arbeitstitel/Produktname: **LOTSE112** – Einsatzleitung (Führungsunterstützung am ELW)
+Frühere Namen „Status 4“, „KLAR“, „KOMPASS“ und „ELWIS“ wurden verworfen („ELWIS“ ist der Wasserstraßen-Infodienst des Bundes). Aktueller Name: **LOTSE112** mit Claim „Einsatzleitung“ (Schwester-App für die Gerätewartung: **LOTSE112 – Geräte**).
 
 Tool zur Erfassung der Einsatzkräfte (Feuerwehr, BRK, Polizei, THW, Sonstige) an einer
 Einsatzstelle. Ein Erfasser geht mit dem Tablet **offline** von Fahrzeug zu Fahrzeug,
@@ -56,7 +56,8 @@ aktuellen Stand.
   (Browser-Druck/PDF): Stammdaten, Führungskräfte, Einheiten, Nachforderungen, Checklisten,
   Lagebesprechungen, Funksprüche, **Lagekarte als Grafik mit Legende, alle Lagebild-Snapshots,
   Fotodokumentation**, Summen und Unterschriftszeilen; Archiv speichert Karte + Fotos mit
-  (mit Speicher-Fallback: bei vollem localStorage werden Bilder im Archiv weggelassen)
+  (Daten inkl. Archiv liegen in IndexedDB; ein Speicher-Wachhund warnt sichtbar, bevor der
+  Browser-Speicher knapp wird – statt Bilder still zu verwerfen)
 - **Konfigurierbar/mandantenfähig (verkaufbar):** Name der Einheit (z. B. „UG-Weiden“) und
   Funkrufnamen-Präfixe je Organisation (FW „Florian“, BRK „RK“, POL „Donau“, THW „Heros“)
   in den Einstellungen änderbar
@@ -82,10 +83,10 @@ aktuellen Stand.
 
 ### Sync (der einzige Punkt, den GitHub Pages nicht kann)
 
-**Umgesetzt (v1, 20.07.2026):** `server/elwis-server.mjs` (null Abhängigkeiten, `npm run server`,
+**Umgesetzt (v1, 20.07.2026):** `server/lotse112-server.mjs` (null Abhängigkeiten, `npm run server`,
 Port 8474) liefert die App im WLAN aus und führt Änderungen aller Geräte zusammen
 (LWW je Datensatz per `_m`-Zeitstempel, Tombstones für Löschungen, Diff-basierte Erkennung
-in der App gegen einen Sync-Snapshot in localStorage, Poll alle 3 s, kompakte Antwort bei
+in der App gegen einen Sync-Snapshot (im Speicher gehalten, in IndexedDB gespiegelt), Poll alle 3 s, kompakte Antwort bei
 unverändertem Stand). Kopplung v1 = Tablets öffnen die angezeigte Server-URL (QR folgt).
 Neuer Einsatz (`einsatzId` + `einsatzStart`) ersetzt serverseitig den alten.
 
@@ -109,7 +110,7 @@ unterwegs, Rückkehr ins gleiche WLAN“.
   Stand 20.07.2026):** Ohne Treffpunkt im Internet nicht möglich (getrennte Netze, LTE-NAT).
   1. **Tailscale-VPN (Favorit):** beide Geräte im Overlay-Netz, vorhandener Server
      funktioniert unverändert über die Tailscale-Adresse; ~1 h Aufwand, kostenlos, E2E.
-  2. **ELWIS-Server auf Mini-VPS** (https + Zugangs-Token nötig, ~½ Tag Entwicklung).
+  2. **LOTSE112-Server auf Mini-VPS** (https + Zugangs-Token nötig, ~½ Tag Entwicklung).
   3. **Supabase-Adapter** (~1–2 Tage) – der richtige Weg fürs Verkaufsprodukt.
 - PouchDB/CouchDB bleibt als Alternative notiert, ist für 2 Geräte aber überdimensioniert.
 

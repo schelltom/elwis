@@ -1,6 +1,6 @@
 {
-  "name": "ELWIS – ELW-Informationssystem",
-  "short_name": "ELWIS",
+  "name": "LOTSE112 – Einsatzleitung",
+  "short_name": "LOTSE112",
   "description": "Kräfteerfassung, Lagekarte, Funktagebuch und Einsatzmonitor für die Einsatzstelle – offline-fähig.",
   "start_url": "./",
   "scope": "./",
