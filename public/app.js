@@ -4506,11 +4506,10 @@ function rotateAbschnitte(){
   }
 }
 // Spalten nach Auflösung: große Fläche → 3 Abschnitte, sonst 2 (klein 1). Mehr als 3 passen nicht auf einen Screen.
+// Kräfteübersicht (Stärke/FK) ist eine eigene Seite, keine Seitenleiste mehr – Abschnitte kriegen die volle Breite.
 function monAbColumns(){
-  const hp = state.monHide.panels;
-  const leftShown = (!hp.org || !hp.fk);   // linke Spalte (Stärke/FK) sichtbar → Kachelfläche schmaler
   const w = window.innerWidth || 1280;
-  const gridW = (leftShown ? w * 0.78 : w) - 40;
+  const gridW = w - 40;
   return gridW >= 1080 ? 3 : gridW >= 640 ? 2 : 1;
 }
 // Eine Reihe je Seite: so viele Kacheln wie Spalten (2 bzw. 3), Rest rotiert.
@@ -4618,18 +4617,22 @@ function renderMonitor(){
   const abCols = monAbColumns();
   const abPageList = monAbPages();
   const abPages = abPageList.length;
-  const specials = monSpecialPages();
-  const totalPages = abPages + specials.length;
+  const preSpecials = monPreSpecialPages();   // vor den Abschnitten (Kräfteübersicht)
+  const specials = monSpecialPages();          // nach den Abschnitten (Lagekarte/Skizze/…)
+  const totalPages = preSpecials.length + abPages + specials.length;
   if(monAbPage >= totalPages) monAbPage = 0;
-  const specialKey = monAbPage >= abPages ? specials[monAbPage - abPages] : null;
+  const specialKey = monAbPage < preSpecials.length ? preSpecials[monAbPage]
+    : monAbPage >= preSpecials.length + abPages ? specials[monAbPage - preSpecials.length - abPages] : null;
+  const isStaerkePage = specialKey === "staerke";
   const isLagePage = specialKey === "karte";
   const isSkizzePage = specialKey === "skizze";
   const isFunkPage = specialKey === "funkchecks";
   const isAsPage = specialKey === "as";
-  const pg = (!specialKey && abPageList[monAbPage]) ? abPageList[monAbPage] : { start:0, count:0 };
+  const abIdx = monAbPage - preSpecials.length;
+  const pg = (!specialKey && abPageList[abIdx]) ? abPageList[abIdx] : { start:0, count:0 };
   const visible = specialKey ? [] : cardsData.slice(pg.start, pg.start + pg.count);
   const abCards = visible.map(c => abCard(c.title, c.units, c.opts)).join("");
-  const pagerLabel = isLagePage ? "Lagekarte" : isSkizzePage ? "Komm-Skizze"
+  const pagerLabel = isStaerkePage ? "Kräfteübersicht" : isLagePage ? "Lagekarte" : isSkizzePage ? "Komm-Skizze"
     : isFunkPage ? "ETB & Checklisten" : isAsPage ? "Atemschutz-Trupps"
     : `${pg.start+1}–${pg.start+pg.count} von ${cardsData.length}`;
   const abPager = totalPages > 1 ? `
@@ -4665,10 +4668,12 @@ function renderMonitor(){
           <h2>${esc(e.stichwort) || "Kein Einsatz angelegt"}</h2>
           <div class="ort">${esc(e.ort)}</div>
           ${e.leiter ? `<div class="mon-el">EL: ${esc(e.leiter)}</div>` : ""}
+          ${(!e.bereitstellung && (e.bereitstellungsraum||"").trim()) ? `<div class="mon-vr">Verfügungsraum <strong>${esc(e.bereitstellungsraum.trim())}</strong></div>` : ""}
         </div>
         <div class="mon-clockbox">
           <div class="mon-clock mono" id="monClock">--:--</div>
           <div class="mon-dauer" id="monDauer"></div>
+          ${e.lagebespr ? `<div class="mon-lb">Nächste Lage <strong class="mono">${esc(e.lagebespr)}</strong> <span id="monLbRel"></span></div>` : ""}
         </div>
         <div class="mon-headctrl">
           <button class="btn btn-ghost" id="btnMonHide">Kacheln</button>
@@ -4676,22 +4681,27 @@ function renderMonitor(){
         </div>
       </div>
       ${abPager ? `<div class="mon-abctrl">${abPager}</div>` : ""}
-      <div class="kpis-compact">
-        <div class="kpic accent"><span class="k">Gesamtstärke</span><span class="v mono">${s.f+s.u+s.m+state.fuehrung.length}</span><span class="s mono">${s.f+state.fuehrung.length}/${s.u}/${s.m}</span></div>
-        ${gesKraefte ? (() => { const pct = Math.round(bestKraefte/gesKraefte*100);
-          const ampel = pct <= 40 ? "ist-rot" : pct <= 70 ? "ist-gelb" : "ist-gruen";
-          return `<div class="kpic ${bestKraefte < gesKraefte ? "warn" : ""} ${ampel}"><span class="k">Ist-Stärke bestätigt</span><span class="v mono">${bestKraefte}/${gesKraefte}</span><span class="kpi-bar"><i style="width:${pct}%"></i></span></div>`; })() : ""}
-        <div class="kpic"><span class="k">Führungskräfte</span><span class="v mono">${state.fuehrung.length}</span></div>
-        <div class="kpic"><span class="k">AGT</span><span class="v mono">${s.agt}</span></div>
-        <div class="kpic"><span class="k">CSA</span><span class="v mono">${s.csa}</span></div>
-        <div class="kpi-break"></div>
-        ${state.anforderungen.some(a => a.status !== "eingetroffen") ? `<div class="kpic warn"><span class="k">Anrollend</span><span class="v mono">${state.anforderungen.filter(a => a.status !== "eingetroffen").length}</span><span class="s">nachgefordert</span></div>` : ""}
-        ${brUnits.length ? `<div class="kpic"><span class="k">Bereitstellung</span><span class="v mono">${brUnits.length}</span><span class="s">Einheiten</span></div>` : ""}
-        <div class="kpic"><span class="k">Abgerückt</span><span class="v mono">${state.einheiten.length - act.length}</span><span class="s">Einheiten</span></div>
-        ${e.lagebespr ? `<div class="kpic warn"><span class="k">Nächste Lagebespr.</span><span class="v mono">${esc(e.lagebespr)}</span><span class="s" id="monLbRel"></span></div>` : ""}
-        ${(!e.bereitstellung && (e.bereitstellungsraum||"").trim()) ? `<div class="kpic vr"><span class="k">Verfügungsraum</span><span class="v vr-val">${esc(e.bereitstellungsraum.trim())}</span></div>` : ""}
-      </div>
-      ${isLagePage ? (() => {
+      ${isStaerkePage ? `
+      <div class="mon-grid" style="grid-template-columns:1fr 1fr">
+        <div class="panel" style="grid-column:1/-1">
+          <div class="panel-head"><h3>Kräfteübersicht</h3></div>
+          <div class="kpis-compact">
+            <div class="kpic accent"><span class="k">Gesamtstärke</span><span class="v mono">${s.f+s.u+s.m+state.fuehrung.length}</span><span class="s mono">${s.f+state.fuehrung.length}/${s.u}/${s.m}</span></div>
+            ${gesKraefte ? (() => { const pct = Math.round(bestKraefte/gesKraefte*100);
+              const ampel = pct <= 40 ? "ist-rot" : pct <= 70 ? "ist-gelb" : "ist-gruen";
+              return `<div class="kpic ${bestKraefte < gesKraefte ? "warn" : ""} ${ampel}"><span class="k">Ist-Stärke bestätigt</span><span class="v mono">${bestKraefte}/${gesKraefte}</span><span class="kpi-bar"><i style="width:${pct}%"></i></span></div>`; })() : ""}
+            <div class="kpic"><span class="k">Führungskräfte</span><span class="v mono">${state.fuehrung.length}</span></div>
+            <div class="kpic"><span class="k">AGT</span><span class="v mono">${s.agt}</span></div>
+            <div class="kpic"><span class="k">CSA</span><span class="v mono">${s.csa}</span></div>
+            <div class="kpi-break"></div>
+            ${state.anforderungen.some(a => a.status !== "eingetroffen") ? `<div class="kpic warn"><span class="k">Anrollend</span><span class="v mono">${state.anforderungen.filter(a => a.status !== "eingetroffen").length}</span><span class="s">nachgefordert</span></div>` : ""}
+            ${brUnits.length ? `<div class="kpic"><span class="k">Bereitstellung</span><span class="v mono">${brUnits.length}</span><span class="s">Einheiten</span></div>` : ""}
+            <div class="kpic"><span class="k">Abgerückt</span><span class="v mono">${state.einheiten.length - act.length}</span><span class="s">Einheiten</span></div>
+          </div>
+        </div>
+        <div class="panel"><h3>Stärke nach Organisation</h3>${orgRows}</div>
+        <div class="panel"><h3>Führungskräfte</h3>${fkRows || `<p class="hint">Noch keine erfasst.</p>`}</div>
+      </div>` : isLagePage ? (() => {
         const nums = state.lage.items.filter(i => i.type === "num").sort((a,b) => a.num - b.num);
         const gefahren = state.lage.items.filter(i => i.type === "gefahr").sort((a,b) => (a.num||0)-(b.num||0));
         const forms = state.lage.items.filter(i => i.type === "form");
@@ -4724,15 +4734,15 @@ function renderMonitor(){
         const legendRight = carItems ? `<div class="lg-legend"><div class="lg-leg-body"><div class="lg-leg-sec"><h3>Fahrzeuge</h3>${carItems}</div></div></div>` : "";
         const cols = carItems ? "260px minmax(0,1fr) 260px" : "260px minmax(0,1fr)";
         return `
-      <div class="mon-grid">
-        <div class="panel mon-lg-panel" style="grid-column:1/-1;display:grid;grid-template-columns:${cols};gap:16px;align-items:start">
+      <div class="mon-grid mon-fill">
+        <div class="panel mon-lg-panel" style="grid-column:1/-1;display:grid;grid-template-columns:${cols};gap:16px;align-items:stretch;height:100%">
           ${legendLeft}
-          <div style="min-width:0">
+          <div style="min-width:0;display:flex;flex-direction:column;height:100%">
             <div class="panel-head"><h3>Lagekarte</h3>
               <button class="ab-jump" id="monLgEdit" style="margin-left:10px">Karte bearbeiten</button></div>
             ${state.lage.mode === "karte" ? `
-            <div class="lg-wrap" style="overflow:hidden"><div id="lgMonMap" style="width:100%;height:100%"></div></div>` : `
-            <div class="lg-wrap" style="pointer-events:none;overflow:hidden">
+            <div class="lg-wrap" style="overflow:hidden;aspect-ratio:auto;flex:1;min-height:0"><div id="lgMonMap" style="width:100%;height:100%"></div></div>` : `
+            <div class="lg-wrap" style="pointer-events:none;overflow:hidden;aspect-ratio:auto;flex:1;min-height:0">
               <div class="lg-canvas ${state.lage.bg ? "hasbg" : ""}" ${state.lage.bg ? `style="background-image:url('${state.lage.bg}')"` : ""}>
                 ${lgShapesSvg(state.lage.items, null)}
                 ${state.lage.items.filter(i => i.x != null).map(lgMarkerHtml).join("")}
@@ -4743,11 +4753,13 @@ function renderMonitor(){
         </div>
       </div>`;
       })() : isSkizzePage ? `
-      <div class="mon-grid" style="grid-template-columns:1fr">
-        <div class="panel">
+      <div class="mon-grid mon-fill" style="grid-template-columns:1fr">
+        <div class="panel" style="display:flex;flex-direction:column;height:100%">
           <div class="panel-head"><h3>Komm-Skizze</h3>
             <button class="ab-jump" id="monSkEdit" style="margin-left:10px">Öffnen</button></div>
-          ${renderFunkskizze()}
+          <div style="flex:1;min-height:0;display:flex;flex-direction:column;justify-content:center;overflow:auto">
+            ${renderFunkskizze()}
+          </div>
         </div>
       </div>`
       : isFunkPage ? (() => {
@@ -4812,21 +4824,13 @@ function renderMonitor(){
           </div></div>
       </div>`;
       })()
-      : (() => {
-        const hp = state.monHide.panels;
-        const leftPanels = [
-          !hp.org ? `<div class="panel"><h3>Stärke nach Organisation</h3>${orgRows}</div>` : "",
-          !hp.fk ? `<div class="panel"><h3>Führungskräfte</h3>${fkRows || `<p class="hint">Noch keine erfasst.</p>`}</div>` : "",
-        ].join("");
-        return `
-      <div class="mon-grid" ${leftPanels ? "" : `style="grid-template-columns:1fr"`}>
-        ${leftPanels ? `<div class="mon-col">${leftPanels}</div>` : ""}
+      : `
+      <div class="mon-grid" style="grid-template-columns:1fr">
         <div class="panel">
           <div class="panel-head"><h3>Einsatzabschnitte</h3></div>
           <div class="ab-grid" id="monAbGrid" style="grid-template-columns:repeat(${abCols},minmax(0,1fr))">${abCards}</div>
         </div>
-      </div>`;
-      })()}
+      </div>`}
     </div>
   </div>`;
 }
@@ -4860,7 +4864,8 @@ function monCardsData(){
   return cards;
 }
 /* Sonderseiten des Monitors (Lagekarte, Komm-Skizze, Funk & Checklisten, Atemschutz)
-   – als eigene durchschaltbare Seiten in der Rotation, über den Kacheln-Dialog abschaltbar */
+   – als eigene durchschaltbare Seiten in der Rotation, über den Kacheln-Dialog abschaltbar.
+   Kommen NACH den Abschnitts-Kacheln. */
 function monSpecialPages(){
   const hp = state.monHide.panels;
   const s = [];
@@ -4870,8 +4875,13 @@ function monSpecialPages(){
   if(!hp.as && state.asTrupps.length) s.push("as");
   return s;
 }
+/* Kräfteübersicht (Gesamtstärke/Ist-Stärke/Stärke nach Organisation/Führungskräfte) läuft als
+   Dashboard VOR den Abschnitts-Kacheln – deshalb eigene Liste statt in monSpecialPages(). */
+function monPreSpecialPages(){
+  return state.monHide.panels.staerke ? [] : ["staerke"];
+}
 function monAbPagesCount(){
-  return monAbPages().length + monSpecialPages().length;
+  return monPreSpecialPages().length + monAbPages().length + monSpecialPages().length;
 }
 function openMonHideSheet(){
   const hp = state.monHide.panels, ha = state.monHide.ab;
@@ -4893,11 +4903,8 @@ function openMonHideSheet(){
       <button class="sheet-close" data-close="1" aria-label="Schließen">×</button>
     </div>
     <div class="sheet-body">
-      <div class="field"><label>Info-Kacheln (Kräfteseite)</label>
-        ${row("Stärke nach Organisation", hp.org, "p:org")}
-        ${row("Führungskräfte", hp.fk, "p:fk")}
-      </div>
       <div class="field"><label>Rotierende Seiten</label>
+        ${row("Kräfteübersicht", hp.staerke, "p:staerke")}
         ${row("Lagekarte", hp.karte, "p:karte")}
         ${row("Komm-Skizze", hp.skizze, "p:skizze")}
         ${row("ETB & Checklisten", hp.funkchecks, "p:funkchecks")}
@@ -4945,9 +4952,10 @@ function wireMonitor(){
   if(next) next.addEventListener("click", () => step(1));
   const jump = $("#monAbKarte");
   if(jump) jump.addEventListener("click", () => {
+    const preSpecials = monPreSpecialPages();
     const specials = monSpecialPages();
-    const abPages = monAbPagesCount() - specials.length;
-    const lagePage = abPages + specials.indexOf("karte");
+    const abPages = monAbPagesCount() - preSpecials.length - specials.length;
+    const lagePage = preSpecials.length + abPages + specials.indexOf("karte");
     monAbPage = (monAbPage === lagePage) ? 0 : lagePage;
     monAbLast = Date.now();
     render();
@@ -5292,16 +5300,17 @@ function renderLagekarte(){
       <button id="lgPzoomIn" aria-label="Hineinzoomen">＋</button>
       <button id="lgPexit" aria-label="Präsentation beenden">✕</button>
     </div>` : ""}
-    <h2>Lagekarte – taktische Skizze</h2>
     <div class="lg-headrow">
+      <h2>Lagekarte – taktische Skizze</h2>
+      ${state.lage.mode !== "karte" ? `
       <div class="lg-zoom" role="group" aria-label="Zoom">
         <button id="lgZoomOut" aria-label="Herauszoomen">−</button>
         <span class="z-val mono">${Math.round(lgZoom*100)} %</span>
         <button id="lgZoomIn" aria-label="Hineinzoomen">＋</button>
-      </div>
-      <button class="btn btn-ghost" id="lgSnapBtn" style="margin-right:8px">Snapshot einfrieren</button>
-      <button class="btn btn-ghost" id="lgBigBtn" style="margin-right:8px">${lgBig ? "Legende einblenden" : "Legende ausblenden"}</button>
-      <button class="btn btn-ghost" id="lgPresentBtn" style="margin-right:8px">Präsentation / Vollbild</button>
+      </div>` : ""}
+      <button class="btn btn-ghost" id="lgSnapBtn">Snapshot einfrieren</button>
+      <button class="btn btn-ghost" id="lgBigBtn">${lgBig ? "Legende einblenden" : "Legende ausblenden"}</button>
+      <button class="btn btn-ghost" id="lgPresentBtn">Präsentation / Vollbild</button>
       <button class="btn btn-primary" id="lgToMonitor">Zum Monitor</button>
     </div>
     <div class="lg-modes">
@@ -5350,7 +5359,7 @@ function renderLagekarte(){
       </div>
       ${legShow ? legendRight : ""}
     </div>`}
-    <p class="hint">Symbol wählen und auf die Karte tippen · Symbole mit dem Finger verschieben · Antippen zum Beschriften oder Löschen · Nummern-Marker halten die Karte frei, der Text steht in der Legende.</p>
+    <p class="hint" title="Symbol wählen und auf die Karte tippen · Symbole mit dem Finger verschieben · Antippen zum Beschriften oder Löschen · Nummern-Marker halten die Karte frei, der Text steht in der Legende.">Symbol wählen &amp; auf die Karte tippen · Verschieben mit dem Finger · Antippen zum Beschriften/Löschen.</p>
     <div class="lg-bgrow">
       <button class="btn btn-ghost" id="lgLwBilanz">💧 Löschwasser-Bilanz</button>
       <button class="btn btn-ghost" id="lgPrint">Lagekarte drucken</button>
@@ -6149,6 +6158,7 @@ function lgMapClick(latlng){
     state.lage.items.push(it); const nid = it.id;
     lgTool = null; markChange(); render(); openLgShapeEdit(nid); return;
   }
+  if(!lgTool) return;                                      // Klick ohne aktives Werkzeug: nichts tun
   if(lgTool.startsWith("gefahrgut:")){                     // Absperr-Kreis + Ausbreitungskeil
     const [r, keil] = lgTool.slice(10).split(":").map(Number);
     const ll = [latlng.lat, latlng.lng];
@@ -6162,7 +6172,6 @@ function lgMapClick(latlng){
     if(keil > 0 && !hatWind) modalInfo("Kein Wind gesetzt – der Ausbreitungskeil zeigt vorläufig nach Osten. Windrichtung über die „＋ Wind\"-Fahne oben rechts auf der Karte setzen, dann im Keil auf „nach aktuellem Wind ausrichten\" tippen.");
     return;
   }
-  if(!lgTool) return;
   if(lgTool === "car"){
     const num = state.lage.items.filter(i => i.type==="car").reduce((m,i)=>Math.max(m,i.num||0),0)+1;
     const it = { id:uid(), type:"car", num, unitId:"", ll };
@@ -7557,12 +7566,30 @@ function openPrintDialog(data){
   });
 }
 
+/* Kurzer, selbst verschwindender Hinweis (z. B. Ansicht wegen zu schmalem Fenster gewechselt) –
+   bewusst kein Modal: der Wechsel soll erklärt, aber nicht durch einen Klick unterbrochen werden. */
+let khTimer = null;
+function zeigeKurzHinweis(text){
+  document.querySelectorAll(".kurzhinweis").forEach(el => el.remove());
+  const el = document.createElement("div");
+  el.className = "kurzhinweis";
+  el.textContent = text;
+  document.body.appendChild(el);
+  clearTimeout(khTimer);
+  khTimer = setTimeout(() => {
+    el.classList.add("raus");
+    setTimeout(() => el.remove(), 260);
+  }, 3200);
+}
+
 /* ---------------- Render-Hauptschleife ---------------- */
 function render(){
   lgMapTeardown();  // Leaflet-Karte vor dem Neuaufbau des DOM sauber entfernen
   // Auf kleinen Geräten sind Monitor/Lagekarte/Komm-Skizze nicht verfügbar
   if(!istGrossesGeraet() && (TABS.find(t => t.id === state.view) || {}).nurGross){
+    const weg = TABS.find(t => t.id === state.view);
     state.view = "kraefte";
+    zeigeKurzHinweis(`${weg ? weg.label : "Diese Ansicht"} braucht ein größeres Gerät (Tablet quer) – zu Kräfte gewechselt.`);
   }
   renderHeader();
   // Monitor-Vollbild: App-Menü/Topbar ausblenden, nur wenn der Monitor aktiv ist

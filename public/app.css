@@ -76,6 +76,16 @@
     flex:0 0 auto;border:1.5px solid currentColor;background:transparent;color:inherit;
     border-radius:8px;padding:5px 12px;font-weight:600;min-height:0;white-space:nowrap}
   .update-bar-zu:hover{background:color-mix(in srgb,currentColor 12%,transparent)}
+
+  /* Kurzhinweis: selbst verschwindender Toast (z. B. Ansichtswechsel wegen zu schmalem Fenster) */
+  .kurzhinweis{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);z-index:120;
+    max-width:min(420px,calc(100vw - 24px));padding:10px 16px;border-radius:12px;
+    background:var(--warn-bg);color:var(--warn);font-size:.85rem;font-weight:650;
+    text-align:center;box-shadow:var(--shadow);animation:kh-ein .2s ease-out}
+  .kurzhinweis.raus{animation:kh-raus .25s ease-in forwards}
+  @keyframes kh-ein{from{opacity:0;transform:translateX(-50%) translateY(8px)}to{opacity:1;transform:translateX(-50%) translateY(0)}}
+  @keyframes kh-raus{to{opacity:0;transform:translateX(-50%) translateY(8px)}}
+  @media (prefers-reduced-motion:reduce){.kurzhinweis,.kurzhinweis.raus{animation:none}}
   button{font:inherit;color:inherit;background:none;border:none;cursor:pointer;padding:0}
   button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible,a:focus-visible{
     outline:3px solid var(--thw);outline-offset:2px;border-radius:6px}
@@ -285,6 +295,9 @@
   .card h2{font-size:.8rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;
     color:var(--ink2);margin:0 0 14px}
   .hint{font-size:.8rem;color:var(--ink3);margin:4px 2px 0}
+  /* Lagekarte: Hinweiszeile bleibt einzeilig (Volltext im title-Tooltip) – zwei Zeilen
+     würden der Karte direkt darüber Höhe wegnehmen. */
+  .lg-card .hint{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin:6px 2px}
 
   .form-grid{display:grid;grid-template-columns:1fr;gap:0 16px}
   @media (min-width:640px){
@@ -461,6 +474,8 @@
   .mon-head h2{margin:2px 0 0;font-size:clamp(1.3rem,2.4vw,1.8rem);font-weight:800;line-height:1.15;text-wrap:balance}
   .mon-head .ort{color:var(--ink2);font-size:.95rem}
   .mon-head .mon-el{color:var(--ink3);font-size:.9rem;font-weight:600;margin-top:2px}
+  .mon-head .mon-vr{color:var(--warn);font-size:.85rem;font-weight:650;margin-top:2px}
+  .mon-head .mon-vr strong{color:var(--warn)}
   .mon-clockbox{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);text-align:center}
   .mon-clock{font-size:clamp(1.6rem,3vw,2.2rem);font-weight:800;line-height:1;font-variant-numeric:tabular-nums}
   .mon-dauer{color:var(--ink);font-size:clamp(1.6rem,3vw,2.2rem);font-weight:700;line-height:1;margin-top:4px}
@@ -485,10 +500,6 @@
   .mon-grid{display:grid;grid-template-columns:minmax(230px,.8fr) minmax(0,3.2fr);gap:12px}
   .mon-grid > *{min-width:0}
   @media (max-width:760px){.mon-grid{grid-template-columns:1fr}}
-  /* Verfügungsraum als KPI-Box (hinten in der Leiste, nur so breit wie der Text) */
-  .kpic.vr{border-color:color-mix(in oklab,var(--warn) 42%,var(--line));
-    background:color-mix(in oklab,var(--warn) 14%,var(--surface))}
-  .kpic.vr .k{color:var(--warn)}
 
   /* Abschnitts-Kacheln – breit genug, dass Fahrzeugname + AGT lesbar sind: max. 2 pro Reihe */
   .ab-grid{display:grid;grid-template-columns:1fr;gap:10px;align-items:start;min-width:0}
@@ -550,16 +561,23 @@
   }
   .panel{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin-bottom:0}
   .panel h3{font-size:.7rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--ink3);margin:0 0 8px}
-  .mon-col{display:flex;flex-direction:column;gap:10px}
 
-  .orgrow{display:grid;grid-template-columns:52px 1fr auto;gap:10px;align-items:center;padding:4px 0}
-  .orgrow .bar-wrap{height:12px;background:var(--surface2);border-radius:4px;overflow:hidden}
+  /* Flex statt festem Grid: passt die Zahlen (z. B. "7/12/59/78 · 14 Einh.") auf schmalen
+     Panels/Monitoren nie mitten im Text um (nowrap) – reicht der Platz nicht, rutscht das
+     ganze Zahlenfeld als Einheit in eine zweite Zeile, statt am Rand abgeschnitten zu werden. */
+  .orgrow{display:flex;flex-wrap:wrap;align-items:center;gap:4px 10px;padding:4px 0}
+  /* Feste Breite (statt nur am Text): FW/POL/THW/BRK sind unterschiedlich lang – ohne feste
+     Breite fängt der Balken je Zeile an anderer Stelle an, alles wirkt schief zueinander. */
+  .orgrow .chip{flex:none;width:40px;justify-content:center}
+  .orgrow .bar-wrap{flex:1 1 60px;min-width:40px;height:12px;background:var(--surface2);border-radius:4px;overflow:hidden}
   .orgrow .bar{height:100%;border-radius:4px;min-width:2px}
-  .orgrow .num{font-weight:750;font-size:1.05rem;min-width:88px;text-align:right}
+  .orgrow .num{flex:none;margin-left:auto;font-weight:750;font-size:1.05rem;text-align:right;white-space:nowrap}
   .orgrow .num small{color:var(--ink3);font-weight:600}
 
   .fkrow{display:flex;align-items:center;gap:10px;padding:4px 0;border-bottom:1px solid var(--line)}
   .fkrow:last-child{border-bottom:none}
+  /* Feste Chip-Breite wie bei .orgrow – sonst startet der Name je nach FW/THW/BRK-Länge versetzt */
+  .fkrow .chip{flex:none;width:40px;justify-content:center}
   .fkrow .fk-n{font-weight:700;font-size:.85rem}
   .fkrow .fk-f{color:var(--ink2);font-size:.78rem;margin-left:auto;text-align:right}
 
@@ -579,6 +597,13 @@
   body.mon-fullscreen header.topbar,
   body.mon-fullscreen nav.rail{display:none!important}
   body.mon-fullscreen #app{padding-left:0}
+  /* Lagekarte & Komm-Skizze haben von sich aus wenig Eigenhöhe (Karte im festen Seitenverhältnis,
+     Skizze so hoch wie ihr Inhalt) – ohne das hier bleibt im Vollbild darunter eine leere graue
+     Fläche stehen. .mon-fill streckt genau diese eine Seite auf die volle Resthöhe. */
+  body.mon-fullscreen .mon-root{display:flex;flex-direction:column;height:100%}
+  body.mon-fullscreen .monitor{display:flex;flex-direction:column}
+  body.mon-fullscreen .mon-grid.mon-fill{flex:1;min-height:0}
+  .lg-legend{overflow-y:auto}
   body.mon-fullscreen main{max-width:none;margin:0;padding:10px}
   body.mon-fullscreen .monitor{border-radius:0;min-height:calc(100vh - 20px);padding:16px}
   /* Rotations-Steuerung oben, rechtsbündig auf gleicher Kante wie die Kopf-Buttons */
@@ -598,9 +623,11 @@
   .map-pin{position:absolute;padding:4px 10px;border-radius:8px;font-size:.72rem;font-weight:800;
     color:#fff;box-shadow:var(--shadow)}
 
-  /* Lagekarte: Werkzeuge */
-  .lg-toolbar{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px}
-  .lg-tool{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;
+  /* Lagekarte: Werkzeuge – EINE scrollbare Zeile statt zweizeiligem Grid, damit auf kleineren
+     Screens nicht eine ganze zweite Zeile Werkzeug-Kacheln der Karte die Höhe wegnimmt. */
+  .lg-toolbar{display:flex;flex-wrap:nowrap;overflow-x:auto;overscroll-behavior-x:contain;
+    -webkit-overflow-scrolling:touch;scrollbar-width:thin;gap:8px;margin-bottom:12px;padding-bottom:2px}
+  .lg-tool{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;flex:none;
     min-width:76px;min-height:66px;padding:8px 10px;border:2px solid var(--line);border-radius:12px;
     background:var(--surface);font-size:.66rem;font-weight:650;color:var(--ink2);text-align:center}
   .lg-tool[aria-pressed="true"]{border-color:var(--accent);color:var(--accent);
@@ -620,8 +647,11 @@
   .lg-unitchips .chip{min-height:44px;padding:6px 12px;font-size:.8rem;cursor:pointer;
     border:1.5px solid transparent}
   .lg-unitchips .chip[aria-pressed="true"]{border-color:currentColor}
-  .lg-bgrow{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
-  .lg-bgrow .btn{min-height:44px;padding:8px 14px;font-size:.85rem}
+  /* Ebenfalls eine scrollbare Zeile statt Umbruch – sonst kostet die Löschwasser-Bilanz &
+     Co. auf schmäleren Screens eine zweite Zeile, die der Karte fehlt. */
+  .lg-bgrow{display:flex;flex-wrap:nowrap;overflow-x:auto;overscroll-behavior-x:contain;
+    -webkit-overflow-scrolling:touch;scrollbar-width:thin;gap:8px;margin-top:12px}
+  .lg-bgrow .btn{min-height:44px;padding:8px 14px;font-size:.85rem;flex:none;white-space:nowrap}
 
   /* Lagekarte: Zeichenfläche (zoombar: Canvas wächst, Wrap scrollt/pannt) */
   .lg-wrap{position:relative;border:1.5px solid var(--line);border-radius:14px;
@@ -638,7 +668,7 @@
     background-size:44px 44px}
   .lg-canvas.hasbg{background-color:var(--surface2)}
   .lg-canvas.hasbg::after{opacity:.12}
-  .lg-zoom{display:flex;align-items:center;gap:2px;margin-right:auto;
+  .lg-zoom{display:flex;align-items:center;gap:2px;
     border:1.5px solid var(--line);border-radius:12px;background:var(--surface);padding:2px}
   .lg-zoom button{width:46px;height:40px;border-radius:9px;font-size:1.25rem;font-weight:700;color:var(--ink)}
   .lg-zoom button:active{background:var(--surface2)}
@@ -833,7 +863,6 @@
   /* Präsentationsmodus: Karte + Legende bildschirmfüllend, nur die Zoom-Lupe – alles andere aus */
   .lg-card.lg-present{position:fixed;inset:0;z-index:200;height:100vh;width:100vw;margin:0;
     border-radius:0;padding:12px;background:var(--surface);display:flex;flex-direction:column}
-  .lg-card.lg-present > h2,
   .lg-card.lg-present > .lg-headrow,
   .lg-card.lg-present > .lg-modes,
   .lg-card.lg-present > .lg-toolbar,
@@ -847,7 +876,10 @@
     background:var(--surface);color:var(--ink);font-size:1.5rem;font-weight:800;box-shadow:var(--shadow);
     display:grid;place-items:center}
   .lg-present-ctrl button:active{background:var(--surface2)}
-  .lg-headrow{display:flex;align-items:center;justify-content:flex-end;margin:-6px 0 10px}
+  /* Titel + Regler in EINER Zeile (statt Titel + eigene Knopfreihe darunter) – auf kleineren
+     Screens zählt jede gesparte Zeile, die stattdessen der Karte zugutekommt. */
+  .lg-headrow{display:flex;align-items:center;flex-wrap:wrap;gap:8px 10px;margin:-2px 0 10px}
+  .lg-headrow h2{margin:0 auto 0 0}
   .lg-headrow .btn{min-height:44px;padding:8px 16px;font-size:.85rem}
   .lg-legend{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:14px 16px}
   .lg-legend h3{font-size:.72rem;font-weight:700;letter-spacing:.09em;text-transform:uppercase;
