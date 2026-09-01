@@ -1718,7 +1718,7 @@ function syncEinsatzleiterFk(){
   let fk = state.einsatz.leiterFkId ? state.fuehrung.find(f => f.id === state.einsatz.leiterFkId) : null;
   if(val){
     if(!fk){
-      fk = { id:uid(), org:"FW", name:val, funktion:"Einsatzleiter", funkrufname:"", einheit:"", tatsaechlich:true, elAuto:true };
+      fk = { id:uid(), org:"FW", name:val, funktion:"Einsatzleiter", funkrufname:"", einheit:AB_EL.name, tatsaechlich:true, elAuto:true };
       state.fuehrung.push(fk);
       state.einsatz.leiterFkId = fk.id;
     }
@@ -2534,7 +2534,7 @@ function ocrUebernehmen(){
     if(bes && bes.fuehrung){
       // Kennung < 10 → Führungskraft (Schätzung); Funkrufname bis zur Klärung im Namensfeld.
       const funkruf = [c.name, c.kennung].filter(Boolean).join(" ");
-      neueFk.push({ id:uid(), org: c.org || "FW", name:funkruf, funktion:"", funkrufname:funkruf, einheit:"", tatsaechlich:false });
+      neueFk.push({ id:uid(), org: c.org || "FW", name:funkruf, funktion:"", funkrufname:funkruf, einheit:AB_EL.name, tatsaechlich:false });
       fkDisp.push({ org: c.org || "FW", label: funkruf });
     }else{
       const org = k ? (k.org||"FW") : (c.org || "FW");
@@ -2983,14 +2983,22 @@ function syncAbschnittsleiterFk(a){
   }
 }
 /* ---------------- Editor: Führungskraft ---------------- */
+// Jede Führungskraft gehört genau einem Einsatzabschnitt ODER der Einsatzleitung – kein
+// unzugeordneter/freier Zwischenzustand. Ungültige (z. B. veraltete Freitext-) Werte
+// fallen auf die Einsatzleitung zurück.
+function normalizeFkAbschnitt(f){
+  const gueltig = f.einheit === AB_EL.name || state.abschnitte.some(a => a.name === f.einheit);
+  if(!gueltig) f.einheit = AB_EL.name;
+}
 function openFkEditor(id){
   if(id){
     const f = state.fuehrung.find(x => x.id === id);
     if(!f) return;
     editingFk = { fk: {...f}, isNew:false };
   }else{
-    editingFk = { fk: { id:uid(), org:"FW", name:"", funktion:"", funkrufname:"", einheit:"", tatsaechlich:true }, isNew:true };
+    editingFk = { fk: { id:uid(), org:"FW", name:"", funktion:"", funkrufname:"", einheit:AB_EL.name, tatsaechlich:true }, isNew:true };
   }
+  normalizeFkAbschnitt(editingFk.fk);
   renderFkSheet();
 }
 function renderFkSheet(){
@@ -3019,9 +3027,8 @@ function renderFkSheet(){
         <datalist id="fk-funktionen">${FUNKTIONEN.map(x=>`<option value="${esc(x)}">`).join("")}</datalist></div>
       <div class="field"><label for="fk-funkruf">Funkrufname</label>
         <input id="fk-funkruf" class="mono" value="${esc(f.funkrufname||"")}" placeholder="z. B. Florian Weiden 1" autocomplete="off"></div>
-      <div class="field"><label for="fk-abschnitt">Einsatzabschnitt <span style="text-transform:none;font-weight:500">(optional)</span></label>
+      <div class="field"><label for="fk-abschnitt">Einsatzabschnitt</label>
         <select id="fk-abschnitt">
-          <option value="">– keinem Abschnitt zugeordnet –</option>
           <option value="${esc(AB_EL.name)}" ${f.einheit===AB_EL.name?"selected":""}>${esc(AB_EL.name)}</option>
           ${(() => {
             // Ein Einsatzabschnitt gehört genau einer Führungskraft. Schon von einer ANDEREN
@@ -3036,9 +3043,7 @@ function renderFkSheet(){
             }).join("");
           })()}
         </select>
-        <p class="hint" style="margin:.4rem 0 0">Einsatzleitung oder vorhandenen Abschnitt wählen – oder unten frei eintragen. Bereits belegte Abschnitte sind gesperrt (nur die Einsatzleitung darf mehreren Personen zugeordnet werden).</p></div>
-      <div class="field"><label for="fk-einheit">Einheit / Abschnitt <span style="text-transform:none;font-weight:500">(optional)</span></label>
-        <input id="fk-einheit" value="${esc(f.einheit||"")}" placeholder="z. B. Abschnitt 1, ${esc(pfx("FW"))} Weiden 1/40/1" autocomplete="off"></div>
+        <p class="hint" style="margin:.4rem 0 0">Ohne eigenen Abschnitt zählt die Führungskraft zur Einsatzleitung. Bereits belegte Abschnitte sind gesperrt (nur die Einsatzleitung darf mehreren Personen zugeordnet werden).</p></div>
       <div class="field">
         <button class="leave-toggle" id="fk-tat" aria-pressed="${f.tatsaechlich !== false}">
           <span class="track"></span>
@@ -3063,16 +3068,14 @@ function renderFkSheet(){
     if(!p) return;
     f.name = p.name||""; f.funktion = p.funktion||""; f.funkrufname = p.funkrufname||"";
     f.einheit = p.einheit||""; f.org = p.org||f.org;
+    normalizeFkAbschnitt(f);   // ggf. veralteter Freitext aus den Stammdaten → Einsatzleitung
     renderFkSheet();   // Felder mit den übernommenen Werten neu zeichnen
   });
   $("#fk-name").addEventListener("input", e => { f.name = e.target.value; });
   $("#fk-funktion").addEventListener("input", e => { f.funktion = e.target.value; });
   $("#fk-funkruf").addEventListener("input", e => { f.funkrufname = e.target.value; });
-  $("#fk-einheit").addEventListener("input", e => { f.einheit = e.target.value; });
   const fkAb = $("#fk-abschnitt");
-  if(fkAb) fkAb.addEventListener("change", () => {
-    if(fkAb.value){ f.einheit = fkAb.value; const inp = $("#fk-einheit"); if(inp) inp.value = fkAb.value; }
-  });
+  if(fkAb) fkAb.addEventListener("change", () => { f.einheit = fkAb.value; });
   const fkTat = $("#fk-tat");
   if(fkTat) fkTat.addEventListener("click", () => {
     f.tatsaechlich = !(f.tatsaechlich !== false);
@@ -7099,7 +7102,7 @@ function reportBodyHtml(data, sel, opts){
     </tbody></table>` : "";
   const secKraefte = on("kraefte") ? `
     <h2>Führungskräfte (${data.fuehrung.length})</h2>
-    ${fkRows ? `<table><thead><tr><th>Name</th><th>Funktion</th><th>Funkrufname</th><th>Organisation</th><th>Einheit / Abschnitt</th></tr></thead><tbody>${fkRows}</tbody></table>` : "<p>Keine erfasst.</p>"}
+    ${fkRows ? `<table><thead><tr><th>Name</th><th>Funktion</th><th>Funkrufname</th><th>Organisation</th><th>Einsatzabschnitt</th></tr></thead><tbody>${fkRows}</tbody></table>` : "<p>Keine erfasst.</p>"}
     <h2>Einheiten (${data.einheiten.length})</h2>
     ${unitRows ? `<table><thead><tr><th>Ankunft</th><th>Organisation</th><th>Funkrufname</th>${showAb?"<th>Abschnitt</th>":""}<th>Stärke</th><th>AGT</th><th>CSA</th><th>Status</th></tr></thead><tbody>${unitRows}</tbody></table>` : "<p>Keine erfasst.</p>"}
     <h2>Nachforderungen (${(data.anforderungen||[]).length})</h2>
