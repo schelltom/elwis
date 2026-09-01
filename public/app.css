@@ -230,7 +230,8 @@
   .drawer-head h2{margin:0;font-size:1.05rem;font-weight:800}
   .drawer button[data-tab]{display:flex;align-items:center;gap:14px;width:100%;text-align:left;
     min-height:60px;padding:12px 14px;border-radius:12px;font-size:1.05rem;font-weight:650;color:var(--ink)}
-  .drawer button[data-tab] svg{width:26px;height:26px}
+  .drawer button[data-tab] svg{width:26px;height:26px;stroke:currentColor;fill:none;
+    stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;flex:none}
   .drawer button[data-tab].active{color:var(--accent);background:color-mix(in oklab,var(--accent) 10%,transparent)}
   .drawer button[data-tab]:active{background:var(--surface2)}
 
