@@ -180,6 +180,19 @@
   .brand .claim{font-size:.72rem;font-weight:700;color:var(--accent);letter-spacing:.08em;text-transform:uppercase;line-height:1.2}
   .brand .sub{font-size:.72rem;color:var(--ink3);letter-spacing:.06em;text-transform:uppercase}
   .topbar-right{margin-left:auto;display:flex;align-items:center;gap:8px}
+  /* Handy: Kopfzeile ist zu schmal für Marke + Synchron/WLAN/Zahnrad in einer Zeile –
+     Regler an den rechten Rand oben pinnen (auf Höhe des Programmnamens) statt in
+     eine eigene Zeile darunter umzubrechen. header.topbar (position:sticky) ist
+     bereits Bezugsrahmen für die absolute Positionierung. Die Textlabel von
+     Sync-Pille und WLAN-Schalter weichen dafür Icon/Punkt bzw. Schalter allein –
+     sonst wäre auch die schmalste Fassung noch breiter als neben der Marke passt. */
+  @media (max-width:899px){
+    .topbar-right{position:absolute;top:10px;right:14px;margin-left:0;gap:6px}
+    .sync-pill{padding:8px;gap:0}
+    .sync-pill #syncText{display:none}
+    .wlan-switch{gap:0}
+    .wlan-switch>span:first-child{display:none}
+  }
   .iconbtn{width:44px;height:44px;border-radius:10px;display:grid;place-items:center;color:var(--ink2)}
   .iconbtn:active{background:var(--surface2)}
   .iconbtn svg{width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
