@@ -7602,8 +7602,25 @@ function zeigeKurzHinweis(text){
 }
 
 /* ---------------- Render-Hauptschleife ---------------- */
-function render(){
-  lgMapTeardown();  // Leaflet-Karte vor dem Neuaufbau des DOM sauber entfernen
+// Ansicht → [HTML-String, Wire-Funktion|null]. Nur Strings bauen, keine Seiteneffekte.
+const ANSICHT_BAUER = {
+  einsatz:    () => [renderEinsatz(), wireEinsatz],
+  kraefte:    () => [renderKraefte(), wireKraefte],
+  funk:       () => [renderFunk(), wireFunk],
+  bespr:      () => [renderBespr(), wireBespr],
+  fotodoku:   () => [renderFotodoku(), wireFotodoku],
+  listen:     () => [renderListen(), wireListen],
+  atemschutz: () => [renderAtemschutz(), wireAtemschutz],
+  skizze:     () => [renderSkizzeView(), null],
+  lagekarte:  () => [renderLagekarte(), wireLagekarte],
+  monitor:    () => [renderMonitor(), wireMonitor],
+};
+let _ansichtSig = "";   // Signatur (Ansicht + HTML) des zuletzt in #view geschriebenen Inhalts
+
+/* sanft=true (aus dem Sync-Tick): das DOM nur anfassen, wenn sich der Inhalt der aktiven
+   Ansicht wirklich ändert. Betrifft ein Fremd-Update die aktuelle Ansicht nicht, bleiben
+   DOM, Scrollposition, Fokus und die Leaflet-Karte unangetastet. */
+function render(sanft){
   // Auf kleinen Geräten sind Monitor/Lagekarte/Komm-Skizze nicht verfügbar
   if(!istGrossesGeraet() && (TABS.find(t => t.id === state.view) || {}).nurGross){
     const weg = TABS.find(t => t.id === state.view);
@@ -7620,30 +7637,39 @@ function render(){
   main.classList.toggle("w-tablet", state.view === "kraefte");
   main.classList.toggle("w-desk", ["einsatz","funk","bespr","listen","skizze"].includes(state.view));
   $("#footNote").style.display = state.view === "monitor" ? "none" : "";
-  // Error-Boundary: eine fehlerhafte Ansicht (z. B. Altdaten/fehlendes Feld, auch aus einem
+
+  // Error-Boundary: eine fehlerhafte Ansicht (Altdaten/fehlendes Feld, auch aus einem
   // Sync-render()) darf nicht die ganze App lahmlegen – Fallback statt halbtotem DOM.
+  let html, wire;
   try{
-    if(state.view === "einsatz"){ main.innerHTML = renderEinsatz(); wireEinsatz(); }
-    else if(state.view === "kraefte"){ main.innerHTML = renderKraefte(); wireKraefte(); }
-    else if(state.view === "funk"){ main.innerHTML = renderFunk(); wireFunk(); }
-    else if(state.view === "bespr"){ main.innerHTML = renderBespr(); wireBespr(); }
-    else if(state.view === "fotodoku"){ main.innerHTML = renderFotodoku(); wireFotodoku(); }
-    else if(state.view === "listen"){ main.innerHTML = renderListen(); wireListen(); }
-    else if(state.view === "atemschutz"){ main.innerHTML = renderAtemschutz(); wireAtemschutz(); }
-    else if(state.view === "skizze"){ main.innerHTML = renderSkizzeView(); }
-    else if(state.view === "lagekarte"){ main.innerHTML = renderLagekarte(); wireLagekarte(); }
-    else { main.innerHTML = renderMonitor(); wireMonitor(); }
+    [html, wire] = (ANSICHT_BAUER[state.view] || ANSICHT_BAUER.monitor)();
   }catch(e){
     console.error("[LOTSE112] Render-Fehler in Ansicht '" + state.view + "':", e);
+    lgMapTeardown();
     main.innerHTML = `<div class="card"><h2>Anzeige-Fehler</h2>
       <p>Diese Ansicht konnte nicht aufgebaut werden. Deine Daten sind gesichert – wechsle die Ansicht oder lade neu.</p>
       <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:8px">
         <button class="btn btn-primary" id="errEinsatz">Zur Einsatz-Ansicht</button>
         <button class="btn btn-ghost" id="errReload">App neu laden</button>
       </div></div>`;
+    _ansichtSig = "";
     const be = $("#errEinsatz"); if(be) be.addEventListener("click", () => { state.view = "einsatz"; render(); });
     const br = $("#errReload"); if(br) br.addEventListener("click", () => location.reload());
+    return;
   }
+
+  let sig = state.view + "\n" + html;
+  // Lagekarte + Monitor zeichnen Symbole per Leaflet AUSSERHALB des HTML – deren
+  // Änderungen zählen für die Signatur mit (Elemente sind klein, keine Bilddaten).
+  if(state.view === "lagekarte" || state.view === "monitor"){
+    try{ sig += "\n" + JSON.stringify(state.lage.items || []); }catch(_){}
+  }
+  if(sanft && sig === _ansichtSig) return;   // an dieser Ansicht nichts geändert → DOM in Ruhe lassen
+
+  lgMapTeardown();   // Leaflet-Karte sauber entfernen, bevor das DOM neu gebaut wird
+  main.innerHTML = html;
+  _ansichtSig = sig;
+  if(wire) wire();
 }
 // Der erste Render passiert async in boot() (unten), sobald der Zustand aus
 // IndexedDB geladen ist.
@@ -7899,8 +7925,9 @@ async function syncTick(){
     if(!d.unchanged){
       syncApply(d);   // übernimmt Merge + stellt SYNC.seq erst NACH Erfolg weiter
       SYNC.pending = 0;
-      // Nur neu zeichnen, wenn der Merge den Stand wirklich verändert hat und niemand gerade tippt
-      if(!snapGleich(syncSnapLoad(), vorher) && !syncTipptGerade()) render();
+      // Merge hat etwas verändert und niemand tippt → sanft neu zeichnen: render(true)
+      // baut das DOM nur um, wenn sich der Inhalt der aktiven Ansicht wirklich ändert.
+      if(!snapGleich(syncSnapLoad(), vorher) && !syncTipptGerade()) render(true);
       else renderHeader();
     }else{
       SYNC.seq = d.seq;
