@@ -32,6 +32,14 @@ const ALT = DIST + ".alt";       // vorherige Version (Rückfall-Ebene)
 const DATEI = process.env.ELWIS_DATEN
   ? path.resolve(process.env.ELWIS_DATEN)
   : path.join(HIER, "elwis-daten.json");
+const PREV = DATEI + ".prev";                              // letzter guter Snapshot (Korruptionsschutz)
+const JOURNAL = path.join(path.dirname(DATEI), "journal.ndjson");   // Write-Ahead-Log der Merges
+const SICHER_DIR = path.join(path.dirname(DATEI), "backups");
+const SICHER_MAX = 40;                  // über dieser Zahl die ältesten wegräumen
+const SICHER_MAX_TAGE = 30;             // und alles Ältere als das …
+const SICHER_MIN = 10;                  // … aber nie unter so viele fallen
+const SICHER_INTERVALL = 2 * 60 * 1000; // höchstens alle 2 Minuten ein Backup
+let letztesBackup = 0;
 // Fotos liegen als Binärdateien (nicht im Einsatzstand / nicht im /api/sync).
 const FOTO_DIR = path.join(path.dirname(DATEI), "fotos");
 const FOTO_MAX = 12 * 1024 * 1024;   // 12 MB je Bild
@@ -59,25 +67,89 @@ const MIME = {
 };
 
 /* ---------------- Zustand ---------------- */
-let stand = leererStand();
-let standGeladen = false;
-try{
-  stand = Object.assign(leererStand(), JSON.parse(fs.readFileSync(DATEI, "utf8")));
-  standGeladen = true;
-  console.log(`Gespeicherten Einsatz geladen (seq ${stand.seq}).`);
-}catch(e){ /* noch keine Daten – frischer Start */ }
+function istPlausiblerStand(o){
+  return o && typeof o === "object" && typeof o.seq === "number"
+    && o.collections && typeof o.collections === "object"
+    && o.singletons && typeof o.singletons === "object"
+    && o.tombstones && typeof o.tombstones === "object"
+    && (o.einsatzId === null || o.einsatzId === undefined || typeof o.einsatzId === "string");
+}
+function neuesteBackups(n){
+  try{
+    return fs.readdirSync(SICHER_DIR)
+      .filter(f => f.startsWith("elwis-daten-") && f.endsWith(".json")).sort().reverse()
+      .slice(0, n).map(f => path.join(SICHER_DIR, f));
+  }catch(_){ return []; }
+}
+/* Korruptionsschutz: aktueller Snapshot → Vorgänger (.prev) → neueste Backups → leer.
+   Jeder Kandidat wird auf Plausibilität geprüft, bevor er akzeptiert wird. */
+function ladeSnapshot(){
+  const quellen = [[DATEI, "Einsatzstand"], [PREV, "Vorgänger-Snapshot"],
+    ...neuesteBackups(3).map(p => [p, "Backup " + path.basename(p)])];
+  for(const [pfad, name] of quellen){
+    let roh;
+    try{ roh = fs.readFileSync(pfad, "utf8"); }catch(_){ continue; }
+    let o;
+    try{ o = Object.assign(leererStand(), JSON.parse(roh)); }
+    catch(_){ console.error(`⚠ ${path.basename(pfad)} nicht lesbar (defekt).`); continue; }
+    if(!istPlausiblerStand(o)){ console.error(`⚠ ${path.basename(pfad)} unplausibel – übersprungen.`); continue; }
+    if(pfad !== DATEI) console.warn(`⚠ ${path.basename(DATEI)} unbrauchbar – stattdessen ${name} geladen.`);
+    return o;
+  }
+  return null;
+}
+
+let journalZeilen = 0;
+function journalLeeren(){ try{ fs.writeFileSync(JOURNAL, ""); journalZeilen = 0; }catch(_){} }
+function journalAnhaengen(body, seq, m){
+  try{ fs.appendFileSync(JOURNAL, JSON.stringify({ s: seq, m, b: body }) + "\n"); journalZeilen++; }
+  catch(e){ console.error("Journal schreiben fehlgeschlagen:", e.message); }
+}
+/* Journal über den geladenen Snapshot legen – holt die Änderungen seit dem letzten
+   Snapshot zurück (nach hartem Absturz / Stromausfall). Deterministisch: die zum
+   Zeitpunkt des Merges gültige Uhr (`m`) wird für das Timestamp-Clamping wiederverwendet. */
+function journalNachspielen(s){
+  let zeilen;
+  try{ zeilen = fs.readFileSync(JOURNAL, "utf8").split("\n").filter(Boolean); }
+  catch(_){ return s; }
+  let n = 0;
+  for(const z of zeilen){
+    let e;
+    try{ e = JSON.parse(z); }catch(_){ continue; }
+    if((e.s || 0) <= s.seq) continue;                                      // schon im Snapshot
+    if(e.b && e.b.einsatzId && s.einsatzId && e.b.einsatzId !== s.einsatzId && !e.b.ersetzen) continue;
+    try{
+      const r = mergeStand(s, e.b, { jetzt: () => e.m || Date.now() });
+      s = r.stand;
+      if(r.geaendert) n++;
+    }catch(_){}
+  }
+  journalZeilen = zeilen.length;
+  if(n) console.log(`↻ ${n} Änderung(en) aus dem Journal nachgespielt – seq jetzt ${s.seq}.`);
+  return s;
+}
+function journalKuerzen(bisSeq){
+  try{
+    if(!fs.existsSync(JOURNAL)) return;
+    const rest = fs.readFileSync(JOURNAL, "utf8").split("\n").filter(Boolean)
+      .filter(z => { try{ return (JSON.parse(z).s || 0) > bisSeq; }catch(_){ return false; } });
+    fs.writeFileSync(JOURNAL + ".tmp", rest.length ? rest.join("\n") + "\n" : "");
+    fs.renameSync(JOURNAL + ".tmp", JOURNAL);
+    journalZeilen = rest.length;
+  }catch(e){ console.error("Journal kürzen fehlgeschlagen:", e.message); }
+}
+
+let stand = ladeSnapshot();
+let standGeladen = !!stand;
+if(!stand) stand = leererStand();
+else console.log(`Gespeicherten Einsatz geladen (seq ${stand.seq}).`);
+stand = journalNachspielen(stand);
 
 /* ---------------- Speichern + automatisches Backup ----------------
-   - Atomar: erst in .tmp schreiben, dann umbenennen → nie eine halbe Datei bei Absturz
+   - Snapshot atomar (fsync + rename); vorher rotiert der letzte gute Stand nach .prev
+   - Write-Ahead-Journal (journal.ndjson) fängt den Verlust zwischen den Snapshots ab
    - Rotierende Zeitstempel-Backups in backups/ (gedrosselt; nach Anzahl UND Alter aufgeräumt)
    - Zusätzlich Sicherung beim Beenden (SIGINT/SIGTERM) */
-const SICHER_DIR = path.join(path.dirname(DATEI), "backups");
-const SICHER_MAX = 40;                  // über dieser Zahl die ältesten wegräumen
-const SICHER_MAX_TAGE = 30;             // und alles Ältere als das …
-const SICHER_MIN = 10;                  // … aber nie unter so viele fallen
-const SICHER_INTERVALL = 2 * 60 * 1000; // höchstens alle 2 Minuten ein Backup
-let letztesBackup = 0;
-
 function zeitStempel(){
   const d = new Date(), p = n => String(n).padStart(2, "0");
   return `${d.getFullYear()}${p(d.getMonth()+1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
@@ -101,25 +173,46 @@ function backupSchreiben(json){
   }catch(e){ console.error("Backup fehlgeschlagen:", e.message); }
 }
 
+// Speicher-Gesundheit (für /api/health und die Client-Warnung)
+let letzterSaveOk = standGeladen ? Date.now() : 0;
+let saveFehler = null;
+let freierPlatzMB = null;
+
+// Snapshot synchron + fsync schreiben; .prev = letzter guter Stand.
+function snapshotSchreiben(json){
+  const tmp = DATEI + ".tmp";
+  const fd = fs.openSync(tmp, "w");
+  try{ fs.writeSync(fd, json); fs.fsyncSync(fd); }
+  finally{ fs.closeSync(fd); }
+  try{ if(fs.existsSync(DATEI)) fs.renameSync(DATEI, PREV); }catch(_){}
+  fs.renameSync(tmp, DATEI);
+}
+
 let speicherTimer = null;
 function speichern(){
   clearTimeout(speicherTimer);
   speicherTimer = setTimeout(() => {
-    const json = JSON.stringify(stand);
-    const tmp = DATEI + ".tmp";
-    fs.writeFile(tmp, json, err => {
-      if(err){ console.error("Speichern fehlgeschlagen:", err.message); return; }
-      try{ fs.renameSync(tmp, DATEI); }
-      catch(e){ console.error("Speichern (Umbenennen) fehlgeschlagen:", e.message); return; }
-      const jetzt = Date.now();
-      if(jetzt - letztesBackup >= SICHER_INTERVALL){ letztesBackup = jetzt; backupSchreiben(json); }
-    });
+    const seqJetzt = stand.seq;
+    let json;
+    try{ json = JSON.stringify(stand); }
+    catch(e){ saveFehler = "Serialisieren: " + e.message; console.error(saveFehler); return; }
+    try{
+      snapshotSchreiben(json);
+      letzterSaveOk = Date.now(); saveFehler = null;
+      journalKuerzen(seqJetzt);   // alles ≤ seqJetzt steckt jetzt im Snapshot
+      const t = Date.now();
+      if(t - letztesBackup >= SICHER_INTERVALL){ letztesBackup = t; backupSchreiben(json); }
+    }catch(e){
+      saveFehler = e.message;
+      console.error("Speichern fehlgeschlagen:", e.message, "– Journal übernimmt die Wiederherstellung.");
+    }
   }, 500);
 }
 function beendenUndSichern(){
   try{
     const json = JSON.stringify(stand);
-    fs.writeFileSync(DATEI, json);
+    snapshotSchreiben(json);
+    journalKuerzen(stand.seq);
     backupSchreiben(json);
     console.log("\nStand beim Beenden gesichert.");
   }catch(e){ console.error("Sichern beim Beenden fehlgeschlagen:", e.message); }
@@ -127,7 +220,25 @@ function beendenUndSichern(){
 }
 process.on("SIGINT", beendenUndSichern);
 process.on("SIGTERM", beendenUndSichern);
+
+// Journal alle 2 s auf die Platte zwingen (Stromausfall-Fenster ~2 s statt ~2 min).
+setInterval(() => { try{ const fd = fs.openSync(JOURNAL, "r"); fs.fsyncSync(fd); fs.closeSync(fd); }catch(_){} }, 2000).unref();
+// Freien Plattenplatz beobachten (für die Client-Warnung).
+function pruefePlatz(){
+  try{ fs.statfs(path.dirname(DATEI), (err, st) => { if(!err) freierPlatzMB = Math.round(st.bavail * st.bsize / 1048576); }); }catch(_){}
+}
+setInterval(pruefePlatz, 60000).unref(); pruefePlatz();
+
+/* Klartext-Warnung an die Clients, wenn mit der Server-Persistenz etwas nicht stimmt. */
+function serverWarnung(){
+  if(saveFehler) return `Der ELW-Server kann den Einsatz nicht mehr speichern (${saveFehler}). Bitte jetzt „Einsatz exportieren“.`;
+  if(freierPlatzMB != null && freierPlatzMB < 150) return `Wenig Speicherplatz am ELW-Server (${freierPlatzMB} MB frei) – Einsatz sichern.`;
+  if(letzterSaveOk && stand.seq > 0 && Date.now() - letzterSaveOk > 10 * 60 * 1000) return "Der ELW-Server hat seit über 10 Minuten nicht gespeichert.";
+  return null;
+}
+
 if(standGeladen){ backupSchreiben(JSON.stringify(stand)); letztesBackup = Date.now(); }  // Snapshot beim Start
+if(journalZeilen > 0){ try{ snapshotSchreiben(JSON.stringify(stand)); journalKuerzen(stand.seq); letzterSaveOk = Date.now(); }catch(e){ console.error("Checkpoint nach Journal-Replay fehlgeschlagen:", e.message); } }
 
 /* Aktive Geräte (Client-IDs, zuletzt gesehen) */
 const geraete = new Map();
@@ -165,9 +276,14 @@ function fotosBeimLadenAuslagern(){
    Kern in server/sync-core.mjs (rein + testbar). Hier nur die Anbindung an
    Persistenz und die Ergänzung um Server-Infos (clients, updateInfo). */
 function mergeSync(body){
+  const vorherId = stand.einsatzId;
   const r = mergeStand(stand, body, { log: (m) => console.log(m) });
   stand = r.stand;
-  if(r.geaendert) speichern();
+  if(r.geaendert){
+    if(stand.einsatzId !== vorherId) journalLeeren();   // neuer Einsatz → Journal des alten wegwerfen
+    journalAnhaengen(body, stand.seq, Date.now());       // Write-Ahead: erst ins Journal …
+    speichern();                                         // … dann (entprellt) der Snapshot
+  }
   return r.geaendert;
 }
 function standAntwort(){
@@ -213,7 +329,7 @@ function manifestVon(dir){
 }
 function versionVon(dir){ const m = manifestVon(dir); return (m && m.version) || null; }
 function appVorhanden(){ return fs.existsSync(path.join(DIST, "index.html")); }
-function updateInfo(){ return { version: versionVon(DIST), update: updateStatus }; }
+function updateInfo(){ return { version: versionVon(DIST), update: updateStatus, serverWarnung: serverWarnung() }; }
 
 // Bereitgestellte Version (dist.neu/) scharf schalten – nur beim Start aufrufen.
 function aktiviereBereitgestellte(){
@@ -323,6 +439,15 @@ const server = http.createServer((req, res) => {
       clients: aktiveGeraete(), urls: lanUrls(), ...updateInfo() });
     return;
   }
+  if(u.pathname === "/api/health"){
+    let backups = 0, fotos = 0;
+    try{ backups = fs.readdirSync(SICHER_DIR).filter(f => f.endsWith(".json")).length; }catch(_){}
+    try{ fotos = fs.readdirSync(FOTO_DIR).filter(f => FOTO_ID_RX.test(f)).length; }catch(_){}
+    sendeJson(req, res, 200, { ok: !saveFehler, seq: stand.seq, einsatzId: stand.einsatzId,
+      letzterSaveOk: letzterSaveOk || null, saveFehler, warnung: serverWarnung(),
+      journalZeilen, freierPlatzMB, backups, fotos, clients: aktiveGeraete() });
+    return;
+  }
 
   /* --- Fotos: Binärdateien, getrennt vom Einsatzstand --- */
   if(u.pathname === "/api/fotos" && req.method === "GET"){
@@ -428,6 +553,7 @@ const server = http.createServer((req, res) => {
         stand.einsatzId = "restore-" + Date.now().toString(36) + Math.random().toString(36).slice(2,7);
         stand.einsatzStart = new Date().toISOString();
         stand.seq = (stand.seq || 0) + 1;
+        journalLeeren();   // Journal des vorherigen Einsatzes verwerfen
         speichern();
         console.log(`Backup wiederhergestellt: ${name} (seq ${stand.seq}).`);
         res.writeHead(200, { "Content-Type": "application/json" });

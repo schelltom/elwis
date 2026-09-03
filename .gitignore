@@ -4,6 +4,9 @@ dist/
 .DS_Store
 server/elwis-daten.json
 server/elwis-daten.json.tmp
+server/elwis-daten.json.prev
+server/journal.ndjson
+server/journal.ndjson.tmp
 server/backups/
 server/fotos/
 dist.alt/

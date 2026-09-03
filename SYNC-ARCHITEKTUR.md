@@ -14,12 +14,22 @@ gemeinsamen Einsatzstand einigen.
 | Baustein | Datei / Ort | Aufgabe |
 |---|---|---|
 | **ELW-Server** | `server/lotse112-server.mjs` auf dem NAS, Port **8474** | Liefert die App aus, führt `/api/sync` zusammen, persistiert |
-| **Maßgeblicher Stand** | NAS: `server/elwis-daten.json` | **Die Wahrheit.** Atomar geschrieben (`.tmp` → rename) |
-| **Backups** | NAS: `server/backups/elwis-daten-<zeit>.json` | Snapshot höchstens alle **2 min**, letzte **40** behalten; zusätzlich beim Serverstart und beim Beenden |
+| **Maßgeblicher Stand** | NAS: `server/elwis-daten.json` | **Die Wahrheit.** Snapshot, atomar + `fsync` geschrieben; davor rotiert der letzte gute Stand nach `.prev` |
+| **Write-Ahead-Journal** | NAS: `server/journal.ndjson` | Jeder ändernde Merge als eine Zeile; beim Start über den Snapshot gelegt → Verlust bei hartem Absturz ≈ 2 s statt ≈ 2 min |
+| **Backups** | NAS: `server/backups/elwis-daten-<zeit>.json` | Snapshot höchstens alle **2 min**, letzte **40** / **30 Tage** / min. **10**; zusätzlich beim Serverstart und beim Beenden |
+| **Fotos** | NAS: `server/fotos/<id>` (JPEG) | getrennt vom Einsatzstand, siehe „Fotos (Sonderfall)" |
 | **Client** | App im Browser jedes Geräts | Hält **vollständige lokale Kopie** in IndexedDB → offlinefähig |
 | **Client-Snapshot** | Browser: IndexedDB `sync-snap` | Referenz für den Diff „was hat sich seit dem letzten Abgleich geändert?" |
 
 Keine externen Abhängigkeiten – nur Node (≥ 18) auf dem NAS.
+
+### Persistenz-Ablauf pro ändernder `/api/sync`
+
+1. Merge in den RAM-Stand (`mergeStand`), `seq` erhöht.
+2. **Journal**: der rohe Client-Body wird als Zeile `{ s: seq, m: jetzt, b: body }` angehängt (alle 2 s `fsync`).
+3. **Snapshot**: entprellt (~500 ms) `elwis-daten.json` neu schreiben (`.prev`-Rotation, `fsync`), dann das Journal auf Einträge `> seq` kürzen.
+4. **Start**: `elwis-daten.json` → `.prev` → neueste Backups (je auf Plausibilität geprüft), dann Journal-Einträge mit `s > snapshot.seq` nachspielen (`mergeStand` mit der ursprünglichen Uhrzeit `m` → deterministisch), sofort ein frischer Checkpoint.
+5. Persistenz-Probleme (kein Platz, Schreibfehler) landen als `serverWarnung` in jeder Antwort → Client-Banner „Einsatz jetzt exportieren"; Details unter `GET /api/health`.
 
 ---
 
@@ -61,6 +71,7 @@ Keine externen Abhängigkeiten – nur Node (≥ 18) auf dem NAS.
 | `POST /api/sync` | Diff entgegennehmen, mergen, Delta seit `seq` zurückgeben (oder `unchanged` / kompletten Stand beim Erstabgleich bzw. Alt-Client) |
 | `GET/PUT/DELETE /api/foto/<id>` | Foto-Binärdatei (JPEG) abrufen / hochladen / löschen – getrennt vom Einsatzstand, `Cache-Control: immutable` |
 | `GET /api/fotos` | IDs der Fotos, die der Server hat (Upload-Abgleich) |
+| `GET /api/health` | Persistenz-Kennzahlen: letzter Save, `saveFehler`, `warnung`, Journal-Zeilen, freier Platz, Backup-/Foto-Anzahl |
 | `GET /api/backups` | Backup-Liste (Name, Größe, Zeit) |
 | `POST /api/restore` | Backup wiederherstellen → neue `einsatzId` mit „jetzt", alle Clients ziehen nach |
 | alles andere | statische App aus `dist/` (SPA-Fallback auf `index.html`) |
@@ -245,11 +256,12 @@ ihn dem Server dann **erzwungen** auf (`ersetzen`-Flag, ohne Konfliktdialog):
 
 | Thema | Heute | Idee |
 |---|---|---|
-| **NAS = Single Point of Failure** | Fällt das NAS aus, laufen alle Geräte lokal weiter, mergen aber nicht mehr untereinander | Desktop als Hot-Standby-Server; „dieses Gerät als Server"-Modus; Recovery = NAS neu starten (lädt `elwis-daten.json`) oder ein Gerät per „meinen Einsatz erzwingen" |
+| **NAS-Prozess weg / Absturz** | Journal + `.prev`-Kaskade holen den Stand bis ~2 s vor den Crash zurück; Clients laufen lokal weiter, mergen bis zum Neustart nicht untereinander | Desktop als Hot-Standby-Server / „dieses Gerät als Server"-Modus (größerer Umbau) |
+| **Total­verlust NAS-Platte** | alles auf dem NAS weg (Snapshot, Journal, Backups, Fotos) | periodische Kopie des Datenverzeichnisses auf USB / zweite Freigabe (Shell-Skript / Cron) |
 | **Echtzeit** | 3-s-Polling | WebSocket/SSE senkt Latenz und NAS-Last, kostet Komplexität |
 | **Delta-Overhead** | jede Delta-Antwort enthält die vollständige ID-Liste je Sammlung (für die Löscherkennung) – wenige KB, aber wächst mit dem Einsatz | Tombstones mit eigener `_s` führen und nur Lösch-IDs seit `seq` senden |
-| **Foto-Speicher am NAS** | `server/fotos/` wächst und wird nicht rotiert / nicht mit den JSON-Backups gesichert | von einem regulären NAS-Backup abgedeckt; ggf. GC verwaister Dateien nach Einsatzende |
-| **Backups** | nur auf dem NAS | zusätzlicher Export auf zweites Medium (USB / zweite Freigabe) |
+| **Foto-Speicher am NAS** | `server/fotos/` wächst; kein GC verwaister Dateien | GC nach Einsatzende (IDs gegen den Stand abgleichen) |
+| **`app.js` unminifiziert** | ~490 KB → 140 KB gzip (reicht meist) | esbuild-Schritt für ~110 KB |
 | **Gleiches Feld gleichzeitig** | last-write-wins, kein Merge | bei Bedarf Feld-Sperre / „wird gerade bearbeitet"-Hinweis |
 | **Boot-Race** | nur wenn der NAS **leer** hochkommt (Datendatei verloren) *und* mehrere Geräte mit je eigenem Einsatz fast gleichzeitig pushen → erster besetzt die `einsatzId`, zweiter bekommt Konfliktdialog. Bei normalem NAS-Neustart (lädt `elwis-daten.json`) tritt das nicht auf. | organisatorisch: iPhone eröffnet, Rest verbindet; NAS-Backups schützen vor „leer hochkommen" |
 | **Discovery** | IP/QR-Code manuell | mDNS (`elw.local`), feste IP, Startseite mit „Verbinden"-Knopf |
@@ -266,9 +278,11 @@ ihn dem Server dann **erzwungen** auf (`ersetzen`-Flag, ohne Konfliktdialog):
 |---|---|
 | `test/sync-core.test.mjs` | Merge-Kern (`server/sync-core.mjs`): last-write-wins, Clamping, Tombstones, Einsatzwechsel/`ersetzen`, Delta-Filter, Erstabgleich |
 | `test/sync-client.test.mjs` | reine Client-Helfer aus `public/app.js` (`snapGleich`, `mergeDeltaCollection`) – per Quelltext-Extraktion |
-| `test/sync-http.test.mjs` | echter Server über HTTP: Delta-Protokoll, Löscherkennung, Alt-Client-Fallback, gzip, ETag/304, Persistenz |
+| `test/sync-http.test.mjs` | echter Server über HTTP: Delta-Protokoll, Löscherkennung, Alt-Client-Fallback, gzip, ETag/304, Fotos (`/api/foto*`), Persistenz |
+| `test/sync-durability.test.mjs` | Write-Ahead-Journal (SIGKILL → Replay), Checkpoint, `.prev`-Kaskade bei defekter Datei, `/api/health` |
 
-Server-Datei per `ELWIS_DATEN=<pfad>` umlenkbar (Tests nutzen ein Temp-Verzeichnis).
+Server-Datei per `ELWIS_DATEN=<pfad>` umlenkbar (Tests nutzen ein Temp-Verzeichnis);
+`journal.ndjson`, `.prev`, `backups/` und `fotos/` liegen daneben.
 
 ## 9. Verweise in den Quellen
 
@@ -278,6 +292,9 @@ Server-Datei per `ELWIS_DATEN=<pfad>` umlenkbar (Tests nutzen ein Temp-Verzeichn
   `mergeDeltaCollection()`, `snapGleich()`, `syncTick()`, `syncInit()`, `frageEinsatzKonflikt()`
 - Foto-Speicher: `public/app.js` → `fotoAufnehmen()`, `fotoDatenHolen()`, `fotosEinblenden()`,
   `fotoUploadsAbgleichen()`, `fotosMitBytes()`; Server → `fotoDataAuslagern()`, Routen `/api/foto*`
-- Persistenz Client: `idbGet` / `idbSet`, `ladeZustand()`, `boot()`
+- Persistenz Server: `server/lotse112-server.mjs` → `ladeSnapshot()`, `journalNachspielen()`,
+  `journalAnhaengen()` / `journalKuerzen()`, `snapshotSchreiben()` (fsync + `.prev`),
+  `serverWarnung()`, Route `/api/health`
+- Persistenz Client: `idbGet` / `idbSet`, `ladeZustand()`, `boot()`, `zeigeServerWarnung()`
 - Auto-Mirror der App-Version (unabhängig vom Einsatz-Sync): `pruefeAufUpdate()`,
   `aktiviereBereitgestellte()`, abschaltbar mit `ELWIS_MIRROR=0`

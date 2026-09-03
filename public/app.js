@@ -8062,6 +8062,7 @@ async function syncTick(){
     SYNC.verbunden = true;
     SYNC.clients = d.clients || 1;
     zeigeUpdateHinweis(d.update);
+    zeigeServerWarnung(d.serverWarnung);
     if(warOffline || (out.collections && out.collections.fotos)) fotoUploadsAbgleichen();
     if(!d.unchanged){
       syncApply(d);   // übernimmt Merge + stellt SYNC.seq erst NACH Erfolg weiter
@@ -8140,6 +8141,25 @@ function zeigeUpdateHinweis(update){
   bar.append(txt, zu);
 }
 
+/* Live-Warnung vom ELW-Server (Persistenz-Problem: kein Platz, Speicherfehler …).
+   Kommt als `serverWarnung` in jeder /api/info- und /api/sync-Antwort; verschwindet
+   von selbst, sobald der Server wieder ok meldet. */
+function zeigeServerWarnung(text){
+  let bar = document.getElementById("srvWarnBar");
+  if(!text){ if(bar) bar.remove(); return; }
+  if(!bar){
+    bar = document.createElement("div");
+    bar.id = "srvWarnBar";
+    bar.className = "update-bar srv-warn";
+    bar.setAttribute("role", "alert");
+    const header = document.querySelector("#app header.topbar");
+    if(header && header.parentNode) header.parentNode.insertBefore(bar, header.nextSibling);
+    else document.body.insertBefore(bar, document.body.firstChild);
+  }
+  const voll = "⚠ " + text;
+  if(bar.textContent !== voll) bar.textContent = voll;
+}
+
 /* Hat dieses Gerät selbst schon Einsatzdaten erfasst? (sonst: frisch verbunden) */
 function einsatzHatDaten(){
   for(const name of SYNC_COLS){
@@ -8195,6 +8215,7 @@ async function syncInit(){
     SYNC.aktiv = true;
     SYNC.urls = d.urls || [];
     zeigeUpdateHinweis(d.update);
+    zeigeServerWarnung(d.serverWarnung);
     // Server führt bereits einen ANDEREN Einsatz als dieses Gerät?
     if(d.einsatzId && d.einsatzId !== state.einsatzId){
       let srv = null;

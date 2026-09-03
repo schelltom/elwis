@@ -76,6 +76,7 @@
     flex:0 0 auto;border:1.5px solid currentColor;background:transparent;color:inherit;
     border-radius:8px;padding:5px 12px;font-weight:600;min-height:0;white-space:nowrap}
   .update-bar-zu:hover{background:color-mix(in srgb,currentColor 12%,transparent)}
+  .update-bar.srv-warn{background:color-mix(in oklab,var(--accent) 16%,var(--surface));color:var(--accent)}
 
   /* Kurzhinweis: selbst verschwindender Toast (z. B. Ansichtswechsel wegen zu schmalem Fenster) */
   .kurzhinweis{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);z-index:120;
