@@ -106,24 +106,56 @@ dauerhaft jeden Merge „gewinnen".
 
 ### App-Auslieferung und Erreichbarkeit
 
-Die App (HTML/JS/CSS) wird im ELW-Betrieb **ausschließlich vom NAS** ausgeliefert
-(`http://<nas>:8474/`). Der Service Worker, der die App offline vorhalten würde,
-registriert sich laut `public/app.js` **nur auf HTTPS** – im ELW-WLAN läuft aber
-plain `http`. Daraus folgt praktischerweise:
+Die App (HTML/JS/CSS) wird im ELW-Betrieb vom NAS ausgeliefert (`http://<nas>:8474/`).
+Ob sie **offline** verfügbar ist, hängt am Service Worker (`public/sw.js`), und der
+läuft nur in einem **secure context** (`window.isSecureContext`):
+
+**A) Ohne Freigabe (plain `http`, Standard):** kein Service Worker, **kein
+App-Offline-Cache**. Praktische Folge:
 
 - **Kein NAS → keine App ladbar.** Der Fall „App gestartet, aber NAS noch nicht da"
-  kann im ELW-Betrieb gar nicht eintreten.
+  kann gar nicht eintreten.
 - **Wenn die App lädt, läuft der NAS** → `syncInit()` erreicht `/api/info` → das
   Gerät landet **immer** im Server-Einsatz.
+- Solange der Tab offen bleibt, arbeitet das Gerät auch bei WLAN-Verlust weiter
+  (JS im Speicher, Schreiben in IndexedDB). **Reload außerhalb der Reichweite =
+  weiße Seite.**
 
-`syncInit()` läuft nur **einmal beim App-Start**. Ein einmal laufender `syncTick`
-übersteht kurze WLAN-Aussetzer von selbst (Wiederverbindung alle 3 s).
+**B) ELW-Origin als „secure" freigegeben → echte Offline-PWA (empfohlen für
+mobil genutzte Tablets):**
 
-**Einziger Rest-Fall:** Tab ist bereits offen, der **NAS startet neu**, und *dann*
-wird die Seite neu geladen → weiße Seite, bis der NAS wieder da ist. Die schon
-laufende Sitzung **ohne** Reload läuft dagegen weiter und verbindet sich nach dem
-NAS-Neustart automatisch wieder. Reine NAS-Verfügbarkeit (NAS läuft 24/7), kein
-Einsatz-Konflikt.
+Auf den Tablets (Chrome/Android) die NAS-Origin freigeben:
+
+- manuell: `chrome://flags/#unsafely-treat-insecure-origin-as-secure` →
+  `http://<nas-ip>:8474` eintragen, aktivieren, Chrome neu starten; **oder**
+- verwaltet: MDM-Policy `OverrideSecurityRestrictionsOnInsecureOrigin` mit derselben
+  Origin (empfohlen, weil update- und resetfest).
+
+Dann registriert die App den Service Worker, precached die App-Shell
+(`index.html`, `app.js`, `app.css`, `leaflet`, `qrcode`, Icons) und liefert sie
+danach **auch komplett offline** aus (stale-while-revalidate: aus dem Cache
+antworten, im Hintergrund aktualisieren). Schwergewichte (Tesseract-OCR, PDF.js)
+werden erst bei Nutzung geladen und dann opportunistisch gecacht – einmal online
+„vorwärmen".
+
+Voraussetzungen/Fallstricke:
+- Die Freigabe ist **an die konkrete Origin gebunden** – ändert sich die NAS-IP
+  oder der Port, muss sie angepasst werden. Feste NAS-IP vergeben.
+- App-Updates: `sw.js` cached versioniert (`VERSION`-Konstante). Jeder Deploy muss
+  die `VERSION` erhöhen, sonst sieht ein Tablet die neue Version erst verzögert.
+  Der Hinweis-Banner „Neue Version liegt am ELW bereit" greift weiterhin.
+- iOS/Safari (das iPhone im Fahrerhaus) hat **kein** Flag-Äquivalent – braucht es
+  aber auch nicht, weil es immer in NAS-Nähe ist. Die Offline-PWA ist eine
+  Android-Chrome-Sache für die herumlaufenden Erfassungs-Tablets.
+- Alternative wäre echtes HTTPS am NAS (self-signed CA auf den Tablets ausrollen) –
+  gleicher Pro-Gerät-Aufwand, daher ist die Origin-Freigabe der pragmatische Weg.
+
+`syncInit()` läuft in beiden Fällen nur **einmal beim App-Start**; ein einmal
+laufender `syncTick` übersteht kurze WLAN-Aussetzer von selbst (alle 3 s).
+
+**Rest-Fall bei A):** Tab offen, **NAS startet neu**, *dann* Reload → weiße Seite,
+bis der NAS wieder da ist. Die Sitzung **ohne** Reload läuft weiter und verbindet
+sich automatisch wieder. Bei B) rendert die App-Shell auch dann aus dem Cache.
 
 ---
 
@@ -195,6 +227,7 @@ ihn dem Server dann **erzwungen** auf (`ersetzen`-Flag, ohne Konfliktdialog):
 | **Gleiches Feld gleichzeitig** | last-write-wins, kein Merge | bei Bedarf Feld-Sperre / „wird gerade bearbeitet"-Hinweis |
 | **Boot-Race** | nur wenn der NAS **leer** hochkommt (Datendatei verloren) *und* mehrere Geräte mit je eigenem Einsatz fast gleichzeitig pushen → erster besetzt die `einsatzId`, zweiter bekommt Konfliktdialog. Bei normalem NAS-Neustart (lädt `elwis-daten.json`) tritt das nicht auf. | organisatorisch: iPhone eröffnet, Rest verbindet; NAS-Backups schützen vor „leer hochkommen" |
 | **Discovery** | IP/QR-Code manuell | mDNS (`elw.local`), feste IP, Startseite mit „Verbinden"-Knopf |
+| **App offline (Tablets)** | ohne Origin-Freigabe kein App-Cache → Reload außer Reichweite = weiße Seite | NAS-Origin auf den Tablets als „secure" freigeben (Flag/MDM) → echte Offline-PWA, siehe Abschnitt 4 B) |
 
 ---
 

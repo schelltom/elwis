@@ -7713,15 +7713,18 @@ window.addEventListener("resize", () => {
 });
 
 /* ---------------- PWA: Service Worker registrieren ----------------
-   Nur auf echtem HTTPS-Host (z. B. GitHub Pages). Auf localhost NICHT –
-   dort verursacht der Cache beim Entwickeln veraltete/kaputte Assets.
-   Vorhandene Alt-Registrierungen auf localhost werden aktiv entfernt. */
+   In jedem "secure context": echtes HTTPS (z. B. GitHub Pages) ODER eine ELW-Origin,
+   die auf den Tablets per chrome://flags/#unsafely-treat-insecure-origin-as-secure
+   bzw. per MDM-Policy OverrideSecurityRestrictionsOnInsecureOrigin freigegeben ist –
+   dann wird die App am ELW zur echten Offline-PWA (App-Shell aus dem Cache).
+   Auf localhost NICHT – dort verursacht der Cache beim Entwickeln veraltete Assets;
+   vorhandene Alt-Registrierungen auf localhost werden aktiv entfernt. */
 const istLokal = location.hostname === "localhost" || location.hostname === "127.0.0.1";
 if("serviceWorker" in navigator){
   if(istLokal){
     navigator.serviceWorker.getRegistrations().then(rs => rs.forEach(r => r.unregister())).catch(() => {});
     if(window.caches) caches.keys().then(ks => ks.forEach(k => caches.delete(k))).catch(() => {});
-  }else if(location.protocol === "https:"){
+  }else if(window.isSecureContext){
     window.addEventListener("load", () => {
       navigator.serviceWorker.register("./sw.js").catch(() => {});
     });
