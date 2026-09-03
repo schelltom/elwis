@@ -65,10 +65,12 @@ try{
 
 /* ---------------- Speichern + automatisches Backup ----------------
    - Atomar: erst in .tmp schreiben, dann umbenennen → nie eine halbe Datei bei Absturz
-   - Rotierende Zeitstempel-Backups in server/backups/ (gedrosselt, letzte N behalten)
+   - Rotierende Zeitstempel-Backups in backups/ (gedrosselt; nach Anzahl UND Alter aufgeräumt)
    - Zusätzlich Sicherung beim Beenden (SIGINT/SIGTERM) */
 const SICHER_DIR = path.join(path.dirname(DATEI), "backups");
-const SICHER_MAX = 40;                 // so viele Backups behalten
+const SICHER_MAX = 40;                  // über dieser Zahl die ältesten wegräumen
+const SICHER_MAX_TAGE = 30;             // und alles Ältere als das …
+const SICHER_MIN = 10;                  // … aber nie unter so viele fallen
 const SICHER_INTERVALL = 2 * 60 * 1000; // höchstens alle 2 Minuten ein Backup
 let letztesBackup = 0;
 
@@ -80,10 +82,18 @@ function backupSchreiben(json){
   try{
     fs.mkdirSync(SICHER_DIR, { recursive: true });
     fs.writeFileSync(path.join(SICHER_DIR, `elwis-daten-${zeitStempel()}.json`), json);
-    const alte = fs.readdirSync(SICHER_DIR)
-      .filter(f => f.startsWith("elwis-daten-") && f.endsWith(".json")).sort();
-    for(const f of alte.slice(0, Math.max(0, alte.length - SICHER_MAX)))
-      fs.unlinkSync(path.join(SICHER_DIR, f));   // älteste über dem Limit entfernen
+    const alle = fs.readdirSync(SICHER_DIR)
+      .filter(f => f.startsWith("elwis-daten-") && f.endsWith(".json"))
+      .sort();   // Zeitstempel im Namen → lexikografisch = chronologisch
+    const grenze = Date.now() - SICHER_MAX_TAGE * 864e5;
+    alle.forEach((f, i) => {
+      const vonHinten = alle.length - i;              // 1 = neuestes
+      if(vonHinten <= SICHER_MIN) return;             // Sicherheits-Untergrenze
+      const p = path.join(SICHER_DIR, f);
+      let mtime = 0;
+      try{ mtime = fs.statSync(p).mtimeMs; }catch(_){}
+      if(vonHinten > SICHER_MAX || mtime < grenze) fs.unlinkSync(p);   // zu viele ODER zu alt
+    });
   }catch(e){ console.error("Backup fehlgeschlagen:", e.message); }
 }
 

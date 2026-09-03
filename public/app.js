@@ -394,7 +394,6 @@ function zustandAufbauen(stored){
   let maxGef = state.lage.items.reduce((m,i) => i.type==="gefahr" ? Math.max(m, i.num||0) : m, 0);
   state.lage.items.forEach(i => { if(i.type === "gefahr" && !i.num) i.num = ++maxGef; });
 }
-let syncing = false;
 let editing = null;   // { unit, isNew } – Einheit
 let editingFk = null; // { fk, isNew }  – Führungskraft
 
@@ -464,7 +463,6 @@ async function saveJetzt(){
   if(!state) return true;
   if(_saveT){ clearTimeout(_saveT); _saveT = null; }
   _saveDirty = false;
-  if(!state.wlan) state.pending++;
   try{ await idbSet("state", JSON.stringify(state)); speicherWachhund(); return true; }
   catch(e){ console.warn("[LOTSE112] Sofort-Speichern fehlgeschlagen:", e); return false; }
 }
@@ -473,7 +471,6 @@ async function saveJetzt(){
    save() tot waren (markChange schreibt asynchron). rollback() macht den Anhang bei Fehler rückgängig. */
 function anhangSichern(rollback, warnText, onOk){
   if(!state) return;
-  if(!state.wlan) state.pending++;
   if(_saveT){ clearTimeout(_saveT); _saveT = null; }
   _saveDirty = false;
   const misslungen = () => {
@@ -523,7 +520,7 @@ function speicherWachhund(){
     }
   });
 }
-function markChange(){ if(!state.wlan) state.pending++; save(); speicherWachhund(); }
+function markChange(){ save(); speicherWachhund(); }
 function pfx(org){ return state.config.prefixes[org] ?? ""; }
 /* Funkrufname normalisieren: führendes Gattungswort (z. B. „Feuerwehr"/„FF") durch das je
    Organisation konfigurierte Präfix ersetzen – „Feuerwehr Schirmitz" → „Florian Schirmitz". */
@@ -1162,29 +1159,14 @@ document.querySelectorAll(".brand, .rail-brand").forEach(el => {
 /* ---------------- Kopfzeile / Sync ---------------- */
 function renderHeader(){
   $("#appSub").textContent = state.config.ugName || "";
-  const pill = $("#syncPill"), txt = $("#syncText"), sw = $("#wlanSwitch");
-  sw.setAttribute("aria-checked", state.wlan ? "true" : "false");
-  pill.classList.toggle("busy", syncing);
-  if(syncing){
-    pill.classList.remove("good");
-    txt.textContent = `Synchronisiere ${state.pending} Änderung${state.pending===1?"":"en"} …`;
-  }else if(state.wlan){
-    pill.classList.add("good");
-    txt.textContent = "Synchron";
-  }else{
-    pill.classList.remove("good");
-    txt.textContent = state.pending > 0 ? `Offline · ${state.pending} lokal` : "Offline · bereit";
+  // Bei aktivem ELW-Sync setzt syncPill() Klasse + Text; hier nur der Eigenständig-Fall
+  // (kein ELW-Server erreichbar).
+  if(typeof SYNC === "undefined" || !SYNC.aktiv){
+    const pill = $("#syncPill");
+    pill.classList.remove("busy", "good");
+    $("#syncText").textContent = "Eigenständig";
   }
 }
-$("#wlanSwitch").addEventListener("click", () => {
-  state.wlan = !state.wlan;
-  if(state.wlan && state.pending > 0){
-    syncing = true; save(); render();
-    setTimeout(() => { syncing = false; state.pending = 0; save(); render(); }, 1400);
-    return;
-  }
-  save(); render();
-});
 $("#btnSettings").addEventListener("click", () => { if(state) renderSettingsSheet(); });
 
 /* ---------------- Navigation ---------------- */
@@ -7934,8 +7916,7 @@ async function syncTick(){
 }
 function syncPill(){
   if(!SYNC.aktiv) return;
-  const pill = $("#syncPill"), txt = $("#syncText"), sw = $("#wlanSwitch");
-  if(sw) sw.style.display = "none"; // Simulations-Schalter weg, der Sync ist echt
+  const pill = $("#syncPill"), txt = $("#syncText");
   if(!pill || !txt) return;
   pill.classList.remove("busy");
   if(SYNC.verbunden){

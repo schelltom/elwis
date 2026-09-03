@@ -1,14 +1,14 @@
 /* LOTSE112 Service Worker – macht die App nach dem ersten Besuch offline nutzbar.
    Strategie: Precache der App-Dateien, danach stale-while-revalidate
    (aus dem Cache antworten, im Hintergrund aktualisieren). */
-const VERSION = "elwis-v151";
+const VERSION = "elwis-v152";
 const ASSETS = [
   "./",
   "./app.css",
   "./app.js",
   "./icon.svg",
   "./manifest.webmanifest",
-  "./demo-einsatz.json",
+  // (demo-einsatz.json bewusst NICHT im Precache – nur „Beispieldaten laden" holt es)
   // In index.html synchron eingebundene Vendor-Dateien – müssen offline da sein,
   // sonst startet die App-Shell nicht. Schwergewichte (tesseract, pdfjs) werden
   // dagegen erst bei Nutzung geladen und dann per stale-while-revalidate gecacht.
