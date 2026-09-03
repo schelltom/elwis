@@ -429,6 +429,138 @@ function idbSet(key, val){
     tx.onerror    = () => reject(tx.error);
   }));
 }
+function idbDel(key){
+  return idbOpen().then(db => new Promise((resolve, reject) => {
+    const tx = db.transaction(DB_STORE, "readwrite");
+    tx.objectStore(DB_STORE).delete(key);
+    tx.oncomplete = () => resolve();
+    tx.onerror    = () => reject(tx.error);
+  }));
+}
+function idbKeys(){
+  return idbOpen().then(db => new Promise((resolve, reject) => {
+    const req = db.transaction(DB_STORE, "readonly").objectStore(DB_STORE).getAllKeys();
+    req.onsuccess = () => resolve(req.result || []);
+    req.onerror   = () => reject(req.error);
+  }));
+}
+
+/* ---------------- Foto-Speicher ----------------
+   state.fotos trägt nur { id, zeit, notiz }. Die Bilddaten (Data-URI) liegen NICHT im
+   State-Blob und NICHT im /api/sync, sondern gerätelokal in IndexedDB ("foto:<id>")
+   und am ELW-Server unter /api/foto/<id>. Anzeige über <img data-foto="<id>">, das
+   fotosEinblenden() nach dem Rendern mit der Bildquelle füllt. */
+const _fotoCache = new Map();         // id → Data-URI (nur was dieses Gerät hat)
+const _fotoHochgeladen = new Set();   // ids, die am ELW bestätigt liegen
+let _fotoServerGeprueft = false, _fotoUploadLaeuft = false;
+
+function blobAlsDataURI(b){
+  return new Promise(res => { const fr = new FileReader(); fr.onload = () => res(fr.result); fr.onerror = () => res(null); fr.readAsDataURL(b); });
+}
+async function fotoDatenHolen(id){
+  if(_fotoCache.has(id)) return _fotoCache.get(id);
+  try{ const lokal = await idbGet("foto:" + id); if(lokal){ _fotoCache.set(id, lokal); return lokal; } }catch(_){}
+  if(SYNC.aktiv){
+    try{
+      const r = await fetch("./api/foto/" + id);
+      if(r.ok){
+        const durl = await blobAlsDataURI(await r.blob());
+        if(durl){ _fotoCache.set(id, durl); return durl; }
+      }
+    }catch(_){}
+  }
+  return null;
+}
+/* Bild lokal ablegen (IndexedDB + RAM-Cache). true = gespeichert, false = Speicher voll. */
+async function fotoDatenAblegen(id, dataUri){
+  _fotoCache.set(id, dataUri);
+  try{ await idbSet("foto:" + id, dataUri); return true; }
+  catch(e){ _fotoCache.delete(id); console.warn("[LOTSE112] Foto lokal speichern fehlgeschlagen:", e); return false; }
+}
+async function fotoBytesLoeschen(id){
+  _fotoCache.delete(id); _fotoHochgeladen.delete(id);
+  try{ await idbDel("foto:" + id); }catch(_){}
+  if(SYNC.aktiv){ try{ await fetch("./api/foto/" + id, { method: "DELETE" }); }catch(_){} }
+}
+/* Verwaiste foto:<id>-Einträge (kein Datensatz mehr) aus IndexedDB entfernen. */
+async function fotoBytesAufraeumen(){
+  try{
+    const behalten = new Set((state.fotos || []).map(f => "foto:" + f.id));
+    for(const k of await idbKeys())
+      if(typeof k === "string" && k.startsWith("foto:") && !behalten.has(k)){ await idbDel(k); _fotoCache.delete(k.slice(5)); }
+  }catch(_){}
+}
+/* Nach dem Rendern (und aus dem Sync-Tick): <img data-foto> mit Bildquelle füllen –
+   lokal bevorzugt, sonst vom ELW. Noch fehlende Bilder werden bei jedem Aufruf erneut versucht. */
+function fotosEinblenden(root){
+  (root || document).querySelectorAll("img[data-foto]").forEach(img => {
+    if(img.dataset.fotoGeladen && !img.classList.contains("foto-fehlt")) return;
+    img.dataset.fotoGeladen = "1";
+    const id = img.dataset.foto;
+    const lokal = _fotoCache.get(id);
+    if(lokal){ img.src = lokal; img.classList.remove("foto-fehlt"); return; }
+    if(SYNC.aktiv){
+      fetch("./api/foto/" + id).then(async r => {
+        if(!r.ok){ img.classList.add("foto-fehlt"); img.alt = "Foto wird übertragen …"; return; }
+        const durl = await blobAlsDataURI(await r.blob());
+        if(durl){ _fotoCache.set(id, durl); idbSet("foto:" + id, durl).catch(() => {}); if(img.isConnected){ img.src = durl; img.classList.remove("foto-fehlt"); } }
+      }).catch(() => { img.classList.add("foto-fehlt"); });
+    }else{
+      img.classList.add("foto-fehlt"); img.alt = "Foto nur auf einem anderen Gerät";
+    }
+  });
+}
+/* Foto aufnehmen: Metadaten in state.fotos, Bytes lokal, Upload anstoßen. */
+function fotoAufnehmen(dataUri, onOk){
+  const id = uid();
+  state.fotos.push({ id, zeit: new Date().toISOString(), notiz: "" });
+  fotoDatenAblegen(id, dataUri).then(ok => {
+    if(!ok){
+      state.fotos = state.fotos.filter(x => x.id !== id);
+      render();
+      modalInfo("Lokaler Speicher voll – das Foto wurde nicht gespeichert. Bitte alte Fotos löschen oder den Einsatz exportieren.");
+      return;
+    }
+    markChange();
+    fotoUploadsAbgleichen();
+    if(onOk) onOk();
+  });
+}
+/* Ausstehende Foto-Uploads zum ELW schicken (nach Verbindung + nach jeder Aufnahme). */
+async function fotoUploadsAbgleichen(){
+  if(_fotoUploadLaeuft || !SYNC.aktiv || !state) return;
+  _fotoUploadLaeuft = true;
+  try{
+    if(!_fotoServerGeprueft){
+      try{ const r = await fetch("./api/fotos"); if(r.ok) ((await r.json()).ids || []).forEach(x => _fotoHochgeladen.add(x)); }catch(_){}
+      _fotoServerGeprueft = true;
+    }
+    for(const f of [...(state.fotos || [])]){
+      if(_fotoHochgeladen.has(f.id)) continue;
+      let d = _fotoCache.get(f.id);
+      if(!d){ try{ d = await idbGet("foto:" + f.id); }catch(_){}}
+      if(!d) continue;   // haben wir nicht → ein anderes Gerät lädt es hoch
+      try{
+        const blob = await (await fetch(d)).blob();
+        const r = await fetch("./api/foto/" + f.id, { method: "PUT", headers: { "Content-Type": "image/jpeg" }, body: blob });
+        if(r.ok) _fotoHochgeladen.add(f.id);
+      }catch(_){ /* offline → nächster Versuch */ }
+    }
+  }finally{ _fotoUploadLaeuft = false; }
+}
+/* data.fotos für Bericht/Word/Export mit den echten Bytes hydrieren. */
+async function fotosMitBytes(liste){
+  return Promise.all((liste || []).map(async f => f.data ? f : { ...f, data: await fotoDatenHolen(f.id) }));
+}
+/* Foto-Liste aus Import/Archiv/Demo übernehmen: Bytes in den lokalen Speicher, im State nur Metadaten. */
+async function fotosUebernehmen(liste){
+  state.fotos = [];
+  for(const f of (liste || [])){
+    const { data, ...meta } = f;
+    state.fotos.push(meta);
+    if(data && String(data).startsWith("data:")) await fotoDatenAblegen(meta.id, data);
+  }
+}
 /* Zustand laden – aus IndexedDB, mit einmaliger Übernahme aus altem localStorage */
 async function ladeZustand(){
   try{
@@ -1712,13 +1844,13 @@ function syncEinsatzleiterFk(){
   }
 }
 /* Einsatz als Datei sichern / einlesen – Backup, Gerätewechsel, „Sync per USB-Stick“ */
-function exportEinsatz(){
+async function exportEinsatz(){
   const data = {
     elwis: 1, full: 1, exportiert: new Date().toISOString(), ugName: state.config.ugName,
     einsatz: state.einsatz, einheiten: state.einheiten, fuehrung: state.fuehrung,
     abschnitte: state.abschnitte, lage: state.lage, funk: state.funk,
     besprechungen: state.besprechungen, anforderungen: state.anforderungen,
-    checks: state.checks, fotos: state.fotos,
+    checks: state.checks, fotos: await fotosMitBytes(state.fotos),   // Backup enthält die Bilder
     asTraeger: state.asTraeger, asTrupps: state.asTrupps,
     archiv: state.archiv, config: state.config,   // Komplett-Backup: auch Archiv + Einstellungen/Kataloge
   };
@@ -1749,7 +1881,7 @@ function importEinsatz(file){
       state.besprechungen = d.besprechungen || [];
       state.anforderungen = d.anforderungen || [];
       state.checks = d.checks || [];
-      state.fotos = d.fotos || [];
+      await fotosUebernehmen(d.fotos);   // Bytes in den lokalen Foto-Speicher, im State nur Metadaten
       state.asTraeger = d.asTraeger || [];
       state.asTrupps = d.asTrupps || [];
       // Komplett-Backup: auf Wunsch auch Archiv + Einstellungen/Kataloge wiederherstellen
@@ -1767,8 +1899,9 @@ function importEinsatz(file){
       }
       state.einsatzId = uid(); state.einsatzStart = new Date().toISOString();
       einsatzErsetzenErzwingen();   // importierten Einsatz erzwungen zur Server-Wahrheit machen
-      anhangSichern(() => { state.fotos = []; state.lage.bg = ""; },
-        "Import gelungen, aber Fotos/Kartenhintergrund passten nicht in den lokalen Speicher und wurden weggelassen.");
+      anhangSichern(() => { state.lage.bg = ""; },
+        "Import gelungen, aber der Kartenhintergrund passte nicht in den lokalen Speicher und wurde weggelassen.");
+      fotoBytesAufraeumen(); fotoUploadsAbgleichen();
       render();
     }catch(err){
       modalInfo("Datei konnte nicht gelesen werden – ist das ein LOTSE112-Export (.json)?");
@@ -1787,7 +1920,7 @@ function openFotoSheet(id){
       <button class="sheet-close" data-close="1" aria-label="Schließen">×</button>
     </div>
     <div class="sheet-body">
-      <img src="${f.data}" alt="Einsatzfoto" style="width:100%;border-radius:12px;margin-bottom:14px">
+      <img data-foto="${esc(f.id)}" alt="Einsatzfoto" style="width:100%;border-radius:12px;margin-bottom:14px">
       <div class="field"><label for="foto-notiz">Kommentar</label>
         <div class="dictate-wrap">
           <textarea id="foto-notiz" rows="3" placeholder="z. B. Giebelwand Ostseite, Riss sichtbar">${esc(f.notiz||"")}</textarea>
@@ -1801,10 +1934,12 @@ function openFotoSheet(id){
     </div>
   </div>`;
   document.querySelectorAll("[data-close]").forEach(el => el.addEventListener("click", closeEditor));
+  fotosEinblenden($("#sheetHost"));
   attachDictation($("#foto-mic"), $("#foto-notiz"));
   $("#foto-del").addEventListener("click", () => {
     modalConfirm("Dieses Foto wirklich löschen?").then(ok => { if(!ok) return;
       state.fotos = state.fotos.filter(x => x.id !== f.id);
+      fotoBytesLoeschen(f.id);
       markChange(); closeEditor(); render();
     });
   });
@@ -1818,7 +1953,7 @@ function renderFotodoku(){
   const fotos = [...state.fotos].sort((a, b) => (b.zeit||"").localeCompare(a.zeit||""));
   const grid = fotos.length ? `<div class="foto-doku-grid">
     ${fotos.map(f => `<figure class="foto-doku-item" data-foto="${esc(f.id)}">
-      <img src="${f.data}" alt="Einsatzfoto ${fmtZeit(f.zeit)}">
+      <img data-foto="${esc(f.id)}" alt="Einsatzfoto ${fmtZeit(f.zeit)}">
       <figcaption>
         <span class="foto-zeit mono">${fmtDatum(f.zeit)} · ${fmtZeit(f.zeit)} Uhr</span>
         <span class="foto-note ${f.notiz ? "" : "leer"}">${f.notiz ? esc(f.notiz) : "Kommentar hinzufügen …"}</span>
@@ -1839,11 +1974,7 @@ function renderFotodoku(){
   </div>`;
 }
 function fotoSpeichern(file, onDone){
-  resizeImage(file, 1600, data => {
-    state.fotos.push({ id:uid(), zeit:new Date().toISOString(), data, notiz:"" });
-    anhangSichern(() => state.fotos.pop(), "Speicher voll – das Foto wurde nicht gespeichert. Bitte alte Fotos löschen oder den Einsatz exportieren.");
-    if(onDone) onDone();
-  });
+  resizeImage(file, 1600, data => fotoAufnehmen(data, onDone));
 }
 // Live-Kamera für die Foto-Doku – bleibt offen, mehrere Aufnahmen nacheinander
 async function fotoDokuKamera(){
@@ -1880,8 +2011,7 @@ async function fotoDokuKamera(){
     const c = document.createElement("canvas");
     c.width = video.videoWidth; c.height = video.videoHeight;
     c.getContext("2d").drawImage(video, 0, 0, c.width, c.height);
-    state.fotos.push({ id:uid(), zeit:new Date().toISOString(), data:c.toDataURL("image/jpeg", .72), notiz:"" });
-    anhangSichern(() => state.fotos.pop(), "Speicher voll – das Foto wurde nicht gespeichert. Bitte alte Fotos löschen.", () => {
+    fotoAufnehmen(c.toDataURL("image/jpeg", .72), () => {
       n++; countEl.textContent = n + (n === 1 ? " Foto" : " Fotos") + " aufgenommen";
       shotBtn.classList.add("flash"); setTimeout(() => shotBtn.classList.remove("flash"), 160);
     });
@@ -1898,10 +2028,11 @@ function wireFotodoku(){
   };
   $("#fotoFile").addEventListener("change", fotoImport);
   $("#fotoCamNative").addEventListener("change", fotoImport);
-  document.querySelectorAll("[data-foto]").forEach(el =>
+  document.querySelectorAll("figure[data-foto]").forEach(el =>
     el.addEventListener("click", () => openFotoSheet(el.dataset.foto)));
+  fotosEinblenden($("#view"));
 }
-function baueArchivEintrag(){
+async function baueArchivEintrag(){
   return {
     id: uid(), ende: new Date().toISOString(),
     einsatz: {...state.einsatz},
@@ -1918,7 +2049,7 @@ function baueArchivEintrag(){
       items: state.lage.items.map(i => ({...i})),
       tiles: (state.lage.tiles || []).map(t => ({...t, items: (t.items||[]).map(i => ({...i}))})),
       snapshots: state.lage.snapshots.map(s => ({...s, items: s.items.map(i => ({...i}))})) },
-    fotos: state.fotos.map(f => ({...f})),
+    fotos: await fotosMitBytes(state.fotos),   // Archiv ist selbsttragend (Bilder eingebettet)
   };
 }
 /* Archivierten Einsatz wieder aktiv machen (aktueller Einsatz wird vorher archiviert) */
@@ -1930,7 +2061,7 @@ async function aktiviereArchiv(id){
   const frage = `Einsatz „${a.einsatz.stichwort || "ohne Stichwort"}“ wieder aktivieren?` +
     (hatInhalt ? "\nDer aktuell erfasste Einsatz wird dabei automatisch archiviert." : "");
   if(!(await modalConfirm(frage, "Aktivieren"))) return;
-  if(hatInhalt) state.archiv.push(baueArchivEintrag());
+  if(hatInhalt) state.archiv.push(await baueArchivEintrag());
   state.archiv = state.archiv.filter(x => x.id !== id);
   state.einsatz = {...a.einsatz};
   state.einheiten = (a.einheiten || []).map(x => ({...x}));
@@ -1944,13 +2075,14 @@ async function aktiviereArchiv(id){
     ? { bg: a.lage.bg || "", items: (a.lage.items || []).map(x => ({...x})),
         snapshots: (a.lage.snapshots || []).map(s => ({...s, items:(s.items || []).map(x => ({...x}))})) }
     : { items: [], bg: "", snapshots: [] };
-  state.fotos = (a.fotos || []).map(x => ({...x}));
+  await fotosUebernehmen(a.fotos);
   state.asTraeger = (a.asTraeger || []).map(x => ({...x}));
   state.asTrupps = (a.asTrupps || []).map(x => ({...x, memberIds:[...(x.memberIds||[])]}));
   // Neue Sync-Identität: der reaktivierte Einsatz wird zum aktuellen (auch am Server)
   state.einsatzId = uid();
   state.einsatzStart = new Date().toISOString();
   einsatzErsetzenErzwingen();   // reaktivierter Einsatz wird erzwungen zur Server-Wahrheit
+  fotoBytesAufraeumen(); fotoUploadsAbgleichen();
   markChange(); render();
 }
 async function endeEinsatz(){
@@ -1959,7 +2091,7 @@ async function endeEinsatz(){
   }
   if(!(await modalConfirm("Einsatz jetzt beenden? Er wird archiviert und die Erfassung geleert."))) return;
   state.einsatz.ende = nowLocalInput();   // Einsatzende auf jetzt setzen (wird mit archiviert/gedruckt)
-  const entry = baueArchivEintrag();
+  const entry = await baueArchivEintrag();
   state.archiv.push(entry);
   state.einsatzId = uid(); state.einsatzStart = new Date().toISOString();
   einsatzErsetzenErzwingen();   // geleerten Stand erzwungen an den Server (Archiv bleibt lokal)
@@ -1969,6 +2101,8 @@ async function endeEinsatz(){
   state.funk = []; state.besprechungen = [];
   state.anforderungen = []; state.checks = []; state.fotos = [];
   state.asTraeger = []; state.asTrupps = [];
+  fotoBytesAufraeumen();   // lokale Bild-Bytes des beendeten Einsatzes freigeben (Archiv trägt sie eingebettet)
+  _fotoHochgeladen.clear(); _fotoServerGeprueft = false;
   if(!(await saveJetzt())){
     // Speicher voll: Bilder aus dem Archiveintrag entfernen und erneut versuchen
     entry.fotos = []; entry.lage.bg = ""; entry.lage.snapshots = [];
@@ -2003,11 +2137,12 @@ async function loadDemo(){
   state.besprechungen = demo.besprechungen || [];
   state.anforderungen = demo.anforderungen || [];
   state.checks        = demo.checks        || [];
-  state.fotos         = demo.fotos         || [];
   state.asTraeger     = demo.asTraeger     || [];
   state.asTrupps      = demo.asTrupps      || [];
   state.lage = Object.assign({ items:[], bg:"", snapshots:[], mode:"raster", mapView:null, mapLayer:"luftbild" }, demo.lage || {});
   if(demo.lwbilanz) state.lwbilanz = demo.lwbilanz;
+  await fotosUebernehmen(demo.fotos);
+  fotoBytesAufraeumen(); fotoUploadsAbgleichen();
   markChange(); render();
 }
 /* Alle Zeitstempel des Beispiel-Einsatzes verschieben, sodass die jüngste Aktivität ~jetzt liegt;
@@ -7188,10 +7323,11 @@ function reportBodyHtml(data, sel, opts){
         <td style="white-space:pre-wrap">${esc(b.protokoll)}</td>
       </tr>`).join("")}
     </tbody></table>` : "<p>Keine protokolliert.</p>"}` : "";
-  const secFotos = on("fotodoku") && (data.fotos||[]).length ? `
-    <h2>Fotodokumentation (${data.fotos.length})</h2>
+  const pFotos = (data.fotos || []).filter(f => f.data);   // nur Bilder, deren Bytes vorliegen (siehe fotosMitBytes)
+  const secFotos = on("fotodoku") && pFotos.length ? `
+    <h2>Fotodokumentation (${pFotos.length})</h2>
     <div class="p-fotos">
-      ${[...data.fotos].sort((a,b) => (a.zeit||"").localeCompare(b.zeit||"")).map(f => `
+      ${[...pFotos].sort((a,b) => (a.zeit||"").localeCompare(b.zeit||"")).map(f => `
       <div class="p-foto">
         <img src="${f.data}" alt="Einsatzfoto">
         <div class="p-foto-cap"><span class="p-mono">${fmtZeit(f.zeit)} Uhr</span>${f.notiz ? " – " + esc(f.notiz) : ""}</div>
@@ -7316,6 +7452,7 @@ function warteAufBilder(root){
 }
 async function doPrint(data, sel){
   await backfillSnapshotBilder(data);   // Lagebilder ohne eingefangenes Luftbild vor dem Druck nachziehen
+  data = { ...data, fotos: await fotosMitBytes(data.fotos) };   // Foto-Bytes für den Bericht besorgen
   $("#printArea").innerHTML = reportBodyHtml(data, sel);
   warteAufBilder($("#printArea")).then(() => window.print());
 }
@@ -7437,6 +7574,7 @@ async function wordBodyMitGrafik(body){
 async function exportWord(data, sel){
   const e = data.einsatz;
   const pEnde = e.ende || data.ende;
+  data = { ...data, fotos: await fotosMitBytes(data.fotos) };   // Foto-Bytes für den Bericht besorgen
   let body = reportBodyHtml(data, sel, { word:true });
   try{ body = await wordBodyMitGrafik(body); }
   catch(err){ console.warn("[LOTSE112] Word-Grafik fehlgeschlagen, nutze HTML:", err && err.message); }
@@ -7670,6 +7808,7 @@ function render(sanft){
   main.innerHTML = html;
   _ansichtSig = sig;
   if(wire) wire();
+  if(typeof fotosEinblenden === "function") fotosEinblenden(main);   // <img data-foto> mit Bildquelle füllen
 }
 // Der erste Render passiert async in boot() (unten), sobald der Zustand aus
 // IndexedDB geladen ist.
@@ -7919,9 +8058,11 @@ async function syncTick(){
     if(!res.ok) throw new Error("HTTP " + res.status);
     const d = await res.json();
     syncErsetzen = false;   // Push kam an → Ersetzen-Wunsch ist erledigt
+    const warOffline = !SYNC.verbunden;
     SYNC.verbunden = true;
     SYNC.clients = d.clients || 1;
     zeigeUpdateHinweis(d.update);
+    if(warOffline || (out.collections && out.collections.fotos)) fotoUploadsAbgleichen();
     if(!d.unchanged){
       syncApply(d);   // übernimmt Merge + stellt SYNC.seq erst NACH Erfolg weiter
       SYNC.pending = 0;
@@ -7929,6 +8070,7 @@ async function syncTick(){
       // baut das DOM nur um, wenn sich der Inhalt der aktiven Ansicht wirklich ändert.
       if(!snapGleich(syncSnapLoad(), vorher) && !syncTipptGerade()) render(true);
       else renderHeader();
+      if(document.querySelector("img.foto-fehlt")) fotosEinblenden(document);   // inzwischen hochgeladene Bilder nachladen
     }else{
       SYNC.seq = d.seq;
       if(pending === 0) SYNC.pending = 0;
@@ -8121,8 +8263,15 @@ async function boot(){
   }catch(e){ /* ohne Snapshot wird beim ersten Abgleich einmalig alles gepusht */ }
   if(!state.einsatz.beginn) state.einsatz.beginn = nowLocalInput();
   if(!TABS.some(t => t.id === state.view)) state.view = "einsatz";
+  // Migration: Inline-Bilddaten aus dem State-Blob in den getrennten Foto-Speicher heben
+  let fotoMig = false;
+  for(const f of state.fotos || []){
+    if(f.data && String(f.data).startsWith("data:")){ await fotoDatenAblegen(f.id, f.data); delete f.data; fotoMig = true; }
+  }
+  if(fotoMig) save();
   render();
   syncInit();
   ladeAppVersion();
+  fotoBytesAufraeumen();
 }
 boot();

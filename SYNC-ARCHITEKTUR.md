@@ -59,6 +59,8 @@ Keine externen Abhängigkeiten – nur Node (≥ 18) auf dem NAS.
 |---|---|
 | `GET /api/info` | „Bin ein ELW-Server", aktuelle `einsatzId`, `seq`, verbundene Geräte, LAN-URLs, App-Update-Status |
 | `POST /api/sync` | Diff entgegennehmen, mergen, Delta seit `seq` zurückgeben (oder `unchanged` / kompletten Stand beim Erstabgleich bzw. Alt-Client) |
+| `GET/PUT/DELETE /api/foto/<id>` | Foto-Binärdatei (JPEG) abrufen / hochladen / löschen – getrennt vom Einsatzstand, `Cache-Control: immutable` |
+| `GET /api/fotos` | IDs der Fotos, die der Server hat (Upload-Abgleich) |
 | `GET /api/backups` | Backup-Liste (Name, Größe, Zeit) |
 | `POST /api/restore` | Backup wiederherstellen → neue `einsatzId` mit „jetzt", alle Clients ziehen nach |
 | alles andere | statische App aus `dist/` (SPA-Fallback auf `index.html`) |
@@ -81,6 +83,21 @@ Einsatz-Stammdaten werden **feldweise** synchronisiert
 (`einsatz:stichwort`, `einsatz:ort`, `einsatz:leiter`, … sowie `lageBg`, `lwbilanz`).
 Pro Feld gewinnt der **jüngste Zeitstempel**. Zwei Personen an **verschiedenen**
 Feldern stören sich also nicht; an **demselben** Feld gewinnt der letzte Speichervorgang.
+
+### Fotos (Sonderfall)
+
+`state.fotos` trägt im Sync nur die Metadaten `{ id, zeit, notiz }`. Die Bilddaten
+laufen **nicht** durch `/api/sync` und liegen **nicht** im State-Blob, sondern:
+
+- gerätelokal in IndexedDB unter `foto:<id>` (aufgenommene / vom Server geholte)
+- am ELW-Server als JPEG-Datei unter `server/fotos/<id>`, abrufbar über `GET /api/foto/<id>`
+
+Ablauf: Aufnahme → lokal ablegen → Metadaten syncen → Binärdatei per `PUT` hochladen
+(offline: Warteschlange, Abgleich bei Verbindung über `GET /api/fotos`). Andere Geräte
+rendern `<img data-foto>` und ziehen das Bild von `/api/foto/<id>` (Platzhalter, solange
+noch nicht hochgeladen). Bericht/Word/Export holen die Bytes vorher über `fotosMitBytes()`;
+das lokale Archiv bettet sie eingebettet. Alt-Stände / Alt-Clients mit Inline-`data`
+werden serverseitig automatisch in Dateien ausgelagert.
 
 ### Sammlungen (`SYNC_COLS`)
 `einheiten`, `fuehrung`, `abschnitte`, `funk`, `besprechungen`, `anforderungen`,
@@ -231,7 +248,7 @@ ihn dem Server dann **erzwungen** auf (`ersetzen`-Flag, ohne Konfliktdialog):
 | **NAS = Single Point of Failure** | Fällt das NAS aus, laufen alle Geräte lokal weiter, mergen aber nicht mehr untereinander | Desktop als Hot-Standby-Server; „dieses Gerät als Server"-Modus; Recovery = NAS neu starten (lädt `elwis-daten.json`) oder ein Gerät per „meinen Einsatz erzwingen" |
 | **Echtzeit** | 3-s-Polling | WebSocket/SSE senkt Latenz und NAS-Last, kostet Komplexität |
 | **Delta-Overhead** | jede Delta-Antwort enthält die vollständige ID-Liste je Sammlung (für die Löscherkennung) – wenige KB, aber wächst mit dem Einsatz | Tombstones mit eigener `_s` führen und nur Lösch-IDs seit `seq` senden |
-| **Fotos im Sync-Channel** | Fotos liegen als Base64 in den `fotos`-Datensätzen und laufen durch Merge/IndexedDB/Delta | eigener Endpunkt `/api/foto/:id` (binär, unveränderlich), im Sync nur Metadaten + ID |
+| **Foto-Speicher am NAS** | `server/fotos/` wächst und wird nicht rotiert / nicht mit den JSON-Backups gesichert | von einem regulären NAS-Backup abgedeckt; ggf. GC verwaister Dateien nach Einsatzende |
 | **Backups** | nur auf dem NAS | zusätzlicher Export auf zweites Medium (USB / zweite Freigabe) |
 | **Gleiches Feld gleichzeitig** | last-write-wins, kein Merge | bei Bedarf Feld-Sperre / „wird gerade bearbeitet"-Hinweis |
 | **Boot-Race** | nur wenn der NAS **leer** hochkommt (Datendatei verloren) *und* mehrere Geräte mit je eigenem Einsatz fast gleichzeitig pushen → erster besetzt die `einsatzId`, zweiter bekommt Konfliktdialog. Bei normalem NAS-Neustart (lädt `elwis-daten.json`) tritt das nicht auf. | organisatorisch: iPhone eröffnet, Rest verbindet; NAS-Backups schützen vor „leer hochkommen" |
@@ -259,6 +276,8 @@ Server-Datei per `ELWIS_DATEN=<pfad>` umlenkbar (Tests nutzen ein Temp-Verzeichn
 - Server-Hülle: `server/lotse112-server.mjs` → `mergeSync()`-Wrapper, `deltaAntwort()`, `standAntwort()`, Routen ab `http.createServer`
 - Client-Sync: `public/app.js` → `SYNC`, `SYNC_COLS`, `syncDiff()`, `syncApply()`,
   `mergeDeltaCollection()`, `snapGleich()`, `syncTick()`, `syncInit()`, `frageEinsatzKonflikt()`
+- Foto-Speicher: `public/app.js` → `fotoAufnehmen()`, `fotoDatenHolen()`, `fotosEinblenden()`,
+  `fotoUploadsAbgleichen()`, `fotosMitBytes()`; Server → `fotoDataAuslagern()`, Routen `/api/foto*`
 - Persistenz Client: `idbGet` / `idbSet`, `ladeZustand()`, `boot()`
 - Auto-Mirror der App-Version (unabhängig vom Einsatz-Sync): `pruefeAufUpdate()`,
   `aktiviereBereitgestellte()`, abschaltbar mit `ELWIS_MIRROR=0`

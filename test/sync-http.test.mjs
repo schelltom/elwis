@@ -108,6 +108,47 @@ test("große Antworten kommen gzip-komprimiert", async () => {
   assert.equal(j.collections.einheiten.length, 50);
 });
 
+test("Fotos: PUT speichert, GET liefert, /api/fotos listet, DELETE entfernt", async () => {
+  const bytes = Buffer.from("\xFF\xD8\xFF\xE0JPEGDUMMY" + "x".repeat(200), "binary");
+  const put = await fetch(`${BASE}/api/foto/testbild1`, { method: "PUT", headers: { "Content-Type": "image/jpeg" }, body: bytes });
+  assert.equal(put.status, 200);
+
+  const get = await fetch(`${BASE}/api/foto/testbild1`);
+  assert.equal(get.status, 200);
+  assert.equal(get.headers.get("content-type"), "image/jpeg");
+  assert.match(get.headers.get("cache-control") || "", /immutable/);
+  const back = Buffer.from(await get.arrayBuffer());
+  assert.equal(back.length, bytes.length);
+
+  const etag = get.headers.get("etag");
+  const get304 = await fetch(`${BASE}/api/foto/testbild1`, { headers: { "If-None-Match": etag } });
+  assert.equal(get304.status, 304);
+
+  const liste = await (await fetch(`${BASE}/api/fotos`)).json();
+  assert.ok(liste.ids.includes("testbild1"));
+
+  await fetch(`${BASE}/api/foto/testbild1`, { method: "DELETE" });
+  assert.equal((await fetch(`${BASE}/api/foto/testbild1`)).status, 404);
+});
+
+test("Fotos: ungültige ID → 400, unbekannte ID → 404", async () => {
+  assert.equal((await fetch(`${BASE}/api/foto/..%2Fetc`)).status, 400);
+  assert.equal((await fetch(`${BASE}/api/foto/gibtsnicht`)).status, 404);
+});
+
+test("Alt-Client mit Inline-Foto: data wird ausgelagert, nicht im Stand gespeichert", async () => {
+  const eid = "fotoinline-" + Date.now();
+  const px = "data:image/jpeg;base64," + Buffer.from("JPEGDUMMYINLINE").toString("base64");
+  const r = await sync({ clientId: "OLD", seq: 0, einsatzId: eid, einsatzStart: new Date().toISOString(),
+    collections: { fotos: [{ id: "inl1", zeit: new Date().toISOString(), notiz: "x", data: px, _m: Date.now() }] } });
+  // Antwort (Vollstand, Alt-Client) darf das data-Feld nicht mehr tragen
+  const rec = (r.json.collections.fotos || []).find(f => f.id === "inl1");
+  assert.ok(rec, "Foto-Metadaten da");
+  assert.equal(rec.data, undefined, "data ausgelagert");
+  // Bild ist als Datei abrufbar
+  assert.equal((await fetch(`${BASE}/api/foto/inl1`)).status, 200);
+});
+
 test("statische Assets: ETag → 304 beim zweiten Abruf", async (t) => {
   const r1 = await fetch(`${BASE}/app.js`);
   if(r1.status === 503){ t.skip("dist/ nicht gebaut (npm run build)"); return; }

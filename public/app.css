@@ -1383,6 +1383,8 @@
   overflow:hidden;cursor:pointer;transition:box-shadow .12s,transform .12s}
 .foto-doku-item:hover{box-shadow:var(--shadow);transform:translateY(-1px)}
 .foto-doku-item img{display:block;width:100%;aspect-ratio:4/3;object-fit:cover;background:var(--surface2)}
+img.foto-fehlt{object-fit:contain;min-height:120px;
+  background:var(--surface2) repeating-linear-gradient(45deg,transparent,transparent 8px,rgba(128,128,128,.09) 8px,rgba(128,128,128,.09) 16px)}
 .foto-doku-item figcaption{padding:8px 10px;display:flex;flex-direction:column;gap:3px}
 .foto-doku-item .foto-zeit{font-size:.78rem;color:var(--ink3);font-weight:600}
 .foto-doku-item .foto-note{font-size:.9rem;color:var(--ink);font-weight:600;line-height:1.25;

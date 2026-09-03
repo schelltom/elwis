@@ -32,6 +32,10 @@ const ALT = DIST + ".alt";       // vorherige Version (Rückfall-Ebene)
 const DATEI = process.env.ELWIS_DATEN
   ? path.resolve(process.env.ELWIS_DATEN)
   : path.join(HIER, "elwis-daten.json");
+// Fotos liegen als Binärdateien (nicht im Einsatzstand / nicht im /api/sync).
+const FOTO_DIR = path.join(path.dirname(DATEI), "fotos");
+const FOTO_MAX = 12 * 1024 * 1024;   // 12 MB je Bild
+const FOTO_ID_RX = /^[A-Za-z0-9_-]{1,64}$/;
 
 // Basispfad der App (muss zum `base` in astro.config.mjs passen). Der Build
 // erzeugt absolute Asset-Pfade wie /elwis/app.js (nötig für GitHub Pages).
@@ -131,6 +135,30 @@ function aktiveGeraete(){
   const jetzt = Date.now();
   for(const [id, t] of geraete) if(jetzt - t > 15000) geraete.delete(id);
   return geraete.size;
+}
+
+/* ---------------- Fotos ----------------
+   Base64-Bilddaten eines Foto-Datensatzes als Datei nach FOTO_DIR auslagern
+   und aus dem Datensatz entfernen. Für Alt-Stände (beim Laden) und Alt-Clients,
+   die noch inline-`data` über /api/sync schicken. */
+function fotoDataAuslagern(rec){
+  if(!rec || typeof rec.data !== "string" || !rec.data.startsWith("data:")) return false;
+  try{
+    const m = rec.data.match(/^data:[^;,]*;base64,(.*)$/s);
+    if(m && FOTO_ID_RX.test(String(rec.id))){
+      fs.mkdirSync(FOTO_DIR, { recursive: true });
+      fs.writeFileSync(path.join(FOTO_DIR, String(rec.id)), Buffer.from(m[1], "base64"));
+    }
+  }catch(e){ console.error("Foto auslagern fehlgeschlagen:", e.message); }
+  delete rec.data;
+  return true;
+}
+function fotosBeimLadenAuslagern(){
+  const col = stand.collections && stand.collections.fotos;
+  if(!col) return;
+  let n = 0;
+  for(const rec of Object.values(col)) if(fotoDataAuslagern(rec)){ rec._s = stand.seq + 1; n++; }
+  if(n){ stand.seq++; speichern(); console.log(`${n} Foto(s) aus dem Einsatzstand in ${FOTO_DIR} ausgelagert.`); }
 }
 
 /* ---------------- Merge-Logik ----------------
@@ -295,6 +323,50 @@ const server = http.createServer((req, res) => {
       clients: aktiveGeraete(), urls: lanUrls(), ...updateInfo() });
     return;
   }
+
+  /* --- Fotos: Binärdateien, getrennt vom Einsatzstand --- */
+  if(u.pathname === "/api/fotos" && req.method === "GET"){
+    let ids = [];
+    try{ ids = fs.readdirSync(FOTO_DIR).filter(f => FOTO_ID_RX.test(f)); }catch(_){}
+    sendeJson(req, res, 200, { ids });
+    return;
+  }
+  if(u.pathname.startsWith("/api/foto/")){
+    const id = decodeURIComponent(u.pathname.slice("/api/foto/".length));
+    if(!FOTO_ID_RX.test(id)){ res.writeHead(400); res.end("Ungültige Foto-ID"); return; }
+    const datei = path.join(FOTO_DIR, id);
+    if(req.method === "GET" || req.method === "HEAD"){
+      fs.readFile(datei, (err, buf) => {
+        if(err){ res.writeHead(404); res.end("Foto nicht vorhanden"); return; }
+        const etag = `"f-${id}-${buf.length.toString(16)}"`;   // Foto ist unveränderlich
+        if((req.headers["if-none-match"] || "") === etag){ res.writeHead(304, { ETag: etag }); res.end(); return; }
+        res.writeHead(200, { "Content-Type": "image/jpeg", "Content-Length": buf.length,
+          "Cache-Control": "public, max-age=31536000, immutable", "ETag": etag });
+        res.end(req.method === "HEAD" ? undefined : buf);
+      });
+      return;
+    }
+    if(req.method === "PUT" || req.method === "POST"){
+      const teile = []; let n = 0, zuGross = false;
+      req.on("data", c => { n += c.length; if(n > FOTO_MAX){ zuGross = true; req.destroy(); } else teile.push(c); });
+      req.on("end", () => {
+        if(zuGross){ res.writeHead(413); res.end("Foto zu groß"); return; }
+        try{
+          fs.mkdirSync(FOTO_DIR, { recursive: true });
+          fs.writeFileSync(path.join(FOTO_DIR, id + ".tmp"), Buffer.concat(teile));
+          fs.renameSync(path.join(FOTO_DIR, id + ".tmp"), datei);
+          res.writeHead(200, { "Content-Type": "application/json" }); res.end('{"ok":true}');
+        }catch(e){ res.writeHead(500); res.end("Speichern fehlgeschlagen"); }
+      });
+      return;
+    }
+    if(req.method === "DELETE"){
+      fs.rm(datei, { force: true }, () => { res.writeHead(200, { "Content-Type": "application/json" }); res.end('{"ok":true}'); });
+      return;
+    }
+    res.writeHead(405); res.end(); return;
+  }
+
   if(u.pathname === "/api/sync" && req.method === "POST"){
     let body = "";
     req.on("data", c => { body += c; if(body.length > 80e6) req.destroy(); });
@@ -302,6 +374,9 @@ const server = http.createServer((req, res) => {
       try{
         const d = JSON.parse(body || "{}");
         if(d.clientId) geraete.set(d.clientId, Date.now());
+        // Alt-Client mit Inline-Foto: Bild als Datei sichern, `data` aus dem Merge nehmen
+        if(d.collections && Array.isArray(d.collections.fotos))
+          for(const rec of d.collections.fotos) fotoDataAuslagern(rec);
         const veraendert = mergeSync(d);
         const gleicherEinsatz = !d.einsatzId || d.einsatzId === stand.einsatzId;
         if(gleicherEinsatz && !veraendert && (Number(d.seq) || 0) === stand.seq){
@@ -420,6 +495,8 @@ function sendeStatisch(req, res, datei, istFallback){
 
 // Beim Start eine ggf. vorab geladene Version scharf schalten (nie im Betrieb).
 aktiviereBereitgestellte();
+// Alt-Stände mit Inline-Foto-Base64 auf Dateien umstellen.
+fotosBeimLadenAuslagern();
 
 server.listen(PORT, () => {
   console.log("");
