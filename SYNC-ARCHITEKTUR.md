@@ -298,3 +298,38 @@ Server-Datei per `ELWIS_DATEN=<pfad>` umlenkbar (Tests nutzen ein Temp-Verzeichn
 - Persistenz Client: `idbGet` / `idbSet`, `ladeZustand()`, `boot()`, `zeigeServerWarnung()`
 - Auto-Mirror der App-Version (unabhängig vom Einsatz-Sync): `pruefeAufUpdate()`,
   `aktiviereBereitgestellte()`, abschaltbar mit `ELWIS_MIRROR=0`
+
+---
+
+## 10. Deployment
+
+| Teil | Update | Wie |
+|---|---|---|
+| **App** (`dist/`) | **automatisch** | Push auf `main` → GitHub Actions → GitHub Pages. Der **Auto-Mirror** am NAS holt den neuen Build in ~5 min und schaltet ihn beim nächsten Serverneustart / bei 0 verbundenen Geräten scharf. |
+| **Server** (`lotse112-server.mjs` **+ `sync-core.mjs`**) | **manuell** | Am NAS im Repo-Ordner `git pull`, dann Node-Prozess neu starten (`start-synology.sh`). Der Mirror fasst Servercode nie an. |
+
+- `server/sync-core.mjs` ist ein **eigenständiges Modul** (reiner Merge-Kern), das
+  `lotse112-server.mjs` importiert – muss beim `git pull` mitkommen, sonst startet
+  der Server nicht.
+- **Nicht in git** (bleiben beim `git pull` unangetastet): `elwis-daten.json`,
+  `elwis-daten.json.prev`, `journal.ndjson`, `backups/`, `fotos/`.
+- Erststart mit neuem Code: `ladeSnapshot()`-Kaskade, (leeres) Journal-Replay und
+  `fotosBeimLadenAuslagern()` laufen automatisch.
+- Lokal testen: `ELWIS_MIRROR=0 npm run server` (Mirror aus, damit der lokale Build
+  nicht überschrieben wird), App-URL `http://localhost:8474/`.
+
+### Kompatibilität (Übergangsphase)
+
+| Kombination | Ergebnis |
+|---|---|
+| neue App + neuer Server | voll |
+| neue App + **alter** Server | Sync ok (alter Server ignoriert `delta:1` → Vollstand). **Fotos:** Upload `PUT /api/foto/…` läuft ins Leere (404, still wiederholt); Metadaten syncen, das aufnehmende Gerät behält das Bild lokal, andere sehen Platzhalter bis Server-Update. Kein Datenverlust. |
+| **alte App** (gecacht) + neuer Server | Sync ok (kein `delta:1` → Vollstand). Inline-Foto-`data` wird serverseitig ausgelagert. Alte App kann Fotos danach nicht mehr anzeigen (Bytes sicher am Server) – bis sie die neue Version nachlädt. |
+
+Rückwärtskompatibel in beide Richtungen; die neue App kann dauerhaft gegen einen
+alten Server laufen. Empfohlen: NAS zeitnah `git pull` + Neustart.
+
+### Nach jedem App-Deploy
+
+`public/sw.js` → `VERSION` erhöhen (aktuell `elwis-v155`), sonst sehen Tablets mit
+Offline-PWA (Abschnitt 4 B) die neue Version verzögert.
