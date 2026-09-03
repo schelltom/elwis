@@ -17,6 +17,7 @@ import os from "node:os";
 import crypto from "node:crypto";
 import zlib from "node:zlib";
 import { fileURLToPath } from "node:url";
+import { leererStand, mergeSync as mergeStand, vollStand, deltaStand } from "./sync-core.mjs";
 
 const HIER = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT || process.argv[2] || 8474);
@@ -27,7 +28,10 @@ const DIST = [path.join(BASIS, "dist"), path.join(process.cwd(), "dist")]
   .find(p => fs.existsSync(path.join(p, "index.html"))) || path.join(BASIS, "dist");
 const STAGING = DIST + ".neu";   // frisch geladene Version wartet hier auf den Neustart
 const ALT = DIST + ".alt";       // vorherige Version (Rückfall-Ebene)
-const DATEI = path.join(HIER, "elwis-daten.json");
+// Ablage des Einsatzstands (per ELWIS_DATEN überschreibbar – u. a. für Tests).
+const DATEI = process.env.ELWIS_DATEN
+  ? path.resolve(process.env.ELWIS_DATEN)
+  : path.join(HIER, "elwis-daten.json");
 
 // Basispfad der App (muss zum `base` in astro.config.mjs passen). Der Build
 // erzeugt absolute Asset-Pfade wie /elwis/app.js (nötig für GitHub Pages).
@@ -51,10 +55,6 @@ const MIME = {
 };
 
 /* ---------------- Zustand ---------------- */
-function leererStand(){
-  return { einsatzId: null, einsatzStart: null, seq: 0,
-    singletons: {}, collections: {}, tombstones: {} };
-}
 let stand = leererStand();
 let standGeladen = false;
 try{
@@ -67,7 +67,7 @@ try{
    - Atomar: erst in .tmp schreiben, dann umbenennen → nie eine halbe Datei bei Absturz
    - Rotierende Zeitstempel-Backups in server/backups/ (gedrosselt, letzte N behalten)
    - Zusätzlich Sicherung beim Beenden (SIGINT/SIGTERM) */
-const SICHER_DIR = path.join(HIER, "backups");
+const SICHER_DIR = path.join(path.dirname(DATEI), "backups");
 const SICHER_MAX = 40;                 // so viele Backups behalten
 const SICHER_INTERVALL = 2 * 60 * 1000; // höchstens alle 2 Minuten ein Backup
 let letztesBackup = 0;
@@ -123,118 +123,20 @@ function aktiveGeraete(){
   return geraete.size;
 }
 
-/* ---------------- Merge-Logik ---------------- */
+/* ---------------- Merge-Logik ----------------
+   Kern in server/sync-core.mjs (rein + testbar). Hier nur die Anbindung an
+   Persistenz und die Ergänzung um Server-Infos (clients, updateInfo). */
 function mergeSync(body){
-  let geaendert = false;
-  // Alle Änderungen dieser Merge-Runde bekommen dieselbe Änderungs-Seq (_s) verpasst –
-  // Grundlage für Delta-Antworten ("gib mir alles mit _s > meinSeq"). stand.seq wird
-  // erst am Ende scharf geschaltet, damit ein abgebrochener Merge nichts halb erhöht.
-  const neueSeq = stand.seq + 1;
-  const markiere = () => { geaendert = true; return neueSeq; };
-  // Client-Zeitstempel (_m) NICHT blind vertrauen: ein Gerät mit falsch gestellter (Zukunfts-)
-  // Uhr würde sonst jeden Merge dauerhaft „gewinnen". Auf jetzt + kleine Toleranz clampen.
-  const CLAMP_TOLERANZ_MS = 5 * 60 * 1000;
-  const jetztM = Date.now();
-  const clampM = m => Math.min(Number(m) || 0, jetztM + CLAMP_TOLERANZ_MS);
-
-  // Einsatz-Identität: neuerer Einsatz ersetzt den alten komplett.
-  // body.ersetzen = bewusste Aktion am Client (Verwerfen / Neuer Einsatz / Beenden /
-  // Import) → erzwingt das Ersetzen unabhängig vom Zeitstempel.
-  if(body.einsatzId && body.einsatzId !== stand.einsatzId){
-    const neuer = body.ersetzen || !stand.einsatzId ||
-      (body.einsatzStart || "") > (stand.einsatzStart || "");
-    if(neuer){
-      console.log(`Neuer Einsatz übernommen (${body.einsatzId}).`);
-      stand = leererStand();
-      stand.einsatzId = body.einsatzId;
-      stand.einsatzStart = body.einsatzStart || new Date().toISOString();
-      geaendert = true;
-    }else{
-      // Client hängt an einem älteren Einsatz → er bekommt den Serverstand
-      return false;
-    }
-  }
-  if(!stand.einsatzId && body.einsatzId){
-    stand.einsatzId = body.einsatzId;
-    stand.einsatzStart = body.einsatzStart || new Date().toISOString();
-    geaendert = true;
-  }
-
-  // Einzelobjekte (Stammdaten, Kartenhintergrund)
-  for(const [k, v] of Object.entries(body.singletons || {})){
-    if(v) v._m = clampM(v._m);
-    const alt = stand.singletons[k];
-    if(!alt || (v._m || 0) > (alt._m || 0)){
-      if(v) v._s = markiere();
-      stand.singletons[k] = v;
-    }
-  }
-
-  // Sammlungen: last-write-wins je Datensatz
-  for(const [name, recs] of Object.entries(body.collections || {})){
-    const col = stand.collections[name] = stand.collections[name] || {};
-    const tomb = stand.tombstones[name] = stand.tombstones[name] || {};
-    for(const rec of recs || []){
-      if(!rec || !rec.id) continue;
-      rec._m = clampM(rec._m);
-      const t = rec._m;
-      if(tomb[rec.id] && tomb[rec.id] >= t) continue;       // schon (später) gelöscht
-      const alt = col[rec.id];
-      if(!alt || t > (alt._m || 0)){ rec._s = markiere(); col[rec.id] = rec; }
-    }
-  }
-
-  // Löschungen (Tombstones). Für die Delta-Antwort zählt die Live-ID-Liste je Sammlung
-  // (deltaAntwort.ids) – ein hier gelöschter Datensatz fällt dort einfach weg.
-  for(const [name, ids] of Object.entries(body.tombstones || {})){
-    const col = stand.collections[name] = stand.collections[name] || {};
-    const tomb = stand.tombstones[name] = stand.tombstones[name] || {};
-    for(const [id, t0] of Object.entries(ids || {})){
-      const t = clampM(t0);
-      if((tomb[id] || 0) >= t) continue;
-      tomb[id] = t;
-      if(col[id] && (col[id]._m || 0) <= t){ delete col[id]; }
-      markiere();
-    }
-  }
-
-  if(geaendert){ stand.seq = neueSeq; speichern(); }
-  return geaendert;
+  const r = mergeStand(stand, body, { log: (m) => console.log(m) });
+  stand = r.stand;
+  if(r.geaendert) speichern();
+  return r.geaendert;
 }
-
-/* Vollständiger Serverstand (Alt-Protokoll: Client ersetzt seine Sammlungen komplett). */
 function standAntwort(){
-  const collections = {};
-  for(const [name, col] of Object.entries(stand.collections)){
-    collections[name] = Object.values(col);
-  }
-  return { einsatzId: stand.einsatzId, einsatzStart: stand.einsatzStart,
-    seq: stand.seq, singletons: stand.singletons, collections,
-    clients: aktiveGeraete(), ...updateInfo() };
+  return { ...vollStand(stand), clients: aktiveGeraete(), ...updateInfo() };
 }
-
-/* Delta-Antwort: nur Einzelfelder/Datensätze mit _s > clientSeq, plus je Sammlung
-   die vollständige Liste der noch lebenden IDs (daran erkennt der Client Löschungen).
-   clientSeq <= 0 → Erstabgleich, dann kommt alles. */
 function deltaAntwort(clientSeq){
-  const erst = !(clientSeq > 0);
-  const singletons = {};
-  for(const [k, v] of Object.entries(stand.singletons)){
-    if(erst || (v && (v._s || 0) > clientSeq)) singletons[k] = v;
-  }
-  const collections = {}, ids = {};
-  for(const [name, col] of Object.entries(stand.collections)){
-    const alle = [], geaendert = [];
-    for(const rec of Object.values(col)){
-      alle.push(rec.id);
-      if(erst || (rec._s || 0) > clientSeq) geaendert.push(rec);
-    }
-    ids[name] = alle;
-    if(geaendert.length) collections[name] = geaendert;
-  }
-  return { einsatzId: stand.einsatzId, einsatzStart: stand.einsatzStart,
-    seq: stand.seq, delta: true, singletons, collections, ids,
-    clients: aktiveGeraete(), ...updateInfo() };
+  return { ...deltaStand(stand, clientSeq), clients: aktiveGeraete(), ...updateInfo() };
 }
 
 /* JSON-Antwort mit gzip für größere Nutzlasten (Delta-/Vollstand, /api/info). */

@@ -240,11 +240,25 @@ ihn dem Server dann **erzwungen** auf (`ersetzen`-Flag, ohne Konfliktdialog):
 
 ---
 
-## 8. Verweise in den Quellen
+## 8. Tests
 
-- Server-Merge: `server/lotse112-server.mjs` → `mergeSync()` (stempelt `_s`), `deltaAntwort()`, `standAntwort()`, Routen ab `http.createServer`
+`npm test` (`node --test`, keine Abhängigkeiten). Läuft auch in CI
+(`.github/workflows/ci.yml`) bei Push und Pull Request.
+
+| Datei | prüft |
+|---|---|
+| `test/sync-core.test.mjs` | Merge-Kern (`server/sync-core.mjs`): last-write-wins, Clamping, Tombstones, Einsatzwechsel/`ersetzen`, Delta-Filter, Erstabgleich |
+| `test/sync-client.test.mjs` | reine Client-Helfer aus `public/app.js` (`snapGleich`, `mergeDeltaCollection`) – per Quelltext-Extraktion |
+| `test/sync-http.test.mjs` | echter Server über HTTP: Delta-Protokoll, Löscherkennung, Alt-Client-Fallback, gzip, ETag/304, Persistenz |
+
+Server-Datei per `ELWIS_DATEN=<pfad>` umlenkbar (Tests nutzen ein Temp-Verzeichnis).
+
+## 9. Verweise in den Quellen
+
+- Merge-Kern (rein, testbar): `server/sync-core.mjs` → `mergeSync()` (stempelt `_s`), `deltaStand()`, `vollStand()`
+- Server-Hülle: `server/lotse112-server.mjs` → `mergeSync()`-Wrapper, `deltaAntwort()`, `standAntwort()`, Routen ab `http.createServer`
 - Client-Sync: `public/app.js` → `SYNC`, `SYNC_COLS`, `syncDiff()`, `syncApply()`,
-  `syncTick()`, `syncInit()`, `frageEinsatzKonflikt()`
+  `mergeDeltaCollection()`, `snapGleich()`, `syncTick()`, `syncInit()`, `frageEinsatzKonflikt()`
 - Persistenz Client: `idbGet` / `idbSet`, `ladeZustand()`, `boot()`
 - Auto-Mirror der App-Version (unabhängig vom Einsatz-Sync): `pruefeAufUpdate()`,
   `aktiviereBereitgestellte()`, abschaltbar mit `ELWIS_MIRROR=0`

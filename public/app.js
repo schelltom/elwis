@@ -7782,6 +7782,15 @@ function syncSnapshotVomZustand(){
   }
   return snap;
 }
+/* Delta übernehmen: geänderte Datensätze in die aktuelle Liste einpflegen (Upsert per id),
+   dann alles wegwerfen, was nicht mehr in liveIds steht (= anderswo gelöscht).
+   Rein/ohne Seiteneffekt – getestet in test/sync-client.test.mjs. */
+function mergeDeltaCollection(current, incoming, liveIds){
+  const nachId = new Map((current || []).map(r => [String(r.id), r]));
+  for(const rec of incoming || []) nachId.set(String(rec.id), rec);
+  const lebt = new Set((liveIds || []).map(String));
+  return [...nachId.values()].filter(r => lebt.has(String(r.id)));
+}
 /* Zwei Sync-Snapshots (Struktur aus syncSnapshotVomZustand) billig vergleichen –
    nur String-Vergleiche der bereits serialisierten Datensätze, kein neues stringify. */
 function snapGleich(a, b){
@@ -7873,11 +7882,8 @@ function syncApply(server){
   };
   for(const name of SYNC_COLS){
     const rein = (server.collections && server.collections[name]) || [];
-    if(!server.delta){ setzeCol(name, rein); continue; }
-    const vorhanden = new Map((syncColOf(name) || []).map(r => [String(r.id), r]));
-    for(const rec of rein) vorhanden.set(String(rec.id), rec);
-    const lebt = new Set(((server.ids && server.ids[name]) || []).map(String));
-    setzeCol(name, [...vorhanden.values()].filter(r => lebt.has(String(r.id))));
+    if(server.delta) setzeCol(name, mergeDeltaCollection(syncColOf(name), rein, server.ids && server.ids[name]));
+    else setzeCol(name, rein);   // Alt-Protokoll: Sammlung komplett ersetzen
   }
   if(typeof server.seq === "number") SYNC.seq = server.seq;   // Delta-Cursor mitführen
   syncSnapSave(syncSnapshotVomZustand());
