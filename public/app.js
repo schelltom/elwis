@@ -3923,7 +3923,16 @@ function wireAtemschutz(){
     b.addEventListener("click", () => openTruppEditor(b.dataset.astruppedit)));
   document.querySelectorAll("[data-asein]").forEach(b => b.addEventListener("click", () => {
     const t = state.asTrupps.find(x => x.id === b.dataset.asein);
-    if(t){ t.status = "einsatz"; t.ausgerueckt = new Date().toISOString(); markChange(); render(); }
+    if(!t) return;
+    const losRuecken = () => { t.status = "einsatz"; t.ausgerueckt = new Date().toISOString(); markChange(); render(); };
+    if(t.sicherheitstrupp){
+      // FwDV 7: Der Sicherheitstrupp wird beim Einsatz zum normalen Trupp – danach neuen Sicherheitstrupp stellen.
+      modalConfirm(`Trupp ${t.nr} ist als Sicherheitstrupp markiert. Beim Ausrücken wird er zum normalen Einsatztrupp – anschließend ist umgehend ein neuer Sicherheitstrupp zu stellen (FwDV 7). Jetzt ausrücken?`).then(ok => {
+        if(!ok) return;
+        t.sicherheitstrupp = false;
+        losRuecken();
+      });
+    } else losRuecken();
   }));
   document.querySelectorAll("[data-asang]").forEach(b => b.addEventListener("click", () => {
     const t = state.asTrupps.find(x => x.id === b.dataset.asang);
@@ -4187,12 +4196,12 @@ function openTruppEditor(id, vorbelegt){
     <div class="sheet-body">
       <div class="field"><label for="tp-name">Truppname <span style="text-transform:none;font-weight:500">(optional)</span></label>
         <input id="tp-name" value="${esc(t.name||"")}" placeholder="z. B. Angriffstrupp Weiden 1/40/1" autocomplete="off"></div>
-      <div class="field">
+      ${t.status === "registriert" ? `<div class="field">
         <button type="button" class="leave-toggle" id="tp-ber" aria-pressed="${t.sicherheitstrupp?"true":"false"}">
           <span class="track"></span>
           <span>Sicherheitstrupp <small style="display:block;font-size:.75rem;font-weight:500;color:var(--ink3)">FwDV 7: steht als Rettungstrupp für einen Trupp in Not bereit – vor jedem Atemschutzeinsatz zu stellen</small></span>
         </button>
-      </div>
+      </div>` : t.sicherheitstrupp ? `<div class="field"><p class="hint" style="margin:0">War Sicherheitstrupp – mit dem Ausrücken zum normalen Einsatztrupp geworden.</p></div>` : ""}
       <div class="field"><label>Mitglieder (2–3 Träger)</label>
         <div class="as-pick">
           ${waehlbar.length ? waehlbar.map(tr => `
@@ -4269,7 +4278,7 @@ function openTruppEditor(id, vorbelegt){
   };
   baueDruck(); baueTf();
   const berBtn = $("#tp-ber");
-  berBtn.addEventListener("click", () => {
+  if(berBtn) berBtn.addEventListener("click", () => {
     t.sicherheitstrupp = !t.sicherheitstrupp;
     berBtn.setAttribute("aria-pressed", t.sicherheitstrupp ? "true" : "false");
   });
