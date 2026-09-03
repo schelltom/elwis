@@ -967,9 +967,11 @@ function lgFoerderUebersichtHtml(line){
   const p = lgFoerderParams(line);
   const len = geoLineM(line.llpoints);
   const schlaeuche = Math.ceil(len / p.schlauchLen);
-  const reserve = Math.max(2, Math.ceil(schlaeuche * 0.1));
+  const reserve = Math.max(2, Math.ceil(len / 100));            // Faustregel: 1 B-Reserveschlauch je 100 m
   const pumps = line.pumps || [];
   const verst = pumps.length, pumpen = verst + 1;
+  const resPumpen = Math.max(1, Math.ceil(pumpen / 4));         // Faustregel: 1 Reservepumpe je 3–5 Pumpen
+  const pumpenGesamt = pumpen + resPumpen;
   const dh = line.elev ? line.elev.dhEnd : null;
   const lastD = pumps.length ? pumps[pumps.length - 1].d : 0;
   const rest = (line.elev && line.elev.profile) ? lgFoerderRest(line.elev.profile, p, lastD) : null;
@@ -983,15 +985,17 @@ function lgFoerderUebersichtHtml(line){
   const rows = [
     ["Wegstrecke", esc(laengeStr(len) + (dh != null ? ` · Höhe Δ ${dh>=0?"+":""}${Math.round(dh)} m` : ""))],
     ["Förderstrom", esc(`${p.q} l/min`)],
-    ["Pumpen gesamt", esc(`${pumpen}  (1 Förderpumpe + ${verst} Verstärkerpumpe${verst===1?"":"n"})`)],
+    ["Pumpen gesamt", esc(`≈ ${pumpenGesamt}  (1 Förderpumpe + ${verst} Verstärkerpumpe${verst===1?"":"n"} + ${resPumpen} Reservepumpe${resPumpen===1?"":"n"})`)],
+    ["Reservepumpen", esc(`≈ ${resPumpen}  ·  Faustregel 1 je 3–5 Pumpen (v. a. bei langer Einsatzdauer), möglichst EN-Kreiselpumpe, griffbereit`)],
     ["Pumpen-Standorte", pumpList],
     ["Restdruck am Verteiler", esc(restStr)],
-    ["B-Schläuche", esc(`${schlaeuche} × ${p.schlauchLen} m  +  ${reserve} Reserve  =  ${schlaeuche+reserve}`)],
+    ["B-Schläuche", esc(`${schlaeuche} × ${p.schlauchLen} m  +  ${reserve} Reserve (1 je 100 m)  =  ${schlaeuche+reserve}`)],
     ["Verteiler", "1 (an der Brandstelle)"],
     ["Sammelstück", "1 (A-B, an der Förderpumpe)"],
     ["Saugstelle", "1 Satz A-Saugschläuche + Saugkorb + Halte-/Ventilleine"],
     ["Schlauchbrücken", "je Straßenquerung 1 (nach Erkundung)"],
     ["Kupplungsschlüssel", esc(`mind. ${pumpen*2} (2 je Pumpe)`)],
+    ["Betriebsstoffe", "Kraftstoff-/Öl-Nachschub für die Pumpen rechtzeitig anfordern"],
     ["Personal (Faustwert)", esc(`${pumpen} Maschinist${pumpen===1?"":"en"} + ${trupps} Schlauchtrupp${trupps===1?"":"s"} zum Verlegen`)],
   ];
   if(line.elev && line.elev.loss > 30) rows.push(["Achtung Gefälle", "Druckbegrenzungsventil an der/den Pumpe(n) vorsehen"]);
