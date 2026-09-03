@@ -104,14 +104,26 @@ dauerhaft jeden Merge „gewinnen".
 - Der Server merkt sich verbundene Geräte 15 s lang (`aktiveGeraete()`); danach
   gilt ein Gerät als weg (relevant für die Leerlauf-Aktivierung von App-Updates).
 
-> **Wichtig – `syncInit()` läuft nur einmal beim App-Start.** Ist der NAS in diesem
-> Moment nicht erreichbar (Gerät noch nicht im WLAN, NAS noch nicht oben), startet
-> der Sync für diese Sitzung **gar nicht** – die App bleibt im Solo-Betrieb, bis
-> die **Seite neu geladen** wird. Ein *einmal* laufender `syncTick` dagegen
-> übersteht kurze Aussetzer von selbst (Wiederverbindung alle 3 s).
->
-> Praxis: die App auf jedem Gerät erst öffnen, **wenn es im ELW-WLAN ist und der
-> NAS läuft**. Wer die App vorher gestartet hat, lädt nach dem Verbinden einmal neu.
+### App-Auslieferung und Erreichbarkeit
+
+Die App (HTML/JS/CSS) wird im ELW-Betrieb **ausschließlich vom NAS** ausgeliefert
+(`http://<nas>:8474/`). Der Service Worker, der die App offline vorhalten würde,
+registriert sich laut `public/app.js` **nur auf HTTPS** – im ELW-WLAN läuft aber
+plain `http`. Daraus folgt praktischerweise:
+
+- **Kein NAS → keine App ladbar.** Der Fall „App gestartet, aber NAS noch nicht da"
+  kann im ELW-Betrieb gar nicht eintreten.
+- **Wenn die App lädt, läuft der NAS** → `syncInit()` erreicht `/api/info` → das
+  Gerät landet **immer** im Server-Einsatz.
+
+`syncInit()` läuft nur **einmal beim App-Start**. Ein einmal laufender `syncTick`
+übersteht kurze WLAN-Aussetzer von selbst (Wiederverbindung alle 3 s).
+
+**Einziger Rest-Fall:** Tab ist bereits offen, der **NAS startet neu**, und *dann*
+wird die Seite neu geladen → weiße Seite, bis der NAS wieder da ist. Die schon
+laufende Sitzung **ohne** Reload läuft dagegen weiter und verbindet sich nach dem
+NAS-Neustart automatisch wieder. Reine NAS-Verfügbarkeit (NAS läuft 24/7), kein
+Einsatz-Konflikt.
 
 ---
 
@@ -181,7 +193,7 @@ ihn dem Server dann **erzwungen** auf (`ersetzen`-Flag, ohne Konfliktdialog):
 | **Echtzeit** | 3-s-Polling | WebSocket/SSE senkt Latenz und NAS-Last, kostet Komplexität |
 | **Backups** | nur auf dem NAS | zusätzlicher Export auf zweites Medium (USB / zweite Freigabe) |
 | **Gleiches Feld gleichzeitig** | last-write-wins, kein Merge | bei Bedarf Feld-Sperre / „wird gerade bearbeitet"-Hinweis |
-| **Boot-Race** | zwei Geräte booten offline mit je eigenem frischem Einsatz und verbinden fast gleichzeitig → zweites bekommt Konfliktdialog | organisatorisch: iPhone eröffnet, Rest verbindet |
+| **Boot-Race** | nur wenn der NAS **leer** hochkommt (Datendatei verloren) *und* mehrere Geräte mit je eigenem Einsatz fast gleichzeitig pushen → erster besetzt die `einsatzId`, zweiter bekommt Konfliktdialog. Bei normalem NAS-Neustart (lädt `elwis-daten.json`) tritt das nicht auf. | organisatorisch: iPhone eröffnet, Rest verbindet; NAS-Backups schützen vor „leer hochkommen" |
 | **Discovery** | IP/QR-Code manuell | mDNS (`elw.local`), feste IP, Startseite mit „Verbinden"-Knopf |
 
 ---
