@@ -39,19 +39,26 @@ Keine externen Abhängigkeiten – nur Node (≥ 18) auf dem NAS.
 - **Takt:** jedes Gerät ruft alle **3 Sekunden** `POST /api/sync` auf
   (`setInterval(syncTick, 3000)` in `public/app.js`).
 - **Hoch** geht nur der **Diff** (geänderte Datensätze, neue Tombstones, geänderte
-  Einzelfelder) – ermittelt gegen den lokalen Snapshot (`syncDiff()`).
-- **Runter** kommt der zusammengeführte Serverstand; hat sich nichts geändert,
-  antwortet der Server `{ unchanged: true }` und spart die Nutzlast.
-- Der Client übernimmt den Serverstand (`syncApply()`), schreibt einen neuen
-  Snapshot und rendert neu – **außer** es tippt gerade jemand in ein Feld
-  (3-Sekunden-Schonfrist, `syncTipptGerade()`), dann wird nur der Kopf aktualisiert.
+  Einzelfelder) – ermittelt gegen den lokalen Snapshot (`syncDiff()`). Der Client
+  schickt `delta: 1` und seinen Änderungs-Zähler `seq` mit.
+- **Runter** kommt eine **Delta-Antwort** (`deltaAntwort()`): nur Einzelfelder und
+  Datensätze mit `_s > seq` (serverseitige Änderungs-Seq) plus je Sammlung die
+  vollständige Liste der noch lebenden IDs (`ids`) – daran erkennt der Client
+  Löschungen anderer Geräte. Hat sich nichts geändert: `{ unchanged: true }`.
+  Beim Erstabgleich (`seq` 0) und bei einem Alt-Client ohne `delta`-Flag liefert
+  der Server den **kompletten** Stand (`standAntwort()`).
+- Der Client pflegt die Änderungen ein (`syncApply()`: Upsert + Löschungen über
+  `ids`), stellt seinen `seq`-Cursor **erst nach erfolgreichem Übernehmen** weiter,
+  schreibt einen neuen Snapshot und rendert neu – **außer** es tippt gerade jemand
+  in ein Feld (3-Sekunden-Schonfrist, `syncTipptGerade()`), dann nur der Kopf.
+- Größere `/api/sync`-Antworten werden gzip-komprimiert.
 
 ### API-Endpunkte des Servers
 
 | Endpoint | Zweck |
 |---|---|
 | `GET /api/info` | „Bin ein ELW-Server", aktuelle `einsatzId`, `seq`, verbundene Geräte, LAN-URLs, App-Update-Status |
-| `POST /api/sync` | Diff entgegennehmen, mergen, zusammengeführten Stand (oder `unchanged`) zurückgeben |
+| `POST /api/sync` | Diff entgegennehmen, mergen, Delta seit `seq` zurückgeben (oder `unchanged` / kompletten Stand beim Erstabgleich bzw. Alt-Client) |
 | `GET /api/backups` | Backup-Liste (Name, Größe, Zeit) |
 | `POST /api/restore` | Backup wiederherstellen → neue `einsatzId` mit „jetzt", alle Clients ziehen nach |
 | alles andere | statische App aus `dist/` (SPA-Fallback auf `index.html`) |
@@ -223,6 +230,8 @@ ihn dem Server dann **erzwungen** auf (`ersetzen`-Flag, ohne Konfliktdialog):
 |---|---|---|
 | **NAS = Single Point of Failure** | Fällt das NAS aus, laufen alle Geräte lokal weiter, mergen aber nicht mehr untereinander | Desktop als Hot-Standby-Server; „dieses Gerät als Server"-Modus; Recovery = NAS neu starten (lädt `elwis-daten.json`) oder ein Gerät per „meinen Einsatz erzwingen" |
 | **Echtzeit** | 3-s-Polling | WebSocket/SSE senkt Latenz und NAS-Last, kostet Komplexität |
+| **Delta-Overhead** | jede Delta-Antwort enthält die vollständige ID-Liste je Sammlung (für die Löscherkennung) – wenige KB, aber wächst mit dem Einsatz | Tombstones mit eigener `_s` führen und nur Lösch-IDs seit `seq` senden |
+| **Fotos im Sync-Channel** | Fotos liegen als Base64 in den `fotos`-Datensätzen und laufen durch Merge/IndexedDB/Delta | eigener Endpunkt `/api/foto/:id` (binär, unveränderlich), im Sync nur Metadaten + ID |
 | **Backups** | nur auf dem NAS | zusätzlicher Export auf zweites Medium (USB / zweite Freigabe) |
 | **Gleiches Feld gleichzeitig** | last-write-wins, kein Merge | bei Bedarf Feld-Sperre / „wird gerade bearbeitet"-Hinweis |
 | **Boot-Race** | nur wenn der NAS **leer** hochkommt (Datendatei verloren) *und* mehrere Geräte mit je eigenem Einsatz fast gleichzeitig pushen → erster besetzt die `einsatzId`, zweiter bekommt Konfliktdialog. Bei normalem NAS-Neustart (lädt `elwis-daten.json`) tritt das nicht auf. | organisatorisch: iPhone eröffnet, Rest verbindet; NAS-Backups schützen vor „leer hochkommen" |
@@ -233,7 +242,7 @@ ihn dem Server dann **erzwungen** auf (`ersetzen`-Flag, ohne Konfliktdialog):
 
 ## 8. Verweise in den Quellen
 
-- Server-Merge: `server/lotse112-server.mjs` → `mergeSync()`, `standAntwort()`, Routen ab `http.createServer`
+- Server-Merge: `server/lotse112-server.mjs` → `mergeSync()` (stempelt `_s`), `deltaAntwort()`, `standAntwort()`, Routen ab `http.createServer`
 - Client-Sync: `public/app.js` → `SYNC`, `SYNC_COLS`, `syncDiff()`, `syncApply()`,
   `syncTick()`, `syncInit()`, `frageEinsatzKonflikt()`
 - Persistenz Client: `idbGet` / `idbSet`, `ladeZustand()`, `boot()`

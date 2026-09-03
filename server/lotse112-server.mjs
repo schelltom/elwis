@@ -126,6 +126,11 @@ function aktiveGeraete(){
 /* ---------------- Merge-Logik ---------------- */
 function mergeSync(body){
   let geaendert = false;
+  // Alle Änderungen dieser Merge-Runde bekommen dieselbe Änderungs-Seq (_s) verpasst –
+  // Grundlage für Delta-Antworten ("gib mir alles mit _s > meinSeq"). stand.seq wird
+  // erst am Ende scharf geschaltet, damit ein abgebrochener Merge nichts halb erhöht.
+  const neueSeq = stand.seq + 1;
+  const markiere = () => { geaendert = true; return neueSeq; };
   // Client-Zeitstempel (_m) NICHT blind vertrauen: ein Gerät mit falsch gestellter (Zukunfts-)
   // Uhr würde sonst jeden Merge dauerhaft „gewinnen". Auf jetzt + kleine Toleranz clampen.
   const CLAMP_TOLERANZ_MS = 5 * 60 * 1000;
@@ -160,8 +165,8 @@ function mergeSync(body){
     if(v) v._m = clampM(v._m);
     const alt = stand.singletons[k];
     if(!alt || (v._m || 0) > (alt._m || 0)){
+      if(v) v._s = markiere();
       stand.singletons[k] = v;
-      geaendert = true;
     }
   }
 
@@ -175,11 +180,12 @@ function mergeSync(body){
       const t = rec._m;
       if(tomb[rec.id] && tomb[rec.id] >= t) continue;       // schon (später) gelöscht
       const alt = col[rec.id];
-      if(!alt || t > (alt._m || 0)){ col[rec.id] = rec; geaendert = true; }
+      if(!alt || t > (alt._m || 0)){ rec._s = markiere(); col[rec.id] = rec; }
     }
   }
 
-  // Löschungen (Tombstones)
+  // Löschungen (Tombstones). Für die Delta-Antwort zählt die Live-ID-Liste je Sammlung
+  // (deltaAntwort.ids) – ein hier gelöschter Datensatz fällt dort einfach weg.
   for(const [name, ids] of Object.entries(body.tombstones || {})){
     const col = stand.collections[name] = stand.collections[name] || {};
     const tomb = stand.tombstones[name] = stand.tombstones[name] || {};
@@ -188,14 +194,15 @@ function mergeSync(body){
       if((tomb[id] || 0) >= t) continue;
       tomb[id] = t;
       if(col[id] && (col[id]._m || 0) <= t){ delete col[id]; }
-      geaendert = true;
+      markiere();
     }
   }
 
-  if(geaendert){ stand.seq++; speichern(); }
+  if(geaendert){ stand.seq = neueSeq; speichern(); }
   return geaendert;
 }
 
+/* Vollständiger Serverstand (Alt-Protokoll: Client ersetzt seine Sammlungen komplett). */
 function standAntwort(){
   const collections = {};
   for(const [name, col] of Object.entries(stand.collections)){
@@ -204,6 +211,44 @@ function standAntwort(){
   return { einsatzId: stand.einsatzId, einsatzStart: stand.einsatzStart,
     seq: stand.seq, singletons: stand.singletons, collections,
     clients: aktiveGeraete(), ...updateInfo() };
+}
+
+/* Delta-Antwort: nur Einzelfelder/Datensätze mit _s > clientSeq, plus je Sammlung
+   die vollständige Liste der noch lebenden IDs (daran erkennt der Client Löschungen).
+   clientSeq <= 0 → Erstabgleich, dann kommt alles. */
+function deltaAntwort(clientSeq){
+  const erst = !(clientSeq > 0);
+  const singletons = {};
+  for(const [k, v] of Object.entries(stand.singletons)){
+    if(erst || (v && (v._s || 0) > clientSeq)) singletons[k] = v;
+  }
+  const collections = {}, ids = {};
+  for(const [name, col] of Object.entries(stand.collections)){
+    const alle = [], geaendert = [];
+    for(const rec of Object.values(col)){
+      alle.push(rec.id);
+      if(erst || (rec._s || 0) > clientSeq) geaendert.push(rec);
+    }
+    ids[name] = alle;
+    if(geaendert.length) collections[name] = geaendert;
+  }
+  return { einsatzId: stand.einsatzId, einsatzStart: stand.einsatzStart,
+    seq: stand.seq, delta: true, singletons, collections, ids,
+    clients: aktiveGeraete(), ...updateInfo() };
+}
+
+/* JSON-Antwort mit gzip für größere Nutzlasten (Delta-/Vollstand, /api/info). */
+function sendeJson(req, res, code, obj){
+  const body = Buffer.from(JSON.stringify(obj));
+  const kopf = { "Content-Type": "application/json; charset=utf-8", "Vary": "Accept-Encoding" };
+  if(body.length > 1400 && /\bgzip\b/.test(req.headers["accept-encoding"] || "")){
+    const gz = zlib.gzipSync(body);
+    res.writeHead(code, { ...kopf, "Content-Encoding": "gzip", "Content-Length": gz.length });
+    res.end(req.method === "HEAD" ? undefined : gz);
+  }else{
+    res.writeHead(code, { ...kopf, "Content-Length": body.length });
+    res.end(req.method === "HEAD" ? undefined : body);
+  }
 }
 
 /* ================================================================
@@ -334,9 +379,8 @@ const server = http.createServer((req, res) => {
 
   /* --- API --- */
   if(u.pathname === "/api/info"){
-    res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ elwis: true, seq: stand.seq, einsatzId: stand.einsatzId,
-      clients: aktiveGeraete(), urls: lanUrls(), ...updateInfo() }));
+    sendeJson(req, res, 200, { elwis: true, seq: stand.seq, einsatzId: stand.einsatzId,
+      clients: aktiveGeraete(), urls: lanUrls(), ...updateInfo() });
     return;
   }
   if(u.pathname === "/api/sync" && req.method === "POST"){
@@ -346,18 +390,20 @@ const server = http.createServer((req, res) => {
       try{
         const d = JSON.parse(body || "{}");
         if(d.clientId) geraete.set(d.clientId, Date.now());
-        const hatteAenderungen = Object.keys(d.collections || {}).length ||
-          Object.keys(d.singletons || {}).length || Object.keys(d.tombstones || {}).length;
-        mergeSync(d);
-        res.writeHead(200, { "Content-Type": "application/json" });
-        if(!hatteAenderungen && d.seq === stand.seq){
-          res.end(JSON.stringify({ unchanged: true, seq: stand.seq, clients: aktiveGeraete(), ...updateInfo() }));
+        const veraendert = mergeSync(d);
+        const gleicherEinsatz = !d.einsatzId || d.einsatzId === stand.einsatzId;
+        if(gleicherEinsatz && !veraendert && (Number(d.seq) || 0) === stand.seq){
+          // Client ist auf demselben Stand und hat nichts geändert
+          sendeJson(req, res, 200, { unchanged: true, seq: stand.seq, clients: aktiveGeraete(), ...updateInfo() });
+        }else if(d.delta && stand.einsatzId && d.einsatzId === stand.einsatzId){
+          // Neues Protokoll: nur Änderungen seit d.seq (+ Live-ID-Listen für Löschungen)
+          sendeJson(req, res, 200, deltaAntwort(Number(d.seq) || 0));
         }else{
-          res.end(JSON.stringify(standAntwort()));
+          // Alt-Client oder Einsatzwechsel → kompletter Stand
+          sendeJson(req, res, 200, standAntwort());
         }
       }catch(err){
-        res.writeHead(400, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ fehler: String(err.message || err) }));
+        sendeJson(req, res, 400, { fehler: String(err.message || err) });
       }
     });
     return;

@@ -7847,9 +7847,14 @@ function syncDiff(){
     pending += changed.length;
   }
   if(syncErsetzen) out.ersetzen = true;   // bewusstes Ersetzen erzwingen
+  out.delta = 1;                           // Delta-Antworten anfordern (Server ignoriert das, wenn alt)
   return { out, pending, snap: neuSnap };
 }
-/* Zusammengeführten Serverstand übernehmen (eigene Änderungen waren im Push enthalten) */
+/* Zusammengeführten Serverstand übernehmen (eigene Änderungen waren im Push enthalten).
+   Zwei Protokolle:
+   - Vollstand (server.delta fehlt): Sammlungen werden komplett ersetzt.
+   - Delta (server.delta): geänderte Datensätze einpflegen, dann alles wegwerfen,
+     was nicht mehr in server.ids[name] steht (= anderswo gelöscht). */
 function syncApply(server){
   state.einsatzId = server.einsatzId;
   state.einsatzStart = server.einsatzStart;
@@ -7861,12 +7866,20 @@ function syncApply(server){
     else if(k === "lwbilanz"){ if(sg.lwbilanz.v) state.lwbilanz = sg.lwbilanz.v; }
     else if(k.startsWith("einsatz:")) state.einsatz[k.slice(8)] = sg[k].v;   // feldweise mergen
   }
-  for(const name of SYNC_COLS){
-    const arr = (server.collections && server.collections[name]) || [];
+  const setzeCol = (name, arr) => {
     if(name === "lageItems") state.lage.items = arr;
     else if(name === "lageSnapshots") state.lage.snapshots = arr;
     else state[name] = arr;
+  };
+  for(const name of SYNC_COLS){
+    const rein = (server.collections && server.collections[name]) || [];
+    if(!server.delta){ setzeCol(name, rein); continue; }
+    const vorhanden = new Map((syncColOf(name) || []).map(r => [String(r.id), r]));
+    for(const rec of rein) vorhanden.set(String(rec.id), rec);
+    const lebt = new Set(((server.ids && server.ids[name]) || []).map(String));
+    setzeCol(name, [...vorhanden.values()].filter(r => lebt.has(String(r.id))));
   }
+  if(typeof server.seq === "number") SYNC.seq = server.seq;   // Delta-Cursor mitführen
   syncSnapSave(syncSnapshotVomZustand());
   save();
 }
@@ -7894,15 +7907,15 @@ async function syncTick(){
     syncErsetzen = false;   // Push kam an → Ersetzen-Wunsch ist erledigt
     SYNC.verbunden = true;
     SYNC.clients = d.clients || 1;
-    SYNC.seq = d.seq;
     zeigeUpdateHinweis(d.update);
     if(!d.unchanged){
-      syncApply(d);   // schreibt den zusammengeführten Stand in _syncSnap
+      syncApply(d);   // übernimmt Merge + stellt SYNC.seq erst NACH Erfolg weiter
       SYNC.pending = 0;
       // Nur neu zeichnen, wenn der Merge den Stand wirklich verändert hat und niemand gerade tippt
       if(!snapGleich(syncSnapLoad(), vorher) && !syncTipptGerade()) render();
       else renderHeader();
     }else{
+      SYNC.seq = d.seq;
       if(pending === 0) SYNC.pending = 0;
       renderHeader();
     }
