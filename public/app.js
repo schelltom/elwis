@@ -7782,17 +7782,40 @@ function syncSnapshotVomZustand(){
   }
   return snap;
 }
-/* Änderungen seit dem letzten Abgleich ermitteln (Diff gegen Snapshot) */
+/* Zwei Sync-Snapshots (Struktur aus syncSnapshotVomZustand) billig vergleichen –
+   nur String-Vergleiche der bereits serialisierten Datensätze, kein neues stringify. */
+function snapGleich(a, b){
+  if(a === b) return true;
+  if(!a || !b || a.einsatzId !== b.einsatzId) return false;
+  const sa = a.singletons || {}, sb = b.singletons || {};
+  const ka = Object.keys(sa);
+  if(ka.length !== Object.keys(sb).length) return false;
+  for(const k of ka) if(sa[k] !== sb[k]) return false;
+  const ca = a.collections || {}, cb = b.collections || {};
+  for(const name of SYNC_COLS){
+    const na = ca[name] || {}, nb = cb[name] || {};
+    const ia = Object.keys(na);
+    if(ia.length !== Object.keys(nb).length) return false;
+    for(const id of ia) if(na[id] !== nb[id]) return false;
+  }
+  return true;
+}
+/* Änderungen seit dem letzten Abgleich ermitteln (Diff gegen Snapshot).
+   Baut nebenbei den aktuellen Snapshot (`snap`) mit – ohne zusätzliches stringify,
+   die Serialisierung je Datensatz passiert hier ohnehin. Spart im syncTick zwei
+   komplette Snapshot-Neuaufbauten samt großem JSON.stringify pro 3-Sekunden-Takt. */
 function syncDiff(){
   const snap = syncSnapLoad();
   const passt = snap && snap.einsatzId === state.einsatzId;
   const now = Date.now();
   const out = { clientId: syncClientId(), einsatzId: state.einsatzId, einsatzStart: state.einsatzStart,
     seq: SYNC.seq, singletons: {}, collections: {}, tombstones: {} };
+  const neuSnap = { einsatzId: state.einsatzId, singletons: {}, collections: {} };
   let pending = 0;
   const singles = syncSingleValues();   // feldweise: einsatz:stichwort, einsatz:ort, …, lageBg
   for(const k of Object.keys(singles)){
     const j = JSON.stringify(singles[k]);
+    neuSnap.singletons[k] = j;
     if(!passt || !snap.singletons || snap.singletons[k] !== j){
       out.singletons[k] = { v: singles[k], _m: now };
       pending++;
@@ -7801,14 +7824,19 @@ function syncDiff(){
   for(const name of SYNC_COLS){
     const arr = syncColOf(name) || [];
     const snapCol = (passt && snap.collections && snap.collections[name]) || {};
+    const neuCol = neuSnap.collections[name] = {};
     const changed = [];
     const ids = new Set();
     for(const rec of arr){
-      ids.add(String(rec.id));
-      if(snapCol[rec.id] !== JSON.stringify(rec)){
+      const id = String(rec.id);
+      ids.add(id);
+      let js = JSON.stringify(rec);
+      if(snapCol[rec.id] !== js){
         rec._m = now;
+        js = JSON.stringify(rec);   // mit frischem _m neu serialisieren
         changed.push(rec);
       }
+      neuCol[id] = js;
     }
     const tomb = {};
     for(const id of Object.keys(snapCol)){
@@ -7819,7 +7847,7 @@ function syncDiff(){
     pending += changed.length;
   }
   if(syncErsetzen) out.ersetzen = true;   // bewusstes Ersetzen erzwingen
-  return { out, pending };
+  return { out, pending, snap: neuSnap };
 }
 /* Zusammengeführten Serverstand übernehmen (eigene Änderungen waren im Push enthalten) */
 function syncApply(server){
@@ -7855,9 +7883,8 @@ async function syncTick(){
   if(SYNC.busy) return;
   SYNC.busy = true;
   try{
-    const { out, pending } = syncDiff();
+    const { out, pending, snap: vorher } = syncDiff();   // vorher = aktueller Stand VOR dem Merge
     SYNC.pending = pending;
-    const vorher = JSON.stringify(syncSnapshotVomZustand());
     const res = await fetch("./api/sync", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify(out),
@@ -7870,10 +7897,10 @@ async function syncTick(){
     SYNC.seq = d.seq;
     zeigeUpdateHinweis(d.update);
     if(!d.unchanged){
-      syncApply(d);
+      syncApply(d);   // schreibt den zusammengeführten Stand in _syncSnap
       SYNC.pending = 0;
-      // Nur neu zeichnen, wenn sich wirklich etwas geändert hat und niemand gerade tippt
-      if(JSON.stringify(syncSnapshotVomZustand()) !== vorher && !syncTipptGerade()) render();
+      // Nur neu zeichnen, wenn der Merge den Stand wirklich verändert hat und niemand gerade tippt
+      if(!snapGleich(syncSnapLoad(), vorher) && !syncTipptGerade()) render();
       else renderHeader();
     }else{
       if(pending === 0) SYNC.pending = 0;

@@ -15,6 +15,7 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import crypto from "node:crypto";
+import zlib from "node:zlib";
 import { fileURLToPath } from "node:url";
 
 const HIER = path.dirname(fileURLToPath(import.meta.url));
@@ -412,26 +413,52 @@ const server = http.createServer((req, res) => {
     res.end("LOTSE112: App noch nicht geladen. Der Server holt sie beim ersten Internet-Kontakt automatisch von GitHub – bitte gleich neu laden.");
     return;
   }
-  let rel = decodeURIComponent(u.pathname);
+  let rel;
+  try{ rel = decodeURIComponent(u.pathname); }
+  catch(_){ res.writeHead(400); res.end("Ungültiger Pfad"); return; }
   // Basis-Präfix (/elwis) abstreifen – die App liegt lokal an der Wurzel.
   if(BASE && (rel === BASE || rel.startsWith(BASE + "/"))) rel = rel.slice(BASE.length) || "/";
   if(rel === "/" || rel === "") rel = "/index.html";
   const datei = path.normalize(path.join(DIST, rel));
   if(!datei.startsWith(DIST)){ res.writeHead(403); res.end(); return; }
-  fs.readFile(datei, (err, inhalt) => {
-    if(err){
+  sendeStatisch(req, res, datei, false);
+});
+
+/* Statische Datei ausliefern – mit ETag/If-None-Match (304 spart den Transfer bei
+   Reloads) und gzip für Text-Assets (app.js unkomprimiert ~490 KB → ~110 KB).
+   Komprimate werden je Datei/ETag im Speicher gehalten, nicht pro Request neu gepackt. */
+const GZ_CACHE = new Map();   // datei → { etag, gz }
+function sendeStatisch(req, res, datei, istFallback){
+  fs.stat(datei, (err, st) => {
+    if(err || !st.isFile()){
       // Unbekannte Pfade → App-Einstieg (SPA-freundlich)
-      fs.readFile(path.join(DIST, "index.html"), (e2, html) => {
-        if(e2){ res.writeHead(404); res.end("Nicht gefunden"); return; }
-        res.writeHead(200, { "Content-Type": MIME[".html"] });
-        res.end(html);
-      });
+      if(istFallback){ res.writeHead(404); res.end("Nicht gefunden"); return; }
+      sendeStatisch(req, res, path.join(DIST, "index.html"), true);
       return;
     }
-    res.writeHead(200, { "Content-Type": MIME[path.extname(datei)] || "application/octet-stream" });
-    res.end(inhalt);
+    const etag = `"${st.size.toString(16)}-${Math.round(st.mtimeMs).toString(16)}"`;
+    const typ = MIME[path.extname(datei)] || "application/octet-stream";
+    const kopf = { "Content-Type": typ, "Cache-Control": "no-cache", "ETag": etag };
+    if((req.headers["if-none-match"] || "") === etag){
+      res.writeHead(304, kopf); res.end(); return;
+    }
+    const magGzip = /javascript|css|html|json|svg|manifest/.test(typ)
+      && /\bgzip\b/.test(req.headers["accept-encoding"] || "");
+    fs.readFile(datei, (e2, inhalt) => {
+      if(e2){ res.writeHead(500); res.end("Lesefehler"); return; }
+      if(magGzip){
+        let c = GZ_CACHE.get(datei);
+        if(!c || c.etag !== etag){ c = { etag, gz: zlib.gzipSync(inhalt) }; GZ_CACHE.set(datei, c); }
+        res.writeHead(200, { ...kopf, "Content-Encoding": "gzip",
+          "Vary": "Accept-Encoding", "Content-Length": c.gz.length });
+        res.end(req.method === "HEAD" ? undefined : c.gz);
+      }else{
+        res.writeHead(200, { ...kopf, "Content-Length": inhalt.length });
+        res.end(req.method === "HEAD" ? undefined : inhalt);
+      }
+    });
   });
-});
+}
 
 // Beim Start eine ggf. vorab geladene Version scharf schalten (nie im Betrieb).
 aktiviereBereitgestellte();
