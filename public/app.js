@@ -3702,10 +3702,11 @@ function truppCard(t){
     : `<button class="btn btn-ghost" data-aswieder="${t.id}">Erneut einsetzen</button>
        <button class="btn btn-danger-ghost" data-astruppdel="${t.id}" aria-label="Löschen">✕</button>`;
   return `
-  <div class="as-trupp status-${t.status}">
+  <div class="as-trupp status-${t.status}${t.sicherheitstrupp && t.status==="registriert" ? " is-sitr" : ""}">
     <div class="as-trupp-head">
       ${asNrBadge(t)}
       <div style="flex:1;min-width:0">
+        ${t.name || t.sicherheitstrupp ? `<div class="as-sub2">${t.sicherheitstrupp ? `<span class="as-sitr-badge">Sicherheitstrupp</span> ` : ""}${t.name ? `<strong>${esc(t.name)}</strong>` : ""}</div>` : ""}
         <div class="as-mit">${mitglieder || "<span style='color:var(--ink3)'>keine Mitglieder</span>"}</div>
         ${zeile ? `<div class="as-sub2">${zeile}</div>` : ""}
         ${t.zusatz ? `<div class="as-sub2">Zusatz: ${esc(t.zusatz)}</div>` : ""}
@@ -3718,6 +3719,11 @@ function renderASSammelstelle(){
   const trupps = [...state.asTrupps].sort((a,b) =>
     ({registriert:0,einsatz:1,zurueck:2}[a.status]) - ({registriert:0,einsatz:1,zurueck:2}[b.status]) || (a.nr-b.nr));
   const frei = asFreieTraeger();
+  const truppsImEinsatz = state.asTrupps.some(t => t.status === "einsatz");
+  const sitrBereit = state.asTrupps.some(t => t.sicherheitstrupp && t.status === "registriert");
+  const sitrWarn = truppsImEinsatz && !sitrBereit
+    ? `<div class="as-warnbanner">⚠ <span>Kein Sicherheitstrupp bereitgestellt. FwDV 7: Vor dem Einsatz eines Atemschutztrupps ist ein Sicherheitstrupp zu stellen.</span></div>`
+    : "";
   const truppList = trupps.length ? trupps.map(truppCard).join("")
     : `<div class="empty"><p>Noch keine Trupps gebildet.<br>Träger registrieren, dann zu einem Trupp (2–3 Mann) zusammenführen.</p></div>`;
   const traegerList = state.asTraeger.length ? `<div class="as-traeger-list">${state.asTraeger.map(tr => {
@@ -3740,6 +3746,7 @@ function renderASSammelstelle(){
   </div>
   <div class="card">
     <h2>Trupps</h2>
+    ${sitrWarn}
     <button class="btn btn-primary btn-block" id="btnTruppBilden" style="margin-bottom:14px" ${frei.length<2?"disabled":""}>＋&nbsp; Trupp bilden${frei.length<2?" (min. 2 freie Träger)":""}</button>
     ${state.asTrupps.length ? `<button class="btn btn-ghost btn-block" id="btnPrintAs" style="margin-bottom:14px">🖨&nbsp; Atemschutz-Nachweis drucken (FwDV 7)</button>` : ""}
     ${truppList}
@@ -4157,7 +4164,7 @@ function openTruppEditor(id, vorbelegt){
   const neu = !id;
   const src = id ? state.asTrupps.find(x => x.id === id) : null;
   const t = id ? {...src, memberIds:[...(src.memberIds||[])], druck: JSON.parse(JSON.stringify(src.druck||{}))}
-    : { id:uid(), nr:asNextTruppNr(), memberIds:[...(vorbelegt||[])], abschnitt:"", funkruf:"", zusatz:"",
+    : { id:uid(), nr:asNextTruppNr(), name:"", sicherheitstrupp:false, memberIds:[...(vorbelegt||[])], abschnitt:"", funkruf:"", zusatz:"",
         status:"registriert", ausgerueckt:"", angeschlossen:"", rueckkehr:"", druck:{},
         reserve:AS_RESERVE_DEFAULT, erwartetMin:AS_ERWARTET_DEFAULT };
   if(t.reserve == null) t.reserve = AS_RESERVE_DEFAULT;
@@ -4178,6 +4185,14 @@ function openTruppEditor(id, vorbelegt){
     <div class="sheet-head"><h2>Trupp ${t.nr}</h2>
       <button class="sheet-close" data-close="1" aria-label="Schließen">×</button></div>
     <div class="sheet-body">
+      <div class="field"><label for="tp-name">Truppname <span style="text-transform:none;font-weight:500">(optional)</span></label>
+        <input id="tp-name" value="${esc(t.name||"")}" placeholder="z. B. Angriffstrupp Weiden 1/40/1" autocomplete="off"></div>
+      <div class="field">
+        <button type="button" class="leave-toggle" id="tp-ber" aria-pressed="${t.sicherheitstrupp?"true":"false"}">
+          <span class="track"></span>
+          <span>Sicherheitstrupp <small style="display:block;font-size:.75rem;font-weight:500;color:var(--ink3)">FwDV 7: steht als Rettungstrupp für einen Trupp in Not bereit – vor jedem Atemschutzeinsatz zu stellen</small></span>
+        </button>
+      </div>
       <div class="field"><label>Mitglieder (2–3 Träger)</label>
         <div class="as-pick">
           ${waehlbar.length ? waehlbar.map(tr => `
@@ -4253,6 +4268,11 @@ function openTruppEditor(id, vorbelegt){
     }));
   };
   baueDruck(); baueTf();
+  const berBtn = $("#tp-ber");
+  berBtn.addEventListener("click", () => {
+    t.sicherheitstrupp = !t.sicherheitstrupp;
+    berBtn.setAttribute("aria-pressed", t.sicherheitstrupp ? "true" : "false");
+  });
   // Funkruf des Abschnittsleiters bei Abschnittswahl übernehmen
   const abSel = $("#tp-ab"), funkInp = $("#tp-funk");
   const abAp = () => { const o = abSel.selectedOptions[0]; return o ? (o.dataset.ap||"") : ""; };
@@ -4295,6 +4315,7 @@ function openTruppEditor(id, vorbelegt){
         return;
       }
     }
+    t.name = $("#tp-name").value.trim();
     t.abschnitt = $("#tp-ab").value.trim();
     t.funkruf = $("#tp-funk").value.trim();
     t.zusatz = $("#tp-zusatz").value.trim();
@@ -4324,7 +4345,7 @@ function doPrintAtemschutz(){
       const d = (t.druck||{})[id] || {};
       const istTf = t.tf ? id === t.tf : idx === 0;
       return `<tr>
-        <td class="p-mono">${idx===0?t.nr:""}</td>
+        <td class="p-mono">${idx===0?t.nr:""}${idx===0&&t.name?`<br><span style="font-weight:400;color:#666">${esc(t.name)}</span>`:""}${idx===0&&t.sicherheitstrupp?`<br><span style="font-weight:400;color:#666">Sicherheitstrupp</span>`:""}</td>
         <td>${esc(tr.name||"?")}${istTf?` <b>(TF)</b>`:""}${tr.feuerwehr?` <span style="color:#666">(${esc(tr.feuerwehr)})</span>`:""}</td>
         <td class="p-mono">${esc(tr.geraeteNr||"–")} / ${esc(tr.maskeNr||"–")} / ${esc(tr.lungenNr||"–")}</td>
         <td style="text-align:center">${tr.csa?"CSA":""}</td>
@@ -4794,9 +4815,11 @@ function renderMonitor(){
           const mit = (t.memberIds||[]).map(id => { const tr = state.asTraeger.find(x=>x.id===id)||{};
             return `${esc(tr.name||"?")}${t.tf===id?" (TF)":""}`; }).join("<br>");
           const rz = t.status==="einsatz" ? asRzTrupp(t) : null;
-          return `<div class="as-mon-kachel st-${esc(t.status)}">
+          return `<div class="as-mon-kachel st-${esc(t.status)}${t.sicherheitstrupp && t.status!=="zurueck" ? " is-sitr" : ""}">
             ${asNrBadge(t)}
             <div class="as-mon-info"><div class="as-mon-mit">${mit || "—"}</div>
+              ${t.sicherheitstrupp && t.status!=="zurueck" ? `<div class="as-mon-sub"><span class="as-sitr-badge">Sicherheitstrupp</span></div>` : ""}
+              ${t.name?`<div class="as-mon-sub">${esc(t.name)}</div>`:""}
               ${t.abschnitt?`<div class="as-mon-sub">${esc(t.abschnitt)}</div>`:""}
               ${rz?`<div class="as-mon-sub">Rückzug ${rz.sofort?"sofort":rz.bar+" bar"}</div>`:""}
             </div></div>`;

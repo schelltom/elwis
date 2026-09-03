@@ -1204,6 +1204,11 @@
 .as-mit{font-weight:750;font-size:1.02rem;line-height:1.25}
 .as-typ{font-weight:600;font-size:.78rem;color:var(--ink2)}
 .as-sub2{font-size:.82rem;color:var(--ink2);margin-top:3px}
+.as-trupp.is-sitr{border-left-color:var(--good)}
+.as-sitr-badge{display:inline-block;font-weight:750;font-size:.74rem;letter-spacing:.02em;
+  padding:2px 8px;border-radius:999px;background:var(--good-bg);color:var(--good);text-transform:uppercase}
+.as-warnbanner{display:flex;gap:10px;align-items:flex-start;margin-bottom:14px;padding:10px 12px;
+  border-radius:12px;background:var(--warn-bg);color:var(--warn);font-size:.86rem;font-weight:600;line-height:1.35}
 .as-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
 .as-actions .btn{min-height:46px;padding:8px 16px;font-size:.9rem}
 

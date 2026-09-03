@@ -1,7 +1,7 @@
 /* LOTSE112 Service Worker – macht die App nach dem ersten Besuch offline nutzbar.
    Strategie: Precache der App-Dateien, danach stale-while-revalidate
    (aus dem Cache antworten, im Hintergrund aktualisieren). */
-const VERSION = "elwis-v149";
+const VERSION = "elwis-v150";
 const ASSETS = [
   "./",
   "./app.css",
