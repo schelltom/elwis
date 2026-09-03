@@ -9,5 +9,8 @@ server/journal.ndjson
 server/journal.ndjson.tmp
 server/backups/
 server/fotos/
+server/freigabe.json
 dist.alt/
 dist.neu/
+worker/.dev.vars
+worker/.wrangler/

@@ -580,19 +580,22 @@ function uid(){ return Date.now().toString(36) + Math.random().toString(36).slic
 // 800 ms geschrieben, statt den mehrere MB großen Voll-Serialisierungslauf bei JEDEM
 // markChange() auszulösen. saveNow() schreibt sofort (z. B. beim Verlassen der Seite).
 let _saveT = null, _saveDirty = false;
+// Freigabe-Ansicht (?teilen=…): reiner Nur-Ansehen-Modus, nichts wird lokal persistiert.
+// Tab zu = weg; erneut öffnen holt den Stand neu vom Relay.
+let FREIGABE_VIEWER = false;
 function saveNow(){
   if(_saveT){ clearTimeout(_saveT); _saveT = null; }
-  if(!state || !_saveDirty) return;
+  if(!state || !_saveDirty || FREIGABE_VIEWER) return;
   _saveDirty = false;
   try{ idbSet("state", JSON.stringify(state)).catch(e => console.warn("[LOTSE112] Speichern (IndexedDB) fehlgeschlagen:", e)); }
   catch(e){ console.warn("[LOTSE112] Zustand serialisieren fehlgeschlagen:", e); }
 }
-function save(){ if(!state) return; _saveDirty = true; if(!_saveT) _saveT = setTimeout(saveNow, 800); }
+function save(){ if(!state || FREIGABE_VIEWER) return; _saveDirty = true; if(!_saveT) _saveT = setTimeout(saveNow, 800); }
 
 /* Sofort persistieren und Erfolg (true/false) zurückmelden – für async-Kontexte. Umgeht die
    Entprellung, damit ein Speicher-voll-Fehler NICHT still verschluckt wird. */
 async function saveJetzt(){
-  if(!state) return true;
+  if(!state || FREIGABE_VIEWER) return true;
   if(_saveT){ clearTimeout(_saveT); _saveT = null; }
   _saveDirty = false;
   try{ await idbSet("state", JSON.stringify(state)); speicherWachhund(); return true; }
@@ -603,6 +606,7 @@ async function saveJetzt(){
    save() tot waren (markChange schreibt asynchron). rollback() macht den Anhang bei Fehler rückgängig. */
 function anhangSichern(rollback, warnText, onOk){
   if(!state) return;
+  if(FREIGABE_VIEWER){ if(onOk) onOk(); return; }
   if(_saveT){ clearTimeout(_saveT); _saveT = null; }
   _saveDirty = false;
   const misslungen = () => {
@@ -1244,6 +1248,7 @@ function zeigeRechtstext(){
     html: `<div class="rechts-scroll">${RECHTS_VOLL}</div>`, ok: "Schließen" });
 }
 function ersterStartRechtshinweis(){
+  if(typeof FREIGABE_VIEWER !== "undefined" && FREIGABE_VIEWER) return;   // Freigabe-Ansicht: kein Erfassungs-Hinweis, kollidiert mit der Code-Eingabe
   let ok = false;
   try{ ok = localStorage.getItem("lotse112-rechtshinweis") === "1"; }catch(e){}
   if(ok) return;
@@ -1300,7 +1305,12 @@ function renderHeader(){
   if(typeof SYNC === "undefined" || !SYNC.aktiv){
     const pill = $("#syncPill");
     pill.classList.remove("busy", "good");
-    $("#syncText").textContent = "Eigenständig";
+    if(typeof FREIGABE !== "undefined" && FREIGABE.viewer){
+      pill.classList.toggle("good", !FREIGABE.gesperrt);
+      $("#syncText").textContent = FREIGABE.gesperrt ? "Freigabe beendet" : "Freigabe-Ansicht";
+    }else{
+      $("#syncText").textContent = "Eigenständig";
+    }
   }
 }
 $("#btnSettings").addEventListener("click", () => { if(state) renderSettingsSheet(); });
@@ -1379,6 +1389,9 @@ function renderSettingsSheet(){
       <div class="field"><label style="margin-bottom:6px">Datensicherung / Wiederherstellung</label>
         <div id="cfg-backups" class="kat-list"><p class="hint" style="margin:6px 4px">Sicherungen werden geladen …</p></div>
         <p class="hint">Der ELW-Server sichert den Einsatzstand automatisch. Beim Wiederherstellen übernehmen alle verbundenen Geräte den gewählten Stand.</p>
+      </div>
+      <div class="field"><label style="margin-bottom:6px">Freigabe-Link (extern, z. B. FüGK)</label>
+        <div id="cfg-freigabe"><p class="hint" style="margin:6px 4px">Status wird geladen …</p></div>
       </div>` : ""}
       <div class="field"><label style="margin-bottom:10px">Darstellung</label>
         <div class="seg" style="max-width:none">
@@ -1596,6 +1609,63 @@ function renderSettingsSheet(){
         }catch(e){ modalInfo("Wiederherstellen fehlgeschlagen: " + (e.message||e)); }
       });
     }).catch(() => { bHost.innerHTML = `<p class="hint" style="margin:6px 4px">Sicherungen nicht abrufbar.</p>`; });
+  }
+
+  // Freigabe-Link (extern) – Status laden, Buttons verdrahten
+  const fHost = $("#cfg-freigabe");
+  if(fHost){
+    const post = (weg) => fetch("./api/share/" + weg, { method:"POST" }).then(r => r.json());
+    fetch("./api/share/status", { cache:"no-store" }).then(r => r.json()).then(s => {
+      if(!s.konfiguriert){
+        fHost.innerHTML = `<p class="hint" style="margin:6px 4px">Am ELW-Server ist keine Relay-Adresse hinterlegt
+          (<span class="mono">EL_FREIGABE_URL</span>). Ohne die geht der externe Freigabe-Link nicht.</p>`;
+        return;
+      }
+      if(!s.aktiv){
+        fHost.innerHTML = `
+          <button class="btn btn-primary" id="cfg-freigabe-on" style="min-height:48px">Freigabe-Link erzeugen</button>
+          <p class="hint" style="margin:8px 4px">Erzeugt einen Link + 6-stelligen Code für externe Stellen (FüGK).
+          Der Stand wird alle ${s.pushS} s aktualisiert; ${s.relayTtlMin} min nach dem letzten Update verfällt der Link,
+          eine geöffnete Ansicht sperrt sich nach ${s.sessionTtlMin} min ohne neuen Stand.</p>`;
+        $("#cfg-freigabe-on").addEventListener("click", async () => { await post("enable"); renderSettingsSheet(); });
+        return;
+      }
+      const url = s.viewUrl || "";
+      const push = s.letzterPushZeit ? `${fmtDatum(s.letzterPushZeit)} ${fmtZeit(s.letzterPushZeit)} Uhr` : "noch nicht";
+      fHost.innerHTML = `
+        <div class="cfg-qr" style="text-align:center;margin:4px 0 10px">
+          <img src="${qrDataUrl(url)}" alt="QR-Code Freigabe-Link" width="176" height="176">
+        </div>
+        <div class="field" style="margin-bottom:8px">
+          <label style="margin-bottom:4px">Link</label>
+          <input id="cfg-freigabe-url" readonly value="${esc(url)}" style="font-size:.85rem">
+        </div>
+        <div class="field" style="margin-bottom:8px">
+          <label style="margin-bottom:4px">Code – telefonisch durchgeben</label>
+          <div class="mono" style="font-size:1.9rem;letter-spacing:.28em;font-weight:700">${esc(s.pin || "")}</div>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">
+          <button class="btn btn-ghost" id="cfg-freigabe-copy" style="min-height:44px;flex:1">Link kopieren</button>
+          <button class="btn btn-ghost" id="cfg-freigabe-new" style="min-height:44px;flex:none">Neu erzeugen</button>
+          <button class="btn btn-ghost" id="cfg-freigabe-off" style="min-height:44px;flex:none">Freigabe beenden</button>
+        </div>
+        <p class="hint" style="margin:0 4px">Letztes Update: ${push}${s.letzterFehler ? ` · <span style="color:var(--warn)">${esc(s.letzterFehler)}</span>` : ""}</p>`;
+      $("#cfg-freigabe-copy").addEventListener("click", () => {
+        const inp = $("#cfg-freigabe-url");
+        navigator.clipboard?.writeText(inp.value).then(
+          () => { const b = $("#cfg-freigabe-copy"); b.textContent = "Kopiert ✓"; setTimeout(() => b.textContent = "Link kopieren", 1500); },
+          () => { inp.select(); document.execCommand?.("copy"); },
+        );
+      });
+      $("#cfg-freigabe-new").addEventListener("click", async () => {
+        if(!(await modalConfirm("Neuen Link + Code erzeugen? Der bisherige Link funktioniert dann nicht mehr (läuft über seine Restzeit aus)."))) return;
+        await post("regenerate"); renderSettingsSheet();
+      });
+      $("#cfg-freigabe-off").addEventListener("click", async () => {
+        if(!(await modalConfirm("Freigabe beenden? Externe Betrachter verlieren nach kurzer Zeit den Zugriff. Der Link lässt sich später mit demselben Code wieder aktivieren."))) return;
+        await post("disable"); renderSettingsSheet();
+      });
+    }).catch(() => { fHost.innerHTML = `<p class="hint" style="margin:6px 4px">Freigabe-Status nicht abrufbar.</p>`; });
   }
 }
 
@@ -1866,6 +1936,32 @@ async function exportEinsatz(){
   document.body.appendChild(a); a.click(); a.remove();
   URL.revokeObjectURL(a.href);
 }
+/* Import-Kern: Einsatzdaten aus einem Export-Objekt in `state` übernehmen –
+   ohne Dialoge, ohne Fotobytes-/Persistenz-Nebenwirkungen. Gemeinsam genutzt von
+   `importEinsatz` (Datei) und dem Freigabe-Auto-Import (`freigabeViewerBoot`). */
+function importEinsatzKern(d){
+  state.einsatz = d.einsatz || {};
+  state.einheiten = d.einheiten || [];
+  state.fuehrung = d.fuehrung || [];
+  state.abschnitte = d.abschnitte || [];
+  state.lage = (d.lage && Array.isArray(d.lage.items)) ? d.lage : { items: [], bg: "", snapshots: [] };
+  state.lage.snapshots = state.lage.snapshots || [];
+  state.funk = d.funk || [];
+  state.besprechungen = d.besprechungen || [];
+  state.anforderungen = d.anforderungen || [];
+  state.checks = d.checks || [];
+  state.fotos = (d.fotos || []).map(({ data, ...meta }) => meta);   // im State nur Metadaten
+  state.asTraeger = d.asTraeger || [];
+  state.asTrupps = d.asTrupps || [];
+}
+function importEinsatzConfigArchiv(d){
+  if(d.config){
+    state.config = Object.assign(defaultConfig(), d.config);
+    state.config.prefixes = Object.assign(defaultConfig().prefixes, d.config.prefixes || {});
+    applyTheme();
+  }
+  if(Array.isArray(d.archiv)) state.archiv = d.archiv;
+}
 function importEinsatz(file){
   const rd = new FileReader();
   rd.onload = async () => {
@@ -1875,30 +1971,14 @@ function importEinsatz(file){
       const wer = [d.einsatz.stichwort || "ohne Stichwort", d.ugName ? `(${d.ugName})` : "",
         d.exportiert ? `– exportiert ${fmtDatum(d.exportiert)} ${fmtZeit(d.exportiert)} Uhr` : ""].join(" ");
       if(!(await modalConfirm(`Einsatz „${wer}“ importieren?\nDer aktuell erfasste Einsatz wird ersetzt (Archiv und Einstellungen bleiben).`))) return;
-      state.einsatz = d.einsatz;
-      state.einheiten = d.einheiten || [];
-      state.fuehrung = d.fuehrung || [];
-      state.abschnitte = d.abschnitte || [];
-      state.lage = (d.lage && Array.isArray(d.lage.items)) ? d.lage : { items: [], bg: "", snapshots: [] };
-      state.lage.snapshots = state.lage.snapshots || [];
-      state.funk = d.funk || [];
-      state.besprechungen = d.besprechungen || [];
-      state.anforderungen = d.anforderungen || [];
-      state.checks = d.checks || [];
+      importEinsatzKern(d);
       await fotosUebernehmen(d.fotos);   // Bytes in den lokalen Foto-Speicher, im State nur Metadaten
-      state.asTraeger = d.asTraeger || [];
-      state.asTrupps = d.asTrupps || [];
       // Komplett-Backup: auf Wunsch auch Archiv + Einstellungen/Kataloge wiederherstellen
       // (beim reinen Übertragen eines Einsatzes „Nein“, damit lokale Einstellungen bleiben).
       if(d.config || Array.isArray(d.archiv)){
         const anz = Array.isArray(d.archiv) ? d.archiv.length : 0;
         if(await modalConfirm(`Auch Einstellungen (UG-Name, Präfixe, Kataloge, ELW-Funkrufname, w3w-Key) und Archiv (${anz} abgeschlossene${anz===1?"r Einsatz":" Einsätze"}) aus der Sicherung übernehmen?\n\nJa = Komplett-Wiederherstellung · Nein = nur diesen Einsatz übernehmen (lokale Einstellungen/Archiv bleiben).`, "Ja, alles", "Nein")){
-          if(d.config){
-            state.config = Object.assign(defaultConfig(), d.config);
-            state.config.prefixes = Object.assign(defaultConfig().prefixes, d.config.prefixes || {});
-            applyTheme();
-          }
-          if(Array.isArray(d.archiv)) state.archiv = d.archiv;
+          importEinsatzConfigArchiv(d);
         }
       }
       state.einsatzId = uid(); state.einsatzStart = new Date().toISOString();
@@ -7919,6 +7999,12 @@ function syncSnapSave(s){ _syncSnap = s; idbSet("sync-snap", s).catch(()=>{}); }
 function syncSingleValues(){
   const s = { lageBg: state.lage.bg, lwbilanz: state.lwbilanz };
   for(const f of Object.keys(state.einsatz)) s["einsatz:" + f] = state.einsatz[f];
+  // Anzeige-relevante Config-Felder mitspiegeln, damit der Server (und darüber der
+  // Freigabe-Link) den echten UG-/ILS-Namen kennt statt des Platzhalters. Bewusst
+  // NICHT: theme (gerätelokal), API-Keys, Präfixe.
+  s["config:ugName"]    = state.config.ugName;
+  s["config:ilsName"]   = state.config.ilsName;
+  s["config:ilsGruppe"] = state.config.ilsGruppe;
   return s;
 }
 function syncSnapshotVomZustand(){
@@ -8025,6 +8111,7 @@ function syncApply(server){
     if(k === "lageBg") state.lage.bg = sg.lageBg.v || "";
     else if(k === "lwbilanz"){ if(sg.lwbilanz.v) state.lwbilanz = sg.lwbilanz.v; }
     else if(k.startsWith("einsatz:")) state.einsatz[k.slice(8)] = sg[k].v;   // feldweise mergen
+    else if(k.startsWith("config:")){ if(sg[k] && sg[k].v !== undefined) state.config[k.slice(7)] = sg[k].v; }
   }
   const setzeCol = (name, arr) => {
     if(name === "lageItems") state.lage.items = arr;
@@ -8269,6 +8356,164 @@ function zeigeAppVersion(){
   const c = document.getElementById("cfgVer"); if(c) c.textContent = t;
 }
 
+/* ================================================================
+   Freigabe-Ansicht (?teilen=<viewToken>)
+   ----------------------------------------------------------------
+   Dieselbe App, aber im Nur-Ansehen-Modus für externe Stellen (FüGK):
+   holt einen eingefrorenen Einsatz-Snapshot vom Cloud-Relay, importiert
+   ihn über den normalen Import-Kern, pollt auf neuere Pushes und sperrt
+   sich selbst, wenn der Stand veraltet ist. KEINE lokale Persistenz.
+   ================================================================ */
+const FREIGABE_RELAY_DEFAULT = "https://freigabe.lotse112el.workers.dev/";
+const FREIGABE = { viewer:false, viewToken:null, relay:FREIGABE_RELAY_DEFAULT, pin:null,
+  letzterPush:null, letzterEmpfang:0, sessionTtlMs:120*60000, pollS:300, gesperrt:false };
+
+async function freigabeHolen(){
+  return fetch(FREIGABE.relay + "snap/" + encodeURIComponent(FREIGABE.viewToken), {
+    cache:"no-store", headers: FREIGABE.pin ? { "X-Freigabe-Pin": FREIGABE.pin } : {},
+  });
+}
+/* Segmentierte Code-Eingabe (6 Kästchen, wie bei AirDrop / PayPal). Alphabet ohne
+   Verwechsler, Großbuchstaben, Auto-Weiterspringen, Einfügen verteilt sich, voll = Absenden.
+   Liefert den 6-Zeichen-Code oder null bei Abbruch. */
+function freigabeCodeDialog(fehler){
+  const ALPHABET = "23456789ABCDEFGHJKMNPQRSTVWXYZ";
+  const clean = (ch) => { ch = String(ch || "").toUpperCase(); return ALPHABET.includes(ch) ? ch : ""; };
+  return new Promise(resolve => {
+    const host = $("#modalHost");
+    host.innerHTML = `
+    <div class="modal-backdrop"></div>
+    <div class="modal" role="alertdialog" aria-modal="true" aria-label="Freigabe-Code">
+      <h2>Freigabe-Code</h2>
+      <p>6-stelliger Code, den die Einsatzleitung telefonisch durchgibt.</p>
+      <div class="code-eingabe${fehler ? " falsch" : ""}" id="codeEingabe">
+        ${Array.from({ length: 6 }, () => `<input type="text" maxlength="1" inputmode="text" autocomplete="off" autocapitalize="characters" spellcheck="false" aria-label="Zeichen">`).join("")}
+      </div>
+      ${fehler ? `<p class="code-fehler">Code stimmt nicht – bitte erneut eingeben.</p>` : ""}
+      <div class="modal-btns">
+        <button class="btn btn-ghost" data-md="0">Abbrechen</button>
+        <button class="btn btn-primary" data-md="1" disabled>Öffnen</button>
+      </div>
+    </div>`;
+    const boxen = [...host.querySelectorAll("#codeEingabe input")];
+    const okBtn = host.querySelector('[data-md="1"]');
+    const wert = () => boxen.map(b => b.value).join("");
+    const pruefe = () => { okBtn.disabled = wert().length !== 6; };
+    const fertig = (v) => { host.innerHTML = ""; resolve(v); };
+    const absendenWennVoll = () => { if(wert().length === 6) fertig(wert()); };
+    boxen.forEach((box, i) => {
+      box.addEventListener("input", () => {
+        box.value = clean(box.value.slice(-1));
+        if(box.value && i < 5) boxen[i + 1].focus();
+        pruefe(); absendenWennVoll();
+      });
+      box.addEventListener("keydown", (e) => {
+        if(e.key === "Backspace" && !box.value && i > 0){ e.preventDefault(); boxen[i - 1].value = ""; boxen[i - 1].focus(); pruefe(); }
+        else if(e.key === "ArrowLeft" && i > 0){ e.preventDefault(); boxen[i - 1].focus(); }
+        else if(e.key === "ArrowRight" && i < 5){ e.preventDefault(); boxen[i + 1].focus(); }
+        else if(e.key === "Enter") absendenWennVoll();
+      });
+      box.addEventListener("paste", (e) => {
+        e.preventDefault();
+        const chars = (e.clipboardData.getData("text") || "").split("").map(clean).filter(Boolean).slice(0, 6);
+        boxen.forEach((b, k) => { b.value = chars[k] || ""; });
+        (boxen[chars.length] || boxen[5]).focus();
+        pruefe(); absendenWennVoll();
+      });
+    });
+    host.querySelector('[data-md="0"]').addEventListener("click", () => fertig(null));
+    host.querySelector(".modal-backdrop").addEventListener("click", () => fertig(null));
+    okBtn.addEventListener("click", absendenWennVoll);
+    boxen[0].focus();
+  });
+}
+async function freigabePinAbfragen(fehler){
+  const code = await freigabeCodeDialog(!!fehler);
+  if(code == null) return false;
+  FREIGABE.pin = code;
+  try{ sessionStorage.setItem("freigabe-pin", code); }catch(e){}
+  return true;
+}
+function freigabeUebernehmen(d){
+  importEinsatzKern(d);
+  importEinsatzConfigArchiv(d);
+  for(const f of d.fotos || []) if(f.data) _fotoCache.set(f.id, f.data);   // Bytes nur im RAM-Cache
+  FREIGABE.letzterPush = d.exportiert;
+  FREIGABE.letzterEmpfang = Date.now();
+  if(d._freigabe){
+    if(d._freigabe.sessionTtlMin) FREIGABE.sessionTtlMs = d._freigabe.sessionTtlMin * 60000;
+    if(d._freigabe.pollS) FREIGABE.pollS = d._freigabe.pollS;
+  }
+}
+async function freigabeViewerBoot(viewToken){
+  FREIGABE.viewer = true; FREIGABE.viewToken = viewToken;
+  const p = new URLSearchParams(location.search);
+  if(p.get("relay")) FREIGABE.relay = p.get("relay").replace(/\/?$/, "/");   // nur fürs lokale Testen
+  try{ FREIGABE.pin = sessionStorage.getItem("freigabe-pin"); }catch(e){}
+  if(p.get("pin")) FREIGABE.pin = p.get("pin").trim().toUpperCase();          // nur fürs lokale Testen
+  for(let versuch = 0; versuch < 5; versuch++){
+    let r;
+    try{ r = await freigabeHolen(); }catch(e){ break; }
+    if(r.status === 200){ freigabeUebernehmen(await r.json()); return true; }
+    if(r.status === 401){ if(await freigabePinAbfragen(versuch > 0)) continue; break; }
+    break;   // 404 / 5xx
+  }
+  await modalInfo("Dieser Freigabe-Link ist abgelaufen, ungültig oder der Code stimmt nicht.");
+  return false;
+}
+let freigabeBusy = false;
+async function freigabePoll(){
+  if(freigabeBusy || FREIGABE.gesperrt) return;
+  freigabeBusy = true;
+  try{
+    if(Date.now() - FREIGABE.letzterEmpfang > FREIGABE.sessionTtlMs)
+      return freigabeSperren("Kein aktueller Stand mehr – die Einsatzleitung teilt nicht mehr oder die Verbindung ist unterbrochen.");
+    let r;
+    try{ r = await freigabeHolen(); }
+    catch(e){ return; }   // Netz weg → der Zeit-Zweig oben sperrt irgendwann
+    if(r.status === 404 || r.status === 410)
+      return freigabeSperren("Die Freigabe wurde beendet oder ist abgelaufen.");
+    if(r.status === 401){
+      if(await freigabePinAbfragen(true)) return;   // nächster Tick mit neuem Code
+      return freigabeSperren("Der Freigabe-Code ist nicht mehr gültig.");
+    }
+    if(!r.ok) return;
+    const d = await r.json();
+    const neu = d.exportiert && d.exportiert !== FREIGABE.letzterPush;
+    freigabeUebernehmen(d);
+    if(neu) render();
+    zeigeFreigabeBanner();
+  }finally{ freigabeBusy = false; }
+}
+function freigabeSperren(text){
+  if(FREIGABE.gesperrt) return;
+  FREIGABE.gesperrt = true;
+  importEinsatzKern({ einsatz:{}, lage:{ items:[], bg:"", snapshots:[] } });   // hinter dem Overlay nichts Verwertbares
+  _fotoCache.clear();
+  try{ render(); }catch(e){}
+  let ov = document.getElementById("freigabeSperre");
+  if(!ov){ ov = document.createElement("div"); ov.id = "freigabeSperre"; ov.className = "freigabe-sperre"; document.body.appendChild(ov); }
+  ov.innerHTML = "";
+  const box = document.createElement("div"); box.className = "freigabe-sperre-box";
+  const h = document.createElement("h2"); h.textContent = "Freigabe beendet";
+  const p = document.createElement("p"); p.textContent = text;
+  const b = document.createElement("button"); b.type = "button"; b.className = "btn btn-primary";
+  b.textContent = "Erneut versuchen"; b.addEventListener("click", () => location.reload());
+  box.append(h, p, b); ov.appendChild(box);
+}
+function zeigeFreigabeBanner(){
+  let bar = document.getElementById("freigabeBar");
+  if(!bar){
+    bar = document.createElement("div"); bar.id = "freigabeBar"; bar.className = "freigabe-bar";
+    const header = document.querySelector("#app header.topbar");
+    if(header && header.parentNode) header.parentNode.insertBefore(bar, header.nextSibling);
+    else document.body.insertBefore(bar, document.body.firstChild);
+  }
+  const zeit = FREIGABE.letzterPush
+    ? `${fmtDatum(FREIGABE.letzterPush)} ${fmtZeit(FREIGABE.letzterPush)} Uhr` : "";
+  bar.textContent = `Freigegebener Stand${zeit ? " vom " + zeit : ""} · nur zur Ansicht – Änderungen hier werden nicht zurückgesendet und beim nächsten Update überschrieben.`;
+}
+
 /* ---------------- Start: Zustand laden, dann rendern ---------------- */
 async function boot(){
   speicherPersistierbarMachen();   // Browser soll die DB nicht wegräumen (best effort, nicht blockierend)
@@ -8288,6 +8533,22 @@ async function boot(){
   }catch(e){ /* ohne Snapshot wird beim ersten Abgleich einmalig alles gepusht */ }
   if(!state.einsatz.beginn) state.einsatz.beginn = nowLocalInput();
   if(!TABS.some(t => t.id === state.view)) state.view = "einsatz";
+
+  // Freigabe-Ansicht: ?teilen=<viewToken> → eingefrorenen Stand vom Relay laden,
+  // danach nur pollen. Keine lokale Persistenz, kein ELW-Sync.
+  const teilen = new URLSearchParams(location.search).get("teilen");
+  if(teilen){
+    FREIGABE_VIEWER = true;
+    const ok = await freigabeViewerBoot(teilen);
+    render();
+    if(ok){
+      zeigeFreigabeBanner();
+      setInterval(freigabePoll, Math.max(20, FREIGABE.pollS) * 1000);
+    }
+    ladeAppVersion();
+    return;
+  }
+
   // Migration: Inline-Bilddaten aus dem State-Blob in den getrennten Foto-Speicher heben
   let fotoMig = false;
   for(const f of state.fotos || []){

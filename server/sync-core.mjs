@@ -104,6 +104,41 @@ export function vollStand(stand){
     seq: stand.seq, singletons: stand.singletons, collections };
 }
 
+/* Serverstand in die `exportEinsatz()`-Form der App bringen – für den Freigabe-Link,
+   der genau diese Form über den normalen Import-Weg der App einliest.
+   Rein: Fotobytes werden über `opts.fotoDaten(id) → "data:…"|null` injiziert
+   (der Server liest sie aus server/fotos/, der Test kann sie mocken).
+   `opts.stufe`: Größen-Rückfallkette 0 = alles · 1 = ohne Fotobytes ·
+   2 = zusätzlich ohne lage.snapshots. `lage.items`/`lage.bg` bleiben immer. */
+export function standAlsExport(stand, opts = {}){
+  const stufe = opts.stufe || 0;
+  const fotoDaten = opts.fotoDaten || (() => null);
+  const einsatz = {}, config = {};
+  for(const [k, s] of Object.entries(stand.singletons || {})){
+    if(k.startsWith("einsatz:")) einsatz[k.slice(8)] = s && s.v;
+    else if(k.startsWith("config:")) config[k.slice(7)] = s && s.v;
+  }
+  const col = name => Object.values((stand.collections && stand.collections[name]) || {})
+    .map(({ _m, _s, ...rec }) => rec);   // interne Merge-Marker nicht mit exportieren
+  const bg = ((stand.singletons || {}).lageBg || {}).v || "";
+  const fotos = col("fotos").map(f => {
+    const meta = { id: f.id, zeit: f.zeit, notiz: f.notiz };
+    if(stufe >= 1) return meta;
+    const d = fotoDaten(f.id);
+    return d ? { ...meta, data: d } : meta;
+  });
+  return {
+    elwis: 1, full: 1, exportiert: new Date().toISOString(), ugName: config.ugName || "",
+    einsatz,
+    einheiten: col("einheiten"), fuehrung: col("fuehrung"), abschnitte: col("abschnitte"),
+    lage: { items: col("lageItems"), bg, snapshots: stufe >= 2 ? [] : col("lageSnapshots") },
+    funk: col("funk"), besprechungen: col("besprechungen"), anforderungen: col("anforderungen"),
+    checks: col("checks"), fotos,
+    asTraeger: col("asTraeger"), asTrupps: col("asTrupps"), config,
+    // archiv fehlt bewusst – erreicht den Server nie (geräte-lokal)
+  };
+}
+
 /* Datenteil einer Delta-Antwort: nur Einzelfelder/Datensätze mit _s > clientSeq,
    plus je Sammlung die vollständige Liste der noch lebenden IDs (Löscherkennung).
    clientSeq <= 0 → Erstabgleich, dann kommt alles. */

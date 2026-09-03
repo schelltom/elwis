@@ -74,6 +74,8 @@ Keine externen Abhängigkeiten – nur Node (≥ 18) auf dem NAS.
 | `GET /api/health` | Persistenz-Kennzahlen: letzter Save, `saveFehler`, `warnung`, Journal-Zeilen, freier Platz, Backup-/Foto-Anzahl |
 | `GET /api/backups` | Backup-Liste (Name, Größe, Zeit) |
 | `POST /api/restore` | Backup wiederherstellen → neue `einsatzId` mit „jetzt", alle Clients ziehen nach |
+| `GET /api/share/status` | Freigabe-Link: konfiguriert? aktiv? `viewUrl`, `pin`, letzter Push, Fehler, Takt-Werte |
+| `POST /api/share/enable` \| `disable` \| `regenerate` | Freigabe-Link starten / stoppen / neues Token+Code-Paar |
 | alles andere | statische App aus `dist/` (SPA-Fallback auf `index.html`) |
 
 ---
@@ -94,6 +96,13 @@ Einsatz-Stammdaten werden **feldweise** synchronisiert
 (`einsatz:stichwort`, `einsatz:ort`, `einsatz:leiter`, … sowie `lageBg`, `lwbilanz`).
 Pro Feld gewinnt der **jüngste Zeitstempel**. Zwei Personen an **verschiedenen**
 Feldern stören sich also nicht; an **demselben** Feld gewinnt der letzte Speichervorgang.
+
+Seit dem Freigabe-Link werden zusätzlich `config:ugName`, `config:ilsName` und
+`config:ilsGruppe` mitsynchronisiert (damit der Server – und darüber die externe
+Freigabe-Ansicht – den echten Namen kennt statt des Platzhalters „UG-Weiden"). Alles
+andere aus `state.config` (Theme, API-Keys, Präfixe) bleibt gerätelokal. Wie bei den
+Einsatzfeldern gilt last-write-wins – normalerweise unkritisch, da alle Tablets einer
+UG dieselben Stammdaten tragen.
 
 ### Fotos (Sonderfall)
 
@@ -331,5 +340,62 @@ alten Server laufen. Empfohlen: NAS zeitnah `git pull` + Neustart.
 
 ### Nach jedem App-Deploy
 
-`public/sw.js` → `VERSION` erhöhen (aktuell `elwis-v155`), sonst sehen Tablets mit
+`public/sw.js` → `VERSION` erhöhen (aktuell `elwis-v156`), sonst sehen Tablets mit
 Offline-PWA (Abschnitt 4 B) die neue Version verzögert.
+
+---
+
+## 11. Freigabe-Link (externe Sicht, z. B. FüGK)
+
+Optionaler, **standardmäßig ausgeschalteter** Zusatz: der ELW-Server pusht einen
+eingefrorenen Einsatz-Snapshot an einen kleinen Cloudflare Worker (`worker/`), externe
+Stellen öffnen damit **dieselbe App** unter `?teilen=<viewToken>` und sehen den (nahezu)
+aktuellen Stand. Die Offline-First-Architektur bleibt unberührt.
+
+**Ablauf**
+
+1. `POST /api/share/enable` erzeugt lokal `server/freigabe.json` mit `pushToken`
+   (Geheimnis), `viewToken` (im Link) und `pin` (6 Zeichen aus `23456789ABCDEFGHJKMNPQRSTVWXYZ`,
+   telefonisch durchzugeben).
+2. `freigabePush()` schickt alle `EL_FREIGABE_PUSH_S` s (Default 1800, **hart ≥ 300** –
+   KV-Free-Limit 1000 Writes/Tag) `standAlsExport()` an `POST <relay>/push/<pushToken>`.
+   `standAlsExport()` (in `sync-core.mjs`, rein + getestet) baut aus `stand` die
+   `exportEinsatz()`-Form; Fotobytes werden aus `server/fotos/<id>` rehydriert.
+   Größen-Rückfallkette bei `413`: Stufe 0 alles → 1 ohne Fotobytes → 2 ohne
+   `lage.snapshots`.
+3. Der Worker legt den Snapshot in KV (`view:<viewToken>`), `expirationTtl =
+   relayTtlMin·60` (bei jedem Push erneuert), zusammen mit `sha256(pushToken)` (TOFU,
+   fremder Push → 403) und `sha256(pin)`.
+4. `GET <relay>/snap/<viewToken>` verlangt den Code als `X-Freigabe-Pin` – Prüfung
+   **im Worker** (falsch/fehlt → 401), nicht gefunden/abgelaufen → 404.
+5. Die App erkennt `?teilen=`, holt den Snapshot, importiert ihn über
+   `importEinsatzKern()`/`importEinsatzConfigArchiv()` (derselbe Kern wie der
+   Datei-Import) und pollt alle `pollS` s. **Keine lokale Persistenz** im Viewer-Modus
+   (`FREIGABE_VIEWER` ⇒ `save()` ist No-Op). Bleibt editierbar, aber mit Dauer-Banner;
+   Änderungen werden nie zurückgeschickt.
+6. **Selbstsperre:** Der Viewer legt ein Vollbild-Overlay + leert den State, wenn seit
+   dem letzten empfangenen Push mehr als `sessionTtlMin` vergangen sind **oder** ein
+   Poll `404` liefert (Relay-TTL abgelaufen / „Freigabe beenden").
+
+**Env-Vars** (ELW-Server, alle geklemmt, `_MIN`/`_S`-Werte an den Viewer im
+`_freigabe`-Block gepusht):
+
+| Var | Default | Klemmung | Wirkung |
+|---|---|---|---|
+| `EL_FREIGABE_URL` | *(leer = AUS)* | – | Worker-Basis-URL; ohne die ist die Freigabe komplett aus |
+| `EL_FREIGABE_PUSH_S` | 1800 | **≥ 300** | Server-Push-Takt (KV-Write je Push) |
+| `EL_FREIGABE_TTL_MIN` | 180 | 60 … 10080 | Link fetchbar ab letztem Push (KV `expirationTtl`) |
+| `EL_FREIGABE_SESSION_MIN` | 120 | 10 … 1440 | Viewer sperrt sich ohne neuen Stand |
+| `EL_FREIGABE_POLL_S` | 300 | 20 … 3600 | Viewer-Poll-Takt |
+
+Neue Variablen mit `EL_`-Kürzel (LOTSE112 Einsatzleitung); die vorhandenen `ELWIS_*`
+bleiben nur aus Abwärtskompatibilität.
+
+**Grenze:** Ist der Snapshot einmal im Browser, kann er nicht zurückgeholt werden – die
+Selbstsperre ist ein UX-Riegel für kooperative Betrachter, keine Krypto-Kontrolle.
+Rate-Limiting ist bei `*.workers.dev` nicht möglich und dank des Code-Schlüsselraums
+auch nicht nötig (siehe `worker/README.md`).
+
+**Worker-Deploy** (nicht automatisch): siehe `worker/README.md`. Aktueller Relay:
+`https://freigabe.lotse112el.workers.dev/` (in `FREIGABE_RELAY_DEFAULT`, `public/app.js`
+schon eingetragen). Am NAS im Startskript `EL_FREIGABE_URL` setzen.

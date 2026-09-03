@@ -17,7 +17,7 @@ import os from "node:os";
 import crypto from "node:crypto";
 import zlib from "node:zlib";
 import { fileURLToPath } from "node:url";
-import { leererStand, mergeSync as mergeStand, vollStand, deltaStand } from "./sync-core.mjs";
+import { leererStand, mergeSync as mergeStand, vollStand, deltaStand, standAlsExport } from "./sync-core.mjs";
 
 const HIER = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT || process.argv[2] || 8474);
@@ -57,6 +57,18 @@ const UPDATE_INTERVALL = Math.max(1, Number(process.env.ELWIS_UPDATE_MIN || 5)) 
 // Auto-Mirror abschaltbar (ELWIS_MIRROR=0) – nötig fürs lokale Testen eines
 // eigenen Builds, den der Mirror sonst mit dem GitHub-Pages-Stand überschreibt.
 const MIRROR_AKTIV = process.env.ELWIS_MIRROR !== "0";
+
+// ---- Freigabe-Link (optionaler Cloud-Relay für externe Sicht, z. B. FüGK) ----
+// Standard: AUS. EL_FREIGABE_URL muss pro Installation explizit gesetzt werden –
+// das hier schickt einen Live-Einsatz-Snapshot ins offene Internet.
+// (Neue Variablen tragen das Kürzel EL für „LOTSE112 Einsatzleitung"; die alten
+//  ELWIS_*-Namen bleiben nur aus Abwärtskompatibilität bestehen.)
+const RELAY_BASIS = process.env.EL_FREIGABE_URL ? process.env.EL_FREIGABE_URL.replace(/\/?$/, "/") : "";
+const FREIGABE_PUSH_S      = Math.max(300, Number(process.env.EL_FREIGABE_PUSH_S) || 1800);   // Default 30 min · hart ≥ 5 min (KV-Free-Limit: 1000 Writes/Tag)
+const FREIGABE_TTL_MIN     = Math.min(10080, Math.max(60, Number(process.env.EL_FREIGABE_TTL_MIN) || 180));   // Link-Lebensdauer ab letztem Push
+const FREIGABE_SESSION_MIN = Math.min(1440,  Math.max(10, Number(process.env.EL_FREIGABE_SESSION_MIN) || 120));   // Viewer-Selbstsperre ohne neuen Stand
+const FREIGABE_POLL_S      = Math.min(3600,  Math.max(20, Number(process.env.EL_FREIGABE_POLL_S) || 300));   // Viewer-Poll-Takt
+const FREIGABE_DATEI = path.join(path.dirname(DATEI), "freigabe.json");
 
 const MIME = {
   ".html": "text/html; charset=utf-8", ".css": "text/css; charset=utf-8",
@@ -305,6 +317,88 @@ function sendeJson(req, res, code, obj){
     res.writeHead(code, { ...kopf, "Content-Length": body.length });
     res.end(req.method === "HEAD" ? undefined : body);
   }
+}
+
+/* ================================================================
+   Freigabe-Link: optionaler Push eines eingefrorenen Einsatzstands an
+   einen Cloud-Relay (Cloudflare Worker). Externe Stellen (z. B. FüGK)
+   öffnen damit die normale App über ?teilen=<viewToken> und sehen den
+   (nahezu) aktuellen Stand – ein 6-stelliger Code (telefonisch) ist der
+   zweite Kanal. Standard: AUS, solange EL_FREIGABE_URL nicht gesetzt ist.
+   ================================================================ */
+const FREIGABE_PIN_ALPHABET = "23456789ABCDEFGHJKMNPQRSTVWXYZ";   // ohne 0 1 I L O U
+function sha256Hex(text){ return crypto.createHash("sha256").update(String(text)).digest("hex"); }
+function neuesToken(){ return crypto.randomBytes(18).toString("base64url"); }
+function neuePin(){
+  const b = crypto.randomBytes(6);
+  let s = "";
+  for(let i = 0; i < 6; i++) s += FREIGABE_PIN_ALPHABET[b[i] % FREIGABE_PIN_ALPHABET.length];
+  return s;
+}
+
+let freigabe = { pushToken: null, viewToken: null, pin: null, aktiv: false,
+  letzterPushZeit: null, letzterFehler: null };
+try{ freigabe = Object.assign(freigabe, JSON.parse(fs.readFileSync(FREIGABE_DATEI, "utf8"))); }
+catch(_){ /* noch nie aktiviert */ }
+
+function freigabeSpeichern(){
+  try{ fs.writeFileSync(FREIGABE_DATEI, JSON.stringify(freigabe, null, 2)); }
+  catch(e){ console.error("freigabe.json schreiben fehlgeschlagen:", e.message); }
+}
+function freigabeTripelSicherstellen(){
+  if(!freigabe.pushToken) freigabe.pushToken = neuesToken();
+  if(!freigabe.viewToken) freigabe.viewToken = neuesToken();
+  if(!freigabe.pin)       freigabe.pin       = neuePin();
+}
+function freigabeViewUrl(){
+  return freigabe.viewToken ? GH_BASIS + "?teilen=" + freigabe.viewToken : null;
+}
+function freigabeFotoDaten(id){
+  try{
+    if(FOTO_ID_RX.test(String(id)))
+      return "data:image/jpeg;base64," + fs.readFileSync(path.join(FOTO_DIR, String(id))).toString("base64");
+  }catch(_){}
+  return null;
+}
+
+let freigabeLaeuft = false;
+async function freigabePush(){
+  if(!RELAY_BASIS || !freigabe.aktiv || freigabeLaeuft) return;
+  freigabeLaeuft = true;
+  try{
+    for(let stufe = 0; stufe <= 2; stufe++){
+      const body = JSON.stringify({
+        viewToken: freigabe.viewToken,
+        pinHash: sha256Hex(freigabe.pin),
+        relayTtlMin: FREIGABE_TTL_MIN,
+        sessionTtlMin: FREIGABE_SESSION_MIN,
+        pollS: FREIGABE_POLL_S,
+        data: standAlsExport(stand, { stufe, fotoDaten: freigabeFotoDaten }),
+      });
+      let r;
+      try{
+        r = await fetch(RELAY_BASIS + "push/" + freigabe.pushToken, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body, signal: AbortSignal.timeout(15000),
+        });
+      }catch(e){
+        freigabe.letzterFehler = "Relay nicht erreichbar: " + (e.message || e);
+        freigabeSpeichern(); return;
+      }
+      if(r.status === 413) continue;   // zu groß → nächste, kleinere Stufe
+      if(r.status === 403){
+        freigabe.aktiv = false;
+        freigabe.letzterFehler = "Relay lehnt den Push ab (Token-Konflikt) – Freigabe neu erzeugen.";
+        freigabeSpeichern(); return;
+      }
+      if(!r.ok){ freigabe.letzterFehler = "Relay-Fehler HTTP " + r.status; freigabeSpeichern(); return; }
+      freigabe.letzterPushZeit = new Date().toISOString();
+      freigabe.letzterFehler = stufe > 0 ? `Stand verkleinert übertragen (Stufe ${stufe})` : null;
+      freigabeSpeichern(); return;
+    }
+    freigabe.letzterFehler = "Einsatzstand auch verkleinert zu groß für die Freigabe.";
+    freigabeSpeichern();
+  }finally{ freigabeLaeuft = false; }
 }
 
 /* ================================================================
@@ -566,6 +660,49 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  /* --- Freigabe-Link (extern, optional; gleiches Auth-Modell wie alle /api/*) --- */
+  if(u.pathname === "/api/share/status"){
+    sendeJson(req, res, 200, {
+      konfiguriert: !!RELAY_BASIS,
+      aktiv: !!freigabe.aktiv,
+      viewUrl: freigabe.aktiv ? freigabeViewUrl() : null,
+      pin: freigabe.aktiv ? freigabe.pin : null,
+      letzterPushZeit: freigabe.letzterPushZeit,
+      letzterFehler: freigabe.letzterFehler,
+      pushS: FREIGABE_PUSH_S, relayTtlMin: FREIGABE_TTL_MIN,
+      sessionTtlMin: FREIGABE_SESSION_MIN, pollS: FREIGABE_POLL_S,
+    });
+    return;
+  }
+  if(u.pathname.startsWith("/api/share/") && req.method === "POST"){
+    req.resume();   // Body (falls vorhanden) verwerfen
+    if(u.pathname === "/api/share/enable"){
+      if(!RELAY_BASIS){ sendeJson(req, res, 400, { fehler: "EL_FREIGABE_URL ist nicht gesetzt – Freigabe serverseitig nicht konfiguriert." }); return; }
+      freigabeTripelSicherstellen();
+      freigabe.aktiv = true; freigabe.letzterFehler = null;
+      freigabeSpeichern(); freigabePush();
+      sendeJson(req, res, 200, { ok: true, viewUrl: freigabeViewUrl(), pin: freigabe.pin });
+      return;
+    }
+    if(u.pathname === "/api/share/disable"){
+      freigabe.aktiv = false; freigabeSpeichern();
+      sendeJson(req, res, 200, { ok: true });
+      return;
+    }
+    if(u.pathname === "/api/share/regenerate"){
+      freigabe.pushToken = neuesToken();
+      freigabe.viewToken = neuesToken();
+      freigabe.pin = neuePin();
+      freigabe.letzterFehler = null; freigabe.letzterPushZeit = null;
+      freigabeSpeichern();
+      if(freigabe.aktiv) freigabePush();
+      sendeJson(req, res, 200, { ok: true, viewUrl: freigabeViewUrl(), pin: freigabe.pin });
+      return;
+    }
+    sendeJson(req, res, 404, { fehler: "unbekannt" });
+    return;
+  }
+
   /* --- Statische App (dist/) --- */
   if(!appVorhanden()){
     res.writeHead(503, { "Content-Type": "text/plain; charset=utf-8" });
@@ -634,6 +771,7 @@ server.listen(PORT, () => {
   console.log(`  Daten:      ${DATEI}`);
   console.log(`  App-Build:  ${appVorhanden() ? `${DIST} (Version ${versionVon(DIST) || "?"})` : "wird beim ersten Internet-Kontakt von GitHub geladen"}`);
   console.log(`  Auto-Mirror: ${MIRROR_AKTIV ? `${GH_BASIS}  (Prüfung alle ${Math.round(UPDATE_INTERVALL/60000)} Min)` : "AUS (ELWIS_MIRROR=0)"}`);
+  console.log(`  Freigabe:   ${RELAY_BASIS ? `${RELAY_BASIS}  (Push alle ${FREIGABE_PUSH_S}s${freigabe.aktiv ? ", AKTIV" : ", inaktiv"})` : "AUS (EL_FREIGABE_URL nicht gesetzt)"}`);
   console.log("");
 
   // Auto-Mirror: gleich prüfen, dann im Takt. Neue Versionen werden geladen,
@@ -645,5 +783,11 @@ server.listen(PORT, () => {
     setInterval(versucheLeerlaufAktivierung, 20000);
   } else {
     console.log("  Auto-Mirror: AUS (ELWIS_MIRROR=0) – lokaler Build wird ausgeliefert.");
+  }
+
+  // Freigabe-Link: sofort einmal pushen, dann im Takt (nur wenn konfiguriert + aktiv).
+  if(RELAY_BASIS){
+    freigabePush();
+    setInterval(freigabePush, FREIGABE_PUSH_S * 1000);
   }
 });

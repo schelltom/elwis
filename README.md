@@ -70,9 +70,18 @@ Der Server zeigt beim Start die WLAN-Adresse an (z. B. `http://192.168.178.20:84
 
 **Deployment Server:** wird **nicht** automatisch aktualisiert. Am NAS im Repo-Ordner
 `git pull` + Server neu starten. `server/sync-core.mjs` (Merge-Kern) muss mitkommen.
-`elwis-daten.json`, `journal.ndjson`, `backups/`, `fotos/` sind nicht in git.
+`elwis-daten.json`, `journal.ndjson`, `backups/`, `fotos/`, `freigabe.json` sind nicht in git.
 
 Vollständig: **`SYNC-ARCHITEKTUR.md`**.
+
+### Freigabe-Link (externe Sicht, optional)
+
+Für einen zeitlich begrenzten Blick von außen (z. B. FüGK) auf den laufenden Einsatz
+kann der Server einen eingefrorenen Snapshot an einen kleinen Cloudflare Worker pushen;
+extern öffnet man damit **dieselbe App** unter `?teilen=<token>` (Link + 6-stelliger
+Code, getrennt durchgegeben). Standardmäßig **aus** – aktiv nur mit gesetztem
+`EL_FREIGABE_URL` (im NAS-Startskript). Aufbau, Env-Vars und Deploy: `SYNC-ARCHITEKTUR.md`
+§11 und `worker/README.md`.
 
 ## Architektur
 

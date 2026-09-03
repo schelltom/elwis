@@ -78,6 +78,43 @@
   .update-bar-zu:hover{background:color-mix(in srgb,currentColor 12%,transparent)}
   .update-bar.srv-warn{background:color-mix(in oklab,var(--accent) 16%,var(--surface));color:var(--accent)}
 
+  /* Freigabe-Ansicht: Dauer-Banner (kein Schließen) + Sperr-Overlay bei veraltetem Stand */
+  .freigabe-bar{
+    display:flex;align-items:center;
+    padding:9px 16px;font-size:13.5px;font-weight:600;line-height:1.35;
+    background:var(--warn-bg);color:var(--warn);
+    border-bottom:1px solid var(--line);
+  }
+  .freigabe-sperre{
+    position:fixed;inset:0;z-index:9999;display:grid;place-items:center;
+    padding:24px;background:color-mix(in srgb,var(--bg) 82%,transparent);
+    backdrop-filter:blur(2px);
+  }
+  .freigabe-sperre-box{
+    max-width:380px;width:100%;text-align:center;
+    background:var(--surface);color:var(--text);border:1px solid var(--line);
+    border-radius:16px;padding:26px 22px;box-shadow:var(--shadow);
+  }
+  .freigabe-sperre-box h2{margin:0 0 8px;font-size:1.15rem}
+  .freigabe-sperre-box p{margin:0 0 18px;font-size:.92rem;color:var(--muted)}
+
+  /* Segmentierte Code-Eingabe (Freigabe-Ansicht) – Stil wie AirDrop / PayPal */
+  .code-eingabe{display:flex;gap:8px;justify-content:center;margin:10px 0 16px}
+  .code-eingabe input{
+    width:clamp(38px,13vw,46px);height:54px;padding:0;text-align:center;
+    font-size:1.6rem;font-weight:700;
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    text-transform:uppercase;border:1.5px solid var(--line);border-radius:12px;
+    background:var(--surface);color:var(--text);caret-color:var(--accent);
+  }
+  .code-eingabe input:focus{
+    outline:none;border-color:var(--accent);
+    box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 25%,transparent);
+  }
+  .code-eingabe.falsch input{border-color:var(--warn);animation:code-shake .4s}
+  .code-fehler{text-align:center;color:var(--warn);font-size:.85rem;font-weight:600;margin:-6px 0 12px}
+  @keyframes code-shake{0%,100%{transform:translateX(0)}20%,60%{transform:translateX(-5px)}40%,80%{transform:translateX(5px)}}
+
   /* Kurzhinweis: selbst verschwindender Toast (z. B. Ansichtswechsel wegen zu schmalem Fenster) */
   .kurzhinweis{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);z-index:120;
     max-width:min(420px,calc(100vw - 24px));padding:10px 16px;border-radius:12px;

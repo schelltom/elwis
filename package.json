@@ -11,12 +11,15 @@
     "preview": "astro preview",
     "astro": "astro",
     "server": "node server/lotse112-server.mjs",
-    "test": "node --test \"test/*.test.mjs\""
+    "test": "node --test \"test/*.test.mjs\" \"worker/test/*.test.mjs\"",
+    "worker:dev": "wrangler dev --config worker/wrangler.toml",
+    "worker:deploy": "wrangler deploy --config worker/wrangler.toml"
   },
   "dependencies": {
     "astro": "^7.0.6"
   },
   "devDependencies": {
-    "decap-server": "^3.9.1"
+    "decap-server": "^3.9.1",
+    "wrangler": "^4.128.0"
   }
 }

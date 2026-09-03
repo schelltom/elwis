@@ -1,0 +1,20 @@
+# Cloudflare Worker: JSON-Relay für den LOTSE112-Freigabe-Link.
+# Deploy-Schritte + Rate-Limit-Regel: siehe README.md in diesem Verzeichnis.
+
+name = "freigabe"
+main = "src/index.mjs"
+compatibility_date = "2026-09-01"
+
+# Maximale Nutzlast je Push (24 MiB – KV-Wertlimit ist 25 MiB, etwas Reserve fürs Wrapping).
+[vars]
+MAX_BYTES = 25165824
+
+# KV-Namespace für die Snapshots.
+#   id         → npx wrangler kv namespace create FREIGABE
+#   preview_id → npx wrangler kv namespace create FREIGABE --preview
+#                (nur für `wrangler dev --remote` nötig; lokales `wrangler dev`
+#                 simuliert KV, hier tut derselbe Wert wie id)
+[[kv_namespaces]]
+binding = "FREIGABE"
+id = "95213401db1243ddb9b0d0690a7df703"
+preview_id = "b5847569269a482aaa4b5b92d208177a"
