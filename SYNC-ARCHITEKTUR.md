@@ -104,6 +104,15 @@ dauerhaft jeden Merge „gewinnen".
 - Der Server merkt sich verbundene Geräte 15 s lang (`aktiveGeraete()`); danach
   gilt ein Gerät als weg (relevant für die Leerlauf-Aktivierung von App-Updates).
 
+> **Wichtig – `syncInit()` läuft nur einmal beim App-Start.** Ist der NAS in diesem
+> Moment nicht erreichbar (Gerät noch nicht im WLAN, NAS noch nicht oben), startet
+> der Sync für diese Sitzung **gar nicht** – die App bleibt im Solo-Betrieb, bis
+> die **Seite neu geladen** wird. Ein *einmal* laufender `syncTick` dagegen
+> übersteht kurze Aussetzer von selbst (Wiederverbindung alle 3 s).
+>
+> Praxis: die App auf jedem Gerät erst öffnen, **wenn es im ELW-WLAN ist und der
+> NAS läuft**. Wer die App vorher gestartet hat, lädt nach dem Verbinden einmal neu.
+
 ---
 
 ## 5. Verbinden eines neuen Geräts (`syncInit()`)
@@ -138,7 +147,19 @@ Desktop hochfahren, der verbindet sich über `http://192.168.x.x:8474/`.
 **Warum kein Konflikt:** Der Konfliktdialog kommt nur, wenn ein *zweites* Gerät
 **selbst schon einen Einsatz mit Inhalten** angelegt hat. Solange nur das iPhone
 den Einsatz „eröffnet" und alle anderen sich bloß **verbinden**, gibt es genau
-eine Wahrheit.
+eine Wahrheit. Beim bloßen Aufruf der URL kann man **keinen** versehentlichen
+Zweit-Einsatz erzeugen – die App übernimmt beim Start still den Server-Einsatz.
+
+**Einen neuen Einsatz gibt es nur über einen bewussten Knopf** – und der drückt
+ihn dem Server dann **erzwungen** auf (`ersetzen`-Flag, ohne Konfliktdialog):
+
+- Einstellungen → „Aktuellen Einsatz verwerfen (ohne Archiv)"
+- „Einsatz beenden" (archiviert + leert)
+- „Beispieldaten laden"
+- „Einsatz importieren"
+- einen archivierten Einsatz reaktivieren
+
+→ Auf Zweitgeräten während eines laufenden Einsatzes **keine** dieser Aktionen.
 
 ### Damit es so bleibt
 
