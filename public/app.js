@@ -1386,10 +1386,6 @@ function renderSettingsSheet(){
         <p class="hint" style="margin:0">Der QR-Code zum Verbinden erscheint hier, sobald LOTSE112 über den ELW-Server läuft (<span class="mono">npm run server</span>) – die Tablets landen dann im gleichen WLAN und synchronisieren automatisch.</p>
       </div>`}
       ${SYNC.aktiv ? `
-      <div class="field"><label style="margin-bottom:6px">Datensicherung / Wiederherstellung</label>
-        <div id="cfg-backups" class="kat-list"><p class="hint" style="margin:6px 4px">Sicherungen werden geladen …</p></div>
-        <p class="hint">Der ELW-Server sichert den Einsatzstand automatisch. Beim Wiederherstellen übernehmen alle verbundenen Geräte den gewählten Stand.</p>
-      </div>
       <div class="field"><label style="margin-bottom:6px">Freigabe-Link (extern, z. B. ÖEL, FüGK)</label>
         <div id="cfg-freigabe"><p class="hint" style="margin:6px 4px">Status wird geladen …</p></div>
       </div>` : ""}
@@ -1498,6 +1494,11 @@ function renderSettingsSheet(){
         </div>
         <p class="hint">Name + Funkrufnummer. Neue Fahrzeuge werden bei der Erfassung automatisch aufgenommen. Mit ✕ entfernen.</p>
       </div>
+      ${SYNC.aktiv ? `
+      <div class="field"><label style="margin-bottom:6px">Datensicherung / Wiederherstellung</label>
+        <div id="cfg-backups" class="kat-list"><p class="hint" style="margin:6px 4px">Sicherungen werden geladen …</p></div>
+        <p class="hint">Der ELW-Server sichert den Einsatzstand automatisch. Beim Wiederherstellen übernehmen alle verbundenen Geräte den gewählten Stand.</p>
+      </div>` : ""}
       <div class="field"><label style="margin-bottom:10px">Rechtliches</label>
         <button type="button" class="btn btn-ghost btn-block" id="cfg-rechts">Nutzungsbedingungen &amp; Haftung</button>
         <p class="hint">Vollständiger Text – im App-Paket gespeichert, auch offline verfügbar. Inhaltsgleich mit lotse112.de/nutzungsbedingungen.</p>
