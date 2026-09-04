@@ -98,10 +98,12 @@
   .freigabe-sperre-box h2{margin:0 0 8px;font-size:1.15rem}
   .freigabe-sperre-box p{margin:0 0 18px;font-size:.92rem;color:var(--muted)}
 
-  /* Segmentierte Code-Eingabe (Freigabe-Ansicht) – Stil wie AirDrop / PayPal */
+  /* Segmentierte Code-Eingabe/-Anzeige (Freigabe) – Stil wie AirDrop / PayPal.
+     .code-eingabe input = Eingabe (Viewer-Seite), .code-box = reine Anzeige (Einstellungen). */
   .code-eingabe{display:flex;gap:8px;justify-content:center;margin:10px 0 16px}
-  .code-eingabe input{
+  .code-eingabe input,.code-box{
     width:clamp(38px,13vw,46px);height:54px;padding:0;text-align:center;
+    display:flex;align-items:center;justify-content:center;
     font-size:1.6rem;font-weight:700;
     font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
     text-transform:uppercase;border:1.5px solid var(--line);border-radius:12px;
@@ -641,6 +643,12 @@
   body.mon-fullscreen .mon-root{display:flex;flex-direction:column;height:100%}
   body.mon-fullscreen .monitor{display:flex;flex-direction:column}
   body.mon-fullscreen .mon-grid.mon-fill{flex:1;min-height:0}
+  /* Dasselbe Problem gibt es auch im normalen (nicht-Vollbild-)Monitor: height:100%-Kette der
+     Lagekarten-Kachel braucht eine definierte Höhe weiter oben, sonst bricht Leaflet/die Karte
+     auf einen schmalen Streifen zusammen. Eigene, kleinere Höhe hier (kein Vollbild-Platz) –
+     bewusst NUR außerhalb von .mon-fullscreen, damit die (funktionierende) Vollbild-Flex-Kette
+     oben unangetastet bleibt. */
+  body:not(.mon-fullscreen) .mon-grid.mon-fill{height:min(64vh,640px)}
   .lg-legend{overflow-y:auto}
   body.mon-fullscreen main{max-width:none;margin:0;padding:10px}
   body.mon-fullscreen .monitor{border-radius:0;min-height:calc(100vh - 20px);padding:16px}

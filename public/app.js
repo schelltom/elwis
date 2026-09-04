@@ -1390,7 +1390,7 @@ function renderSettingsSheet(){
         <div id="cfg-backups" class="kat-list"><p class="hint" style="margin:6px 4px">Sicherungen werden geladen …</p></div>
         <p class="hint">Der ELW-Server sichert den Einsatzstand automatisch. Beim Wiederherstellen übernehmen alle verbundenen Geräte den gewählten Stand.</p>
       </div>
-      <div class="field"><label style="margin-bottom:6px">Freigabe-Link (extern, z. B. FüGK)</label>
+      <div class="field"><label style="margin-bottom:6px">Freigabe-Link (extern, z. B. ÖEL, FüGK)</label>
         <div id="cfg-freigabe"><p class="hint" style="margin:6px 4px">Status wird geladen …</p></div>
       </div>` : ""}
       <div class="field"><label style="margin-bottom:10px">Darstellung</label>
@@ -1632,6 +1632,8 @@ function renderSettingsSheet(){
       }
       const url = s.viewUrl || "";
       const push = s.letzterPushZeit ? `${fmtDatum(s.letzterPushZeit)} ${fmtZeit(s.letzterPushZeit)} Uhr` : "noch nicht";
+      const codeChars = (s.pin || "      ").padEnd(6, " ").slice(0, 6).split("");
+      const kannTeilen = typeof navigator.share === "function";
       fHost.innerHTML = `
         <div class="cfg-qr" style="text-align:center;margin:4px 0 10px">
           <img src="${qrDataUrl(url)}" alt="QR-Code Freigabe-Link" width="176" height="176">
@@ -1640,22 +1642,46 @@ function renderSettingsSheet(){
           <label style="margin-bottom:4px">Link</label>
           <input id="cfg-freigabe-url" readonly value="${esc(url)}" style="font-size:.85rem">
         </div>
-        <div class="field" style="margin-bottom:8px">
-          <label style="margin-bottom:4px">Code – telefonisch durchgeben</label>
-          <div class="mono" style="font-size:1.9rem;letter-spacing:.28em;font-weight:700">${esc(s.pin || "")}</div>
+        <div class="field" style="margin-bottom:4px">
+          <label style="margin-bottom:4px;text-align:center;display:block">Code – telefonisch durchgeben</label>
+          <div class="code-eingabe">${codeChars.map(c => `<div class="code-box">${esc(c.trim())}</div>`).join("")}</div>
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">
+          ${kannTeilen ? `<button class="btn btn-primary" id="cfg-freigabe-share" style="min-height:44px;flex:1">Teilen …</button>` : ""}
           <button class="btn btn-ghost" id="cfg-freigabe-copy" style="min-height:44px;flex:1">Link kopieren</button>
-          <button class="btn btn-ghost" id="cfg-freigabe-new" style="min-height:44px;flex:none">Neu erzeugen</button>
-          <button class="btn btn-ghost" id="cfg-freigabe-off" style="min-height:44px;flex:none">Freigabe beenden</button>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">
+          <button class="btn btn-ghost" id="cfg-freigabe-new" style="min-height:44px;flex:1">Neu erzeugen</button>
+          <button class="btn btn-ghost" id="cfg-freigabe-off" style="min-height:44px;flex:1">Freigabe beenden</button>
         </div>
         <p class="hint" style="margin:0 4px">Letztes Update: ${push}${s.letzterFehler ? ` · <span style="color:var(--warn)">${esc(s.letzterFehler)}</span>` : ""}</p>`;
-      $("#cfg-freigabe-copy").addEventListener("click", () => {
+      if(kannTeilen){
+        $("#cfg-freigabe-share").addEventListener("click", () => {
+          navigator.share({
+            title: "LOTSE112 Freigabe-Link",
+            text: "LOTSE112-Freigabe-Link zum Einsatz – den Zugangscode dazu bitte separat (telefonisch) durchgeben.",
+            url,
+          }).catch(() => { /* abgebrochen oder nicht unterstützt – kein Fehlerdialog nötig */ });
+        });
+      }
+      $("#cfg-freigabe-copy").addEventListener("click", async () => {
         const inp = $("#cfg-freigabe-url");
-        navigator.clipboard?.writeText(inp.value).then(
-          () => { const b = $("#cfg-freigabe-copy"); b.textContent = "Kopiert ✓"; setTimeout(() => b.textContent = "Link kopieren", 1500); },
-          () => { inp.select(); document.execCommand?.("copy"); },
-        );
+        const btn = $("#cfg-freigabe-copy");
+        const erfolg = () => { btn.textContent = "Kopiert ✓"; setTimeout(() => { if($("#cfg-freigabe-copy")) $("#cfg-freigabe-copy").textContent = "Link kopieren"; }, 1500); };
+        try{
+          if(!navigator.clipboard || !navigator.clipboard.writeText) throw new Error("keine Clipboard-API");
+          await navigator.clipboard.writeText(inp.value);
+          erfolg();
+        }catch(e){
+          let ok = false;
+          try{
+            inp.removeAttribute("readonly"); inp.focus(); inp.select();
+            ok = !!(document.execCommand && document.execCommand("copy"));
+          }catch(e2){ ok = false; }
+          finally{ inp.setAttribute("readonly", ""); }
+          if(ok) erfolg();
+          else modalInfo("Kopieren nicht möglich – bitte das Link-Feld antippen, Text markieren und selbst kopieren.");
+        }
       });
       $("#cfg-freigabe-new").addEventListener("click", async () => {
         if(!(await modalConfirm("Neuen Link + Code erzeugen? Der bisherige Link funktioniert dann nicht mehr (läuft über seine Restzeit aus)."))) return;
