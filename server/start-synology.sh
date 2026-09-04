@@ -38,7 +38,7 @@ echo "$(date '+%Y-%m-%d %H:%M:%S')  Starte LOTSE112-Server mit $NODE" >> "$LOG"
 # ================================================================
 # EL_FREIGABE_URL="https://freigabe.lotse112el.workers.dev/"
 # EL_FREIGABE_PUSH_S=1800        # Push-Takt in Sekunden (Default 1800 = 30 min; Minimum 300)
-# EL_FREIGABE_TTL_MIN=180        # Link laeuft so viele Minuten nach dem letzten Push ab
+# EL_FREIGABE_TTL_MIN=60         # Link laeuft so viele Minuten nach dem letzten Push ab
 # EL_FREIGABE_SESSION_MIN=120    # offene Ansicht sperrt sich nach so vielen Minuten ohne neuen Stand
 # EL_FREIGABE_POLL_S=300         # wie oft die Ansicht auf Neues prueft
 # export EL_FREIGABE_URL EL_FREIGABE_PUSH_S EL_FREIGABE_TTL_MIN EL_FREIGABE_SESSION_MIN EL_FREIGABE_POLL_S

@@ -65,7 +65,7 @@ const MIRROR_AKTIV = process.env.ELWIS_MIRROR !== "0";
 //  ELWIS_*-Namen bleiben nur aus Abwärtskompatibilität bestehen.)
 const RELAY_BASIS = process.env.EL_FREIGABE_URL ? process.env.EL_FREIGABE_URL.replace(/\/?$/, "/") : "";
 const FREIGABE_PUSH_S      = Math.max(300, Number(process.env.EL_FREIGABE_PUSH_S) || 1800);   // Default 30 min · hart ≥ 5 min (KV-Free-Limit: 1000 Writes/Tag)
-const FREIGABE_TTL_MIN     = Math.min(10080, Math.max(60, Number(process.env.EL_FREIGABE_TTL_MIN) || 180));   // Link-Lebensdauer ab letztem Push
+const FREIGABE_TTL_MIN     = Math.min(10080, Math.max(60, Number(process.env.EL_FREIGABE_TTL_MIN) || 60));    // Link-Lebensdauer ab letztem Push
 const FREIGABE_SESSION_MIN = Math.min(1440,  Math.max(10, Number(process.env.EL_FREIGABE_SESSION_MIN) || 120));   // Viewer-Selbstsperre ohne neuen Stand
 const FREIGABE_POLL_S      = Math.min(3600,  Math.max(20, Number(process.env.EL_FREIGABE_POLL_S) || 300));   // Viewer-Poll-Takt
 const FREIGABE_DATEI = path.join(path.dirname(DATEI), "freigabe.json");

@@ -384,7 +384,7 @@ aktuellen Stand. Die Offline-First-Architektur bleibt unberührt.
 |---|---|---|---|
 | `EL_FREIGABE_URL` | *(leer = AUS)* | – | Worker-Basis-URL; ohne die ist die Freigabe komplett aus |
 | `EL_FREIGABE_PUSH_S` | 1800 | **≥ 300** | Server-Push-Takt (KV-Write je Push) |
-| `EL_FREIGABE_TTL_MIN` | 180 | 60 … 10080 | Link fetchbar ab letztem Push (KV `expirationTtl`) |
+| `EL_FREIGABE_TTL_MIN` | 60 | 60 … 10080 | Link fetchbar ab letztem Push (KV `expirationTtl`) |
 | `EL_FREIGABE_SESSION_MIN` | 120 | 10 … 1440 | Viewer sperrt sich ohne neuen Stand |
 | `EL_FREIGABE_POLL_S` | 300 | 20 … 3600 | Viewer-Poll-Takt |
 
