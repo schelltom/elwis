@@ -1633,10 +1633,6 @@ function renderSettingsSheet(){
       const url = s.viewUrl || "";
       const push = s.letzterPushZeit ? `${fmtDatum(s.letzterPushZeit)} ${fmtZeit(s.letzterPushZeit)} Uhr` : "noch nicht";
       const codeChars = (s.pin || "      ").padEnd(6, " ").slice(0, 6).split("");
-      const kannTeilen = typeof navigator.share === "function";
-      const teilenHinweis = kannTeilen ? "" : !window.isSecureContext
-        ? `<p class="hint" style="margin:0 0 8px">„Teilen" fehlt hier, weil diese Adresse kein sicherer Kontext ist (HTTP über die LAN-IP) – „Link kopieren" funktioniert trotzdem.</p>`
-        : `<p class="hint" style="margin:0 0 8px">„Teilen" wird von diesem Browser nicht unterstützt – „Link kopieren" funktioniert trotzdem.</p>`;
       fHost.innerHTML = `
         <div class="cfg-qr" style="text-align:center;margin:4px 0 10px">
           <img src="${qrDataUrl(url)}" alt="QR-Code Freigabe-Link" width="176" height="176">
@@ -1649,25 +1645,14 @@ function renderSettingsSheet(){
           <label style="margin-bottom:4px;text-align:center;display:block">Code – telefonisch durchgeben</label>
           <div class="code-eingabe">${codeChars.map(c => `<div class="code-box">${esc(c.trim())}</div>`).join("")}</div>
         </div>
-        ${teilenHinweis}
         <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">
-          ${kannTeilen ? `<button class="btn btn-primary" id="cfg-freigabe-share" style="min-height:44px;flex:1">Teilen …</button>` : ""}
-          <button class="btn ${kannTeilen ? "btn-ghost" : "btn-primary"}" id="cfg-freigabe-copy" style="min-height:44px;flex:1">Link kopieren</button>
+          <button class="btn btn-primary" id="cfg-freigabe-copy" style="min-height:44px;flex:1">Link kopieren</button>
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">
           <button class="btn btn-ghost" id="cfg-freigabe-new" style="min-height:44px;flex:1">Neu erzeugen</button>
           <button class="btn btn-ghost" id="cfg-freigabe-off" style="min-height:44px;flex:1">Freigabe beenden</button>
         </div>
         <p class="hint" style="margin:0 4px">Letztes Update: ${push}${s.letzterFehler ? ` · <span style="color:var(--warn)">${esc(s.letzterFehler)}</span>` : ""}</p>`;
-      if(kannTeilen){
-        $("#cfg-freigabe-share").addEventListener("click", () => {
-          navigator.share({
-            title: "LOTSE112 Freigabe-Link",
-            text: "LOTSE112-Freigabe-Link zum Einsatz – den Zugangscode dazu bitte separat (telefonisch) durchgeben.",
-            url,
-          }).catch(() => { /* abgebrochen oder nicht unterstützt – kein Fehlerdialog nötig */ });
-        });
-      }
       $("#cfg-freigabe-copy").addEventListener("click", async () => {
         const inp = $("#cfg-freigabe-url");
         const btn = $("#cfg-freigabe-copy");
