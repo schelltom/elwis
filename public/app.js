@@ -297,6 +297,21 @@ const TABS = [
 function istGrossesGeraet(){ return window.matchMedia("(min-width:900px)").matches; }
 function sichtbareTabs(){ return istGrossesGeraet() ? TABS : TABS.filter(t => !t.nurGross); }
 
+// Standard-Matrix für die OCR-Besatzungsschätzung (nur Fallback für Fahrzeuge außerhalb des
+// eigenen Katalogs). "von"/"bis" = Typ-Zahl aus der Funkkennung (zweitletzte Zifferngruppe),
+// grob am BOS-Kennungsplan orientiert. < 10 ist separat als Führungskraft behandelt.
+const BESATZUNG_MATRIX_DEFAULT = [
+  { von:10, bis:19, stk:2, label:"10–19 · Kommandowagen (KdoW, ELW)" },
+  { von:20, bis:29, stk:3, label:"20–29 · Tanklöschfahrzeuge (TLF u. ä.)" },
+  { von:30, bis:39, stk:2, label:"30–39 · Hubrettung (DLK)" },
+  { von:40, bis:43, stk:9, label:"40–43 · Gruppenfahrzeuge (LF/HLF)" },
+  { von:44, bis:49, stk:6, label:"44–49 · Staffelfahrzeuge (TSF u. ä.)" },
+  { von:50, bis:59, stk:3, label:"50–59 · Rüstwagen" },
+  { von:60, bis:69, stk:3, label:"60–69 · Gerätewagen" },
+  { von:70, bis:79, stk:3, label:"70–79 · Boote" },
+  { von:80, bis:89, stk:3, label:"80–89 · ABC-Fahrzeuge" },
+  { von:90, bis:99, stk:3, label:"90–99 · Sonstige Fahrzeuge" },
+];
 function defaultConfig(){
   return {
     ugName:"UG-Weiden",
@@ -310,6 +325,12 @@ function defaultConfig(){
     ilsName:"ILS Nordoberpfalz",
     ilsGruppe:{mode:"TMO",gruppe:""},
     theme:"auto",   // auto (Systemeinstellung) | hell | dunkel
+
+    // Mannschaftsstärke (gesamt) je Kennungs-Typbereich – nur die OCR-Schätzung für Fahrzeuge,
+    // die NICHT im Fahrzeugkatalog stehen (siehe defaultBesatzung()); bekannte Fahrzeuge nutzen
+    // immer ihre eigenen Katalog-Werte. "von"/"bis" = zweitletzte Zifferngruppe der Funkkennung
+    // (z. B. 1/40/1 → 40), Bereiche orientieren sich am üblichen BOS-Kennungsplan.
+    besatzungMatrix: BESATZUNG_MATRIX_DEFAULT.map(r => ({...r})),
   };
 }
 function applyTheme(){
@@ -1356,8 +1377,17 @@ function openMenu(){
 $("#btnMenu").addEventListener("click", openMenu);
 
 /* ---------------- Einstellungen (mandantenfähig) ---------------- */
+const SETTINGS_TABS = [
+  { id:"allgemein", label:"Allgemein" },
+  { id:"einsatz",   label:"Einsatz" },
+  { id:"fahrzeuge", label:"Fahrzeuge" },
+  { id:"karten",    label:"Karten" },
+  { id:"sync",      label:"Sync" },
+];
+let settingsTab = "allgemein";   // bleibt über Re-Renders (Speichern, Löschen …) hinweg erhalten
 function renderSettingsSheet(){
   const c = state.config;
+  const pane = id => settingsTab === id ? "" : " hidden";
   const prefFields = Object.entries(ORGS).map(([key,o]) => `
     <div class="field">
       <label for="cfg-p-${key}">Präfix ${esc(o.label)}</label>
@@ -1371,137 +1401,160 @@ function renderSettingsSheet(){
       <h2>Einstellungen</h2>
       <button class="sheet-close" data-close="1" aria-label="Schließen">×</button>
     </div>
+    <div class="cfg-tabs" role="tablist">
+      ${SETTINGS_TABS.map(t => `<button type="button" role="tab" data-cfgtab="${t.id}" aria-selected="${settingsTab===t.id}" class="${settingsTab===t.id?'active':''}">${esc(t.label)}</button>`).join("")}
+    </div>
     <div class="sheet-body">
-      ${SYNC.aktiv && SYNC.urls.length ? `
-      <div class="field"><label style="margin-bottom:10px">Tablet verbinden</label>
-        <div class="cfg-qr">
-          <img src="${qrDataUrl(SYNC.urls[0])}" alt="QR-Code zum Verbinden" width="176" height="176">
-          <div>
-            <p class="hint" style="margin:0 0 8px">Mit der Tablet-Kamera scannen – LOTSE112 öffnet sich im ELW-WLAN und verbindet sich automatisch mit dem Einsatz.</p>
-            ${SYNC.urls.map(u => `<div class="mono" style="font-size:.82rem">${esc(u)}</div>`).join("")}
+      <div class="cfg-pane" data-pane="allgemein"${pane("allgemein")}>
+        <div class="field"><label style="margin-bottom:10px">Darstellung</label>
+          <div class="seg" style="max-width:none">
+            <button type="button" data-theme-opt="auto" class="${(c.theme||'auto')==='auto'?'active':''}">Automatisch</button>
+            <button type="button" data-theme-opt="hell" class="${c.theme==='hell'?'active':''}">Hell</button>
+            <button type="button" data-theme-opt="dunkel" class="${c.theme==='dunkel'?'active':''}">Dunkel</button>
+          </div>
+          <p class="hint">„Automatisch“ folgt der Systemeinstellung des Geräts.</p>
+        </div>
+        <div class="field">
+          <label for="cfg-ug">Name der Einheit / Organisation</label>
+          <input id="cfg-ug" value="${esc(c.ugName)}" placeholder="z. B. UG-Weiden" autocomplete="off">
+          <p class="hint">Erscheint auf Startbildschirm, Kopfzeile und Einsatzbericht – so ist die Anwendung je Installation anpassbar (UG, Feuerwehr, Landkreis …).</p>
+        </div>
+        <div class="field"><label style="margin-bottom:10px">Rechtliches</label>
+          <button type="button" class="btn btn-ghost btn-block" id="cfg-rechts">Nutzungsbedingungen &amp; Haftung</button>
+          <p class="hint">Vollständiger Text – im App-Paket gespeichert, auch offline verfügbar. Inhaltsgleich mit lotse112.de/nutzungsbedingungen.</p>
+        </div>
+      </div>
+      <div class="cfg-pane" data-pane="einsatz"${pane("einsatz")}>
+        <div class="field">
+          <label for="cfg-elw">Standard-Empfänger Funkgespräche (ELW)</label>
+          <input id="cfg-elw" class="mono" value="${esc(c.elwFunk||"")}" placeholder="z. B. Kater Weiden 1/12/1" autocomplete="off">
+          <p class="hint">Funkrufname des ELW – wird im ETB als Empfänger („An“) vorbelegt.</p>
+        </div>
+        <div class="field"><label style="margin-bottom:10px">Komm-Skizze / Leitstelle</label>
+          <div class="form-grid">
+            <div class="field"><label for="cfg-ils">Leitstelle</label>
+              <input id="cfg-ils" value="${esc(c.ilsName||"")}" placeholder="z. B. ILS Nordoberpfalz" autocomplete="off"></div>
+            <div class="field"><label for="cfg-ilsgrp">Rufgruppe zur Leitstelle</label>
+              <div style="display:flex;gap:8px">
+                <select id="cfg-ils-mode" style="width:100px;flex:none">
+                  <option value="TMO" ${(c.ilsGruppe||{}).mode!=="DMO"?"selected":""}>TMO</option>
+                  <option value="DMO" ${(c.ilsGruppe||{}).mode==="DMO"?"selected":""}>DMO</option>
+                </select>
+                <input id="cfg-ilsgrp" class="mono" value="${esc((c.ilsGruppe||{}).gruppe||"")}" placeholder="z. B. 2772" autocomplete="off">
+              </div></div>
           </div>
         </div>
-      </div>` : `
-      <div class="field"><label style="margin-bottom:6px">Tablet verbinden</label>
-        <p class="hint" style="margin:0">Der QR-Code zum Verbinden erscheint hier, sobald LOTSE112 über den ELW-Server läuft (<span class="mono">npm run server</span>) – die Tablets landen dann im gleichen WLAN und synchronisieren automatisch.</p>
-      </div>`}
-      ${SYNC.aktiv ? `
-      <div class="field"><label style="margin-bottom:6px">Freigabe-Link (extern, z. B. ÖEL, FüGK)</label>
-        <div id="cfg-freigabe"><p class="hint" style="margin:6px 4px">Status wird geladen …</p></div>
-      </div>` : ""}
-      <div class="field"><label style="margin-bottom:10px">Darstellung</label>
-        <div class="seg" style="max-width:none">
-          <button type="button" data-theme-opt="auto" class="${(c.theme||'auto')==='auto'?'active':''}">Automatisch</button>
-          <button type="button" data-theme-opt="hell" class="${c.theme==='hell'?'active':''}">Hell</button>
-          <button type="button" data-theme-opt="dunkel" class="${c.theme==='dunkel'?'active':''}">Dunkel</button>
+        <div class="field"><label style="margin-bottom:10px">Funkrufnamen-Präfixe je Organisation</label>
+          <div class="form-grid">${prefFields}</div>
+          <p class="hint">Wird bei der Erfassung vorbelegt und kann dort jederzeit überschrieben werden.</p>
         </div>
-        <p class="hint">„Automatisch“ folgt der Systemeinstellung des Geräts.</p>
-      </div>
-      <div class="field">
-        <label for="cfg-ug">Name der Einheit / Organisation</label>
-        <input id="cfg-ug" value="${esc(c.ugName)}" placeholder="z. B. UG-Weiden" autocomplete="off">
-        <p class="hint">Erscheint auf Startbildschirm, Kopfzeile und Einsatzbericht – so ist die Anwendung je Installation anpassbar (UG, Feuerwehr, Landkreis …).</p>
-      </div>
-      <div class="field">
-        <label for="cfg-elw">Standard-Empfänger Funkgespräche (ELW)</label>
-        <input id="cfg-elw" class="mono" value="${esc(c.elwFunk||"")}" placeholder="z. B. Kater Weiden 1/12/1" autocomplete="off">
-        <p class="hint">Funkrufname des ELW – wird im ETB als Empfänger („An“) vorbelegt.</p>
-      </div>
-      <div class="field">
-        <label for="cfg-w3w">what3words API-Key</label>
-        <input id="cfg-w3w" class="mono" value="${esc(c.w3wKey||"")}" placeholder="kostenlos bei what3words registrieren" autocomplete="off">
-        <p class="hint">Ermöglicht in den Einsatzstammdaten die Umwandlung von <em>3 Wörtern</em> in eine echte Adresse (nur online). Ohne Key bleibt die Funktion inaktiv.</p>
-      </div>
-      <div class="field">
-        <label for="cfg-geoprov">Adress-Suche / Geocoding-Anbieter</label>
-        <select id="cfg-geoprov">
-          <option value="nominatim" ${(c.geoProvider||"nominatim")==="nominatim"?"selected":""}>OpenStreetMap / Nominatim (kostenlos, nicht für kommerziell)</option>
-          <option value="geoapify" ${c.geoProvider==="geoapify"?"selected":""}>Geoapify (API-Key, EU, kommerziell)</option>
-          <option value="photon" ${c.geoProvider==="photon"?"selected":""}>Photon (eigener Server, self-hosted)</option>
-        </select>
-        <div id="cfg-geo-extra" style="margin-top:8px">
-          <input id="cfg-geokey" class="mono" value="${esc(c.geoKey||"")}" placeholder="Geoapify API-Key" autocomplete="off" style="${c.geoProvider==="geoapify"?"":"display:none"}">
-          <input id="cfg-geourl" class="mono" value="${esc(c.geoUrl||"")}" placeholder="Photon-Endpoint, z. B. https://photon.example.de" autocomplete="off" style="${c.geoProvider==="photon"?"":"display:none"}">
-        </div>
-        <p class="hint">Wird genutzt, um die Lagekarte auf den Einsatzort zu zoomen und Pumpen-Adressen zu ermitteln. Für den kommerziellen Betrieb Geoapify (Key) oder eigenen Photon-Server wählen. Ohne Anbieter/Netz tippt man die Adresse selbst.</p>
-      </div>
-      <div class="field"><label style="margin-bottom:10px">Komm-Skizze / Leitstelle</label>
-        <div class="form-grid">
-          <div class="field"><label for="cfg-ils">Leitstelle</label>
-            <input id="cfg-ils" value="${esc(c.ilsName||"")}" placeholder="z. B. ILS Nordoberpfalz" autocomplete="off"></div>
-          <div class="field"><label for="cfg-ilsgrp">Rufgruppe zur Leitstelle</label>
-            <div style="display:flex;gap:8px">
-              <select id="cfg-ils-mode" style="width:100px;flex:none">
-                <option value="TMO" ${(c.ilsGruppe||{}).mode!=="DMO"?"selected":""}>TMO</option>
-                <option value="DMO" ${(c.ilsGruppe||{}).mode==="DMO"?"selected":""}>DMO</option>
-              </select>
-              <input id="cfg-ilsgrp" class="mono" value="${esc((c.ilsGruppe||{}).gruppe||"")}" placeholder="z. B. 2772" autocomplete="off">
-            </div></div>
+        <div class="field"><label style="margin-bottom:10px">Einsatzstichwörter (${(c.stichworte||[]).length})</label>
+          <div class="kat-list">
+            ${stichwortGruppen().map(g => `
+              <div class="kat-grp">${esc(g.grp)}</div>
+              ${g.items.map(s => `
+                <div class="kat-row">
+                  <span>${esc(s.text)}</span>
+                  <button class="kat-x" data-stwdel="${s._i}" aria-label="Stichwort entfernen">✕</button>
+                </div>`).join("")}`).join("")}
+          </div>
+          <div class="kat-add">
+            <select id="cfg-stw-kat" aria-label="Kategorie">
+              ${STW_KAT_ORDER.map(k => `<option value="${esc(k)}">${esc(k)}</option>`).join("")}
+              <option value="Weitere">Weitere</option>
+            </select>
+            <input id="cfg-stw-neu" placeholder="z. B. B 5 – Menschenrettung" autocomplete="off">
+            <button type="button" class="btn btn-ghost" id="cfg-stw-add">Hinzufügen</button>
+          </div>
+          <p class="hint">Eigene Stichwörter ergänzen oder mit ✕ entfernen. Die Liste erscheint beim Einsatzstichwort zur Auswahl.</p>
         </div>
       </div>
-      <div class="field"><label style="margin-bottom:10px">Funkrufnamen-Präfixe je Organisation</label>
-        <div class="form-grid">${prefFields}</div>
-        <p class="hint">Wird bei der Erfassung vorbelegt und kann dort jederzeit überschrieben werden.</p>
-      </div>
-      <div class="field"><label style="margin-bottom:10px">Einsatzstichwörter (${(c.stichworte||[]).length})</label>
-        <div class="kat-list">
-          ${stichwortGruppen().map(g => `
-            <div class="kat-grp">${esc(g.grp)}</div>
-            ${g.items.map(s => `
+      <div class="cfg-pane" data-pane="fahrzeuge"${pane("fahrzeuge")}>
+        <div class="field"><label style="margin-bottom:10px">Führungskräfte-Stammdaten (${(c.fkStamm||[]).length})</label>
+          <div class="kat-list">
+            ${(c.fkStamm||[]).length ? fkStammGruppen().map(g => `
+              <div class="kat-grp">${esc(g.grp)}</div>
+              ${g.items.map(p => `
+                <div class="kat-row">
+                  <span>${esc(fkStammLabel(p))}</span>
+                  <button class="kat-x" data-fkdel="${p._i}" aria-label="Aus Stammdaten entfernen">✕</button>
+                </div>`).join("")}`).join("")
+              : `<p class="hint" style="margin:6px 4px">Noch keine Führungskräfte hinterlegt.</p>`}
+          </div>
+          <div class="kat-add kat-add-fk">
+            <input id="cfg-fk-name" placeholder="Name" autocomplete="off">
+            <input id="cfg-fk-funktion" list="cfg-fk-funktionen" placeholder="Funktion" autocomplete="off">
+            <input id="cfg-fk-funkruf" class="mono" placeholder="Funkrufname" autocomplete="off">
+            <input id="cfg-fk-einheit" placeholder="Einheit / Abschnitt" autocomplete="off">
+            <button type="button" class="btn btn-ghost" id="cfg-fk-add">Hinzufügen</button>
+            <datalist id="cfg-fk-funktionen">${FUNKTIONEN.map(x=>`<option value="${esc(x)}">`).join("")}</datalist>
+          </div>
+          <p class="hint">Je Einheit pflegbar. Beim Erfassen einer Führungskraft per Dropdown wählbar – neu erfasste Personen landen automatisch hier.</p>
+        </div>
+        <div class="field"><label style="margin-bottom:10px">Fahrzeugkatalog (${(c.katalog||[]).length})</label>
+          <div class="kat-list">
+            ${katalogListe().map(k => `
               <div class="kat-row">
-                <span>${esc(s.text)}</span>
-                <button class="kat-x" data-stwdel="${s._i}" aria-label="Stichwort entfernen">✕</button>
-              </div>`).join("")}`).join("")}
+                <span>${esc(katalogLabel(k))}</span>
+                <button class="kat-x" data-katdel="${k._i}" aria-label="Aus Katalog entfernen">✕</button>
+              </div>`).join("")}
+          </div>
+          <p class="hint">Name + Funkrufnummer. Neue Fahrzeuge werden bei der Erfassung automatisch aufgenommen. Mit ✕ entfernen.</p>
         </div>
-        <div class="kat-add">
-          <select id="cfg-stw-kat" aria-label="Kategorie">
-            ${STW_KAT_ORDER.map(k => `<option value="${esc(k)}">${esc(k)}</option>`).join("")}
-            <option value="Weitere">Weitere</option>
+        <div class="field"><label style="margin-bottom:10px">Mannschaftsstärke je Kennungs-Typbereich (OCR-Schätzung)</label>
+          <div class="kat-list">
+            ${(c.besatzungMatrix||BESATZUNG_MATRIX_DEFAULT).map((r,i) => `
+              <div class="kat-row">
+                <span>${esc(r.label)}</span>
+                <input id="cfg-bm-${i}" type="number" min="1" max="20" class="mono cfg-bm-input" value="${esc(String(r.stk))}">
+              </div>`).join("")}
+          </div>
+          <p class="hint">Beim „Aus Alarm-Foto einlesen“ wird die Besatzung immer aus der zweitletzten Zahl der Funkkennung geschätzt (z. B. 1/40/1 → 40 → Gruppenfahrzeug) – unabhängig davon, mit welcher Stärke das Fahrzeug zuletzt im Fahrzeugkatalog gelandet ist (die kann ja von Einsatz zu Einsatz schwanken). Kennungen unter 10 gelten als Führungskraft.</p>
+        </div>
+      </div>
+      <div class="cfg-pane" data-pane="karten"${pane("karten")}>
+        <div class="field">
+          <label for="cfg-w3w">what3words API-Key</label>
+          <input id="cfg-w3w" class="mono" value="${esc(c.w3wKey||"")}" placeholder="kostenlos bei what3words registrieren" autocomplete="off">
+          <p class="hint">Ermöglicht in den Einsatzstammdaten die Umwandlung von <em>3 Wörtern</em> in eine echte Adresse (nur online). Ohne Key bleibt die Funktion inaktiv.</p>
+        </div>
+        <div class="field">
+          <label for="cfg-geoprov">Adress-Suche / Geocoding-Anbieter</label>
+          <select id="cfg-geoprov">
+            <option value="nominatim" ${(c.geoProvider||"nominatim")==="nominatim"?"selected":""}>OpenStreetMap / Nominatim (kostenlos, nicht für kommerziell)</option>
+            <option value="geoapify" ${c.geoProvider==="geoapify"?"selected":""}>Geoapify (API-Key, EU, kommerziell)</option>
+            <option value="photon" ${c.geoProvider==="photon"?"selected":""}>Photon (eigener Server, self-hosted)</option>
           </select>
-          <input id="cfg-stw-neu" placeholder="z. B. B 5 – Menschenrettung" autocomplete="off">
-          <button type="button" class="btn btn-ghost" id="cfg-stw-add">Hinzufügen</button>
+          <div id="cfg-geo-extra" style="margin-top:8px">
+            <input id="cfg-geokey" class="mono" value="${esc(c.geoKey||"")}" placeholder="Geoapify API-Key" autocomplete="off" style="${c.geoProvider==="geoapify"?"":"display:none"}">
+            <input id="cfg-geourl" class="mono" value="${esc(c.geoUrl||"")}" placeholder="Photon-Endpoint, z. B. https://photon.example.de" autocomplete="off" style="${c.geoProvider==="photon"?"":"display:none"}">
+          </div>
+          <p class="hint">Wird genutzt, um die Lagekarte auf den Einsatzort zu zoomen und Pumpen-Adressen zu ermitteln. Für den kommerziellen Betrieb Geoapify (Key) oder eigenen Photon-Server wählen. Ohne Anbieter/Netz tippt man die Adresse selbst.</p>
         </div>
-        <p class="hint">Eigene Stichwörter ergänzen oder mit ✕ entfernen. Die Liste erscheint beim Einsatzstichwort zur Auswahl.</p>
       </div>
-      <div class="field"><label style="margin-bottom:10px">Führungskräfte-Stammdaten (${(c.fkStamm||[]).length})</label>
-        <div class="kat-list">
-          ${(c.fkStamm||[]).length ? fkStammGruppen().map(g => `
-            <div class="kat-grp">${esc(g.grp)}</div>
-            ${g.items.map(p => `
-              <div class="kat-row">
-                <span>${esc(fkStammLabel(p))}</span>
-                <button class="kat-x" data-fkdel="${p._i}" aria-label="Aus Stammdaten entfernen">✕</button>
-              </div>`).join("")}`).join("")
-            : `<p class="hint" style="margin:6px 4px">Noch keine Führungskräfte hinterlegt.</p>`}
-        </div>
-        <div class="kat-add kat-add-fk">
-          <input id="cfg-fk-name" placeholder="Name" autocomplete="off">
-          <input id="cfg-fk-funktion" list="cfg-fk-funktionen" placeholder="Funktion" autocomplete="off">
-          <input id="cfg-fk-funkruf" class="mono" placeholder="Funkrufname" autocomplete="off">
-          <input id="cfg-fk-einheit" placeholder="Einheit / Abschnitt" autocomplete="off">
-          <button type="button" class="btn btn-ghost" id="cfg-fk-add">Hinzufügen</button>
-          <datalist id="cfg-fk-funktionen">${FUNKTIONEN.map(x=>`<option value="${esc(x)}">`).join("")}</datalist>
-        </div>
-        <p class="hint">Je Einheit pflegbar. Beim Erfassen einer Führungskraft per Dropdown wählbar – neu erfasste Personen landen automatisch hier.</p>
-      </div>
-      <div class="field"><label style="margin-bottom:10px">Fahrzeugkatalog (${(c.katalog||[]).length})</label>
-        <div class="kat-list">
-          ${katalogListe().map(k => `
-            <div class="kat-row">
-              <span>${esc(katalogLabel(k))}</span>
-              <button class="kat-x" data-katdel="${k._i}" aria-label="Aus Katalog entfernen">✕</button>
-            </div>`).join("")}
-        </div>
-        <p class="hint">Name + Funkrufnummer. Neue Fahrzeuge werden bei der Erfassung automatisch aufgenommen. Mit ✕ entfernen.</p>
-      </div>
-      ${SYNC.aktiv ? `
-      <div class="field"><label style="margin-bottom:6px">Datensicherung / Wiederherstellung</label>
-        <div id="cfg-backups" class="kat-list"><p class="hint" style="margin:6px 4px">Sicherungen werden geladen …</p></div>
-        <p class="hint">Der ELW-Server sichert den Einsatzstand automatisch. Beim Wiederherstellen übernehmen alle verbundenen Geräte den gewählten Stand.</p>
-      </div>` : ""}
-      <div class="field"><label style="margin-bottom:10px">Rechtliches</label>
-        <button type="button" class="btn btn-ghost btn-block" id="cfg-rechts">Nutzungsbedingungen &amp; Haftung</button>
-        <p class="hint">Vollständiger Text – im App-Paket gespeichert, auch offline verfügbar. Inhaltsgleich mit lotse112.de/nutzungsbedingungen.</p>
+      <div class="cfg-pane" data-pane="sync"${pane("sync")}>
+        ${SYNC.aktiv && SYNC.urls.length ? `
+        <div class="field"><label style="margin-bottom:10px">Tablet verbinden</label>
+          <div class="cfg-qr">
+            <img src="${qrDataUrl(SYNC.urls[0])}" alt="QR-Code zum Verbinden" width="176" height="176">
+            <div>
+              <p class="hint" style="margin:0 0 8px">Mit der Tablet-Kamera scannen – LOTSE112 öffnet sich im ELW-WLAN und verbindet sich automatisch mit dem Einsatz.</p>
+              ${SYNC.urls.map(u => `<div class="mono" style="font-size:.82rem">${esc(u)}</div>`).join("")}
+            </div>
+          </div>
+        </div>` : `
+        <div class="field"><label style="margin-bottom:6px">Tablet verbinden</label>
+          <p class="hint" style="margin:0">Der QR-Code zum Verbinden erscheint hier, sobald LOTSE112 über den ELW-Server läuft (<span class="mono">npm run server</span>) – die Tablets landen dann im gleichen WLAN und synchronisieren automatisch.</p>
+        </div>`}
+        ${SYNC.aktiv ? `
+        <div class="field"><label style="margin-bottom:6px">Freigabe-Link (extern, z. B. ÖEL, FüGK)</label>
+          <div id="cfg-freigabe"><p class="hint" style="margin:6px 4px">Status wird geladen …</p></div>
+        </div>` : ""}
+        ${SYNC.aktiv ? `
+        <div class="field"><label style="margin-bottom:6px">Datensicherung / Wiederherstellung</label>
+          <div id="cfg-backups" class="kat-list"><p class="hint" style="margin:6px 4px">Sicherungen werden geladen …</p></div>
+          <p class="hint">Der ELW-Server sichert den Einsatzstand automatisch. Beim Wiederherstellen übernehmen alle verbundenen Geräte den gewählten Stand.</p>
+        </div>` : ""}
       </div>
     </div>
     <div class="sheet-foot" style="flex-wrap:wrap">
@@ -1522,8 +1575,19 @@ function renderSettingsSheet(){
     document.querySelectorAll("[data-pfx]").forEach(inp => {
       state.config.prefixes[inp.dataset.pfx] = inp.value.trim();
     });
+    const basis = state.config.besatzungMatrix || BESATZUNG_MATRIX_DEFAULT;
+    state.config.besatzungMatrix = basis.map((r, i) => {
+      const inp = $("#cfg-bm-" + i);
+      const n = inp ? parseInt(inp.value, 10) : NaN;
+      return { ...r, stk: n > 0 ? n : r.stk };
+    });
   };
   document.querySelectorAll("[data-close]").forEach(el => el.addEventListener("click", closeEditor));
+  document.querySelectorAll("[data-cfgtab]").forEach(b => b.addEventListener("click", () => {
+    leseSettings();   // laufende Eingaben beim Tabwechsel nicht verlieren
+    settingsTab = b.dataset.cfgtab;
+    renderSettingsSheet();
+  }));
   $("#cfg-rechts").addEventListener("click", zeigeRechtstext);
   document.querySelectorAll("[data-theme-opt]").forEach(b => b.addEventListener("click", () => {
     state.config.theme = b.dataset.themeOpt;
@@ -2543,15 +2607,17 @@ function ocrStichwort(text){
   return val.replace(/\|/g, "").replace(/^[#>\s]+/, "").replace(/\s+/g, " ").trim();
 }
 // Default-Besatzung (Schätzung) aus der Funkkennung. Typ-Zahl = zweitletzte Ziffernstelle
-// (z. B. 1/40/2 → 40, 46/1 → 46). < 10 ⇒ Führungskraft. Personenzahl je Typ-Bereich:
-// 40–43 → 9 (Gruppe), 44–49 → 6 (Staffel), sonst 3 (Trupp).
+// (z. B. 1/40/2 → 40, 46/1 → 46). < 10 ⇒ Führungskraft. Personenzahl je Typ-Bereich kommt aus
+// der (in den Einstellungen editierbaren) besatzungMatrix; kein Treffer ⇒ 3 (Trupp).
 function defaultBesatzung(kennung){
   const teile = String(kennung || "").split("/").map(x => parseInt(x, 10)).filter(n => !isNaN(n));
   if(teile.length < 2) return null;
   const typ = teile[teile.length - 2];
   if(!(typ >= 0)) return null;
   if(typ < 10) return { fuehrung: true };
-  const total = (typ >= 40 && typ <= 43) ? 9 : (typ >= 44 && typ <= 49) ? 6 : 3;
+  const matrix = (state && state.config && state.config.besatzungMatrix) || BESATZUNG_MATRIX_DEFAULT;
+  const treffer = matrix.find(r => typ >= r.von && typ <= r.bis);
+  const total = treffer ? treffer.stk : 3;
   return { fuehrung: false, f: 0, u: 1, m: total - 1, total };
 }
 function ocrKatalogTreffer(kennung){
@@ -2760,6 +2826,9 @@ function ocrUebernehmen(){
       const label = [name, kennung].filter(Boolean).join(" ");
       if(kennung && vorhanden.has(norm(kennung))){ dubletten.push({ org, label }); continue; }   // schon erfasst → überspringen
       if(kennung) vorhanden.add(norm(kennung));
+      // Besatzung immer aus der Kennungs-Matrix (Vorgabe je Fahrzeugtyp) schätzen – nicht aus dem,
+      // was beim letzten Einsatz zufällig im Katalog gelandet ist (kann schwanken, z. B. Gruppe
+      // statt voller Stärke). Nur wenn die Kennung nicht auswertbar ist, zählt der Katalog-Wert.
       const crew = bes ? { f:bes.f, u:bes.u, m:bes.m } : (k ? { f:k.f|0, u:k.u|0, m:k.m|0 } : { f:0, u:1, m:2 });
       neueEinheiten.push({ id:uid(), org, name, kennung, f:crew.f, u:crew.u, m:crew.m,
         agt: k ? (k.agt|0) : 0, csa: k ? (k.csa|0) : 0,
