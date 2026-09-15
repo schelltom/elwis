@@ -4641,8 +4641,7 @@ function doPrintAtemschutz(){
       const istTf = t.tf ? id === t.tf : idx === 0;
       return `<tr>
         <td class="p-mono">${idx===0?t.nr:""}${idx===0&&t.name?`<br><span style="font-weight:400;color:#666">${esc(t.name)}</span>`:""}${idx===0&&t.sicherheitstrupp?`<br><span style="font-weight:400;color:#666">Sicherheitstrupp</span>`:""}</td>
-        <td>${esc(tr.name||"?")}${istTf?` <b>(TF)</b>`:""}${tr.feuerwehr?` <span style="color:#666">(${esc(tr.feuerwehr)})</span>`:""}</td>
-        <td class="p-mono">${esc(tr.geraeteNr||"–")} / ${esc(tr.maskeNr||"–")} / ${esc(tr.lungenNr||"–")}</td>
+        <td>${esc(tr.name||"?")}${istTf?` <b>(TF)</b>`:""}${tr.feuerwehr?`<br><span style="color:#666">FF ${esc(tr.feuerwehr)}</span>`:""}<br><span class="p-mono" style="color:#666;font-size:.85em">${esc(tr.geraeteNr||"–")} / ${esc(tr.maskeNr||"–")} / ${esc(tr.lungenNr||"–")}</span></td>
         <td style="text-align:center">${tr.csa?"CSA":""}</td>
         <td class="p-mono">${d.start?esc(d.start):""}</td>
         <td class="p-mono">${d.ziel?esc(d.ziel):""}</td>
@@ -4672,7 +4671,7 @@ function doPrintAtemschutz(){
       <tr><td>Trupps gesamt</td><td>${trupps.length}</td></tr>
     </table>
     <h2>Atemschutztrupps (${trupps.length})</h2>
-    ${trupps.length ? `<table><thead><tr><th>Nr.</th><th>Träger (Feuerwehr)</th><th>Gerät / Maske / LA</th><th>CSA</th><th>Start</th><th>Ziel</th><th>Ende</th><th>Rückzugsdr.</th><th>Abschnitt / Funk</th><th>ausgerückt</th><th>angeschl.</th><th>Ziel</th><th>zurück</th><th>Einsatzzeit</th></tr></thead><tbody>${rows}</tbody></table>` : "<p>Keine Atemschutztrupps erfasst.</p>"}
+    ${trupps.length ? `<table><thead><tr><th>Nr.</th><th>Träger</th><th>CSA</th><th>Start</th><th>Ziel</th><th>Ende</th><th>Rückzugsdr.</th><th>Abschnitt / Funk</th><th>ausgerückt</th><th>angeschl.</th><th>Ziel</th><th>zurück</th><th>Einsatzzeit</th></tr></thead><tbody>${rows}</tbody></table>` : "<p>Keine Atemschutztrupps erfasst.</p>"}
     <p style="font-size:8.5pt;color:#444;margin-top:10px">
       FwDV 7 – Registrierung: Uhrzeit beim Anschließen der Luftversorgung, Hinweise an den Trupp bei 1/3 und 2/3 der erwarteten Einsatzzeit,
       Erreichen des Einsatzziels und Beginn des Rückzugs. Rückzugsdruck = (2·Startdruck + Reserve)/3.
@@ -7522,7 +7521,7 @@ function reportBodyHtml(data, sel, opts){
     <section class="p-land">
     <h2>Atemschutz – Trupps (${asTrupps.length})</h2>
     <div class="p-atem">
-    <table><thead><tr><th>Nr.</th><th>Träger (Feuerwehr)</th><th>Gerät / Maske / LA</th><th>CSA</th><th>Start</th><th>Ziel</th><th>Ende</th><th>Rückzugsdr.</th><th>Abschnitt / Funk</th><th>ausgerückt</th><th>angeschl.</th><th>Ziel</th><th>zurück</th><th>Einsatzzeit</th></tr></thead><tbody>
+    <table><thead><tr><th>Nr.</th><th>Träger</th><th>CSA</th><th>Start</th><th>Ziel</th><th>Ende</th><th>Rückzugsdr.</th><th>Abschnitt / Funk</th><th>ausgerückt</th><th>angeschl.</th><th>Ziel</th><th>zurück</th><th>Einsatzzeit</th></tr></thead><tbody>
       ${asTrupps.map(t => {
         const mem = t.memberIds||[];
         // Truppführer zuerst listen (steht oben mit den Zeiten)
@@ -7535,8 +7534,7 @@ function reportBodyHtml(data, sel, opts){
           const istTf = t.tf ? id === t.tf : idx === 0;
           return `<tr>
             <td class="p-mono">${idx===0?t.nr:""}</td>
-            <td>${esc(tr.name||"?")}${istTf?` <b>(TF)</b>`:""}${tr.feuerwehr?` <span style="color:#666">(${esc(tr.feuerwehr)})</span>`:""}</td>
-            <td class="p-mono">${esc(tr.geraeteNr||"–")} / ${esc(tr.maskeNr||"–")} / ${esc(tr.lungenNr||"–")}</td>
+            <td>${esc(tr.name||"?")}${istTf?` <b>(TF)</b>`:""}${tr.feuerwehr?`<br><span style="color:#666">FF ${esc(tr.feuerwehr)}</span>`:""}<br><span class="p-mono" style="color:#666;font-size:.85em">${esc(tr.geraeteNr||"–")} / ${esc(tr.maskeNr||"–")} / ${esc(tr.lungenNr||"–")}</span></td>
             <td style="text-align:center">${tr.csa?"CSA":""}</td>
             <td class="p-mono">${d.start?esc(d.start):""}</td>
             <td class="p-mono">${d.ziel?esc(d.ziel):""}</td>
