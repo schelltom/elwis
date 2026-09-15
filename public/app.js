@@ -4641,7 +4641,7 @@ function doPrintAtemschutz(){
       const istTf = t.tf ? id === t.tf : idx === 0;
       return `<tr>
         <td class="p-mono">${idx===0?t.nr:""}${idx===0&&t.name?`<br><span style="font-weight:400;color:#666">${esc(t.name)}</span>`:""}${idx===0&&t.sicherheitstrupp?`<br><span style="font-weight:400;color:#666">Sicherheitstrupp</span>`:""}</td>
-        <td>${esc(tr.name||"?")}${istTf?` <b>(TF)</b>`:""}${tr.feuerwehr?`<br><span style="color:#666">FF ${esc(tr.feuerwehr)}</span>`:""}<br><span style="color:#666;font-size:.85em">Gerät <span class="p-mono">${esc(tr.geraeteNr||"–")}</span> · Maske <span class="p-mono">${esc(tr.maskeNr||"–")}</span> · Lungenautomat <span class="p-mono">${esc(tr.lungenNr||"–")}</span></span></td>
+        <td>${esc(tr.name||"?")}${istTf?` <b>(TF)</b>`:""}${tr.feuerwehr?`<br><span style="color:#666">FF ${esc(tr.feuerwehr)}</span>`:""}<br><span style="color:#666;font-size:.85em;white-space:nowrap">Gerät <span class="p-mono">${esc(tr.geraeteNr||"–")}</span> · Maske <span class="p-mono">${esc(tr.maskeNr||"–")}</span> · Lungenautomat <span class="p-mono">${esc(tr.lungenNr||"–")}</span></span></td>
         <td style="text-align:center">${tr.csa?"CSA":""}</td>
         <td class="p-mono">${d.start?esc(d.start):""}</td>
         <td class="p-mono">${d.ziel?esc(d.ziel):""}</td>
@@ -7534,7 +7534,7 @@ function reportBodyHtml(data, sel, opts){
           const istTf = t.tf ? id === t.tf : idx === 0;
           return `<tr>
             <td class="p-mono">${idx===0?t.nr:""}</td>
-            <td>${esc(tr.name||"?")}${istTf?` <b>(TF)</b>`:""}${tr.feuerwehr?`<br><span style="color:#666">FF ${esc(tr.feuerwehr)}</span>`:""}<br><span style="color:#666;font-size:.85em">Gerät <span class="p-mono">${esc(tr.geraeteNr||"–")}</span> · Maske <span class="p-mono">${esc(tr.maskeNr||"–")}</span> · Lungenautomat <span class="p-mono">${esc(tr.lungenNr||"–")}</span></span></td>
+            <td>${esc(tr.name||"?")}${istTf?` <b>(TF)</b>`:""}${tr.feuerwehr?`<br><span style="color:#666">FF ${esc(tr.feuerwehr)}</span>`:""}<br><span style="color:#666;font-size:.85em;white-space:nowrap">Gerät <span class="p-mono">${esc(tr.geraeteNr||"–")}</span> · Maske <span class="p-mono">${esc(tr.maskeNr||"–")}</span> · Lungenautomat <span class="p-mono">${esc(tr.lungenNr||"–")}</span></span></td>
             <td style="text-align:center">${tr.csa?"CSA":""}</td>
             <td class="p-mono">${d.start?esc(d.start):""}</td>
             <td class="p-mono">${d.ziel?esc(d.ziel):""}</td>
