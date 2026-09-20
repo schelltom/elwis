@@ -1076,6 +1076,9 @@
     #printArea .p-head .p-sub{font-size:9pt;letter-spacing:.12em;text-transform:uppercase;color:#444}
     #printArea .p-mark{border:2px solid #000;border-radius:6px;padding:6px 10px;font-weight:800;
       font-family:ui-monospace,Menlo,Consolas,monospace}
+    /* Eigenes Logo (Einstellungen › Stammdaten) statt der LOTSE112-Wortmarke: kein Kasten, nur Größenbegrenzung */
+    #printArea .p-mark.p-logo{border:none;padding:0}
+    #printArea .p-mark.p-logo img{display:block;max-height:22mm;max-width:55mm;object-fit:contain}
     #printArea h2{font-size:11pt;letter-spacing:.08em;text-transform:uppercase;
       border-bottom:1px solid #000;padding-bottom:3px;margin:18px 0 8px}
     #printArea table{width:100%;border-collapse:collapse;font-size:10pt}
@@ -1110,13 +1113,20 @@
     #printArea .p-fotos img{width:100%;border:1px solid #999;border-radius:3px}
     #printArea .p-fotos .p-foto-cap{font-size:8.5pt;color:#333;margin-top:2px;line-height:1.3}
     /* Seitenkopf/-fuß + Seitenzahl über @page-Randboxen (kein position:fixed → keine Überlagerung
-       des Inhalts). Kopftext kommt aus der versteckten Quelle .p-run-src via string-set. */
+       des Inhalts). Kopftext kommt aus der versteckten Quelle .p-run-src via string-set.
+       LOTSE112-Kennzeichnung links unten bleibt auf jeder Seite stehen, auch wenn oben rechts ein
+       eigenes Logo steht – einzeilig und knapp, LOTSE112 fett voran (plakativ), damit der Block
+       flach bleibt. (Zwei getrennte Randboxen für Marke+Text wurden verworfen: die Eckbox
+       "bottom-left-corner" hat eine vom linken Seitenrand fix vorgegebene Breite und läuft bei
+       "LOTSE112" über – sie überlappt dann die Nachbarbox statt sich einzupassen.) */
     @page{
-      margin:20mm 13mm 16mm;
+      margin:20mm 13mm 13mm;
       @top-right{content:string(rptHead);
         font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;font-size:8pt;color:#777}
-      @bottom-left{content:"Erstellt mit LOTSE112 – Unterstützungswerkzeug; fachliche Verantwortung beim Ersteller.";
-        font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;font-size:7.5pt;color:#888}
+      @bottom-left{content:"LOTSE112 – Erstellt mit · Unterstützungswerkzeug; die fachliche Verantwortung liegt beim Ersteller.";
+        font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;font-weight:700;
+        font-size:6.5pt;color:#555;
+        border:1px solid #bbb;border-radius:3px;padding:2px 6px;background:#fafafa}
       @bottom-right{content:"Seite " counter(page) " von " counter(pages);
         font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;font-size:8pt;color:#777}
     }
@@ -1200,6 +1210,13 @@
 /* Feld-Kopfzeile: Label + Schalter (z. B. Verfügungs-/Bereitstellungsraum) */
 .field-head{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:6px;flex-wrap:wrap}
 .field-head label{margin:0}
+/* Logo-Upload in den Einstellungen (Allgemein › bei UG-Namen) */
+.logo-row{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+.logo-preview{width:64px;height:64px;flex:none;object-fit:contain;border:1px solid var(--line);
+  border-radius:10px;background:#fff;padding:6px}
+.logo-preview-empty{display:flex;align-items:center;justify-content:center;text-align:center;
+  font-size:.68rem;color:var(--ink3);padding:4px}
+.logo-row-btns{display:flex;gap:8px;flex-wrap:wrap}
 /* what3words-Zeile (eigene vollbreite Zeile in den Einsatzstammdaten) */
 .w3w-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .w3w-row input{flex:1;min-width:160px;font-family:ui-monospace,Menlo,Consolas,monospace}
@@ -1386,7 +1403,6 @@
 .kat-add select{flex:none;width:110px}
 .kat-add input{flex:1;min-width:140px}
 .kat-add .btn{flex:none}
-.kat-add-fk input{flex:1 1 120px;min-width:110px;width:auto}
 .kat-nr{display:inline-block;min-width:2.2em;color:var(--ink3);font-size:.78rem;text-align:right}
 
 /* Lagekarten-Legende: bei Bedarf zweispaltig, getrennt Marker / Fahrzeuge */

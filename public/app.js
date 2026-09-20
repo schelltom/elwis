@@ -39,22 +39,33 @@ const FZG_KATALOG = [
 function katalogLabel(k){
   return [k.name, k.kennung].filter(Boolean).join(" ");
 }
-// Flache, alphabetisch sortierte Liste (ohne Fahrzeugart/-typ)
-function katalogListe(){
+// Flache, alphabetisch sortierte Liste (ohne Fahrzeugart/-typ). Mit org: nur Fahrzeuge dieser Organisation.
+function katalogListe(org){
   return (state.config.katalog || []).map((k,i) => ({...k, _i:i}))
+    .filter(k => !org || (k.org||"FW") === org)
     .sort((a,b) => katalogLabel(a).localeCompare(katalogLabel(b), "de"));
 }
-function katalogGruppen(){
-  const kat = (state.config.katalog || []).map((k,i) => ({...k, _i:i}));
+// Mit org: nur Fahrzeuge dieser Organisation (für die Erfassung – erst Organisation, dann passender Katalog).
+function katalogGruppen(org){
+  const kat = (state.config.katalog || []).map((k,i) => ({...k, _i:i})).filter(k => !org || (k.org||"FW") === org);
   const grps = [...new Set(kat.map(k => k.grp || "Weitere Fahrzeuge"))].sort((a,b) => a.localeCompare(b, "de"));
   return grps.map(g => ({ grp:g,
     items: kat.filter(k => (k.grp||"Weitere Fahrzeuge") === g)
       .sort((a,b) => katalogLabel(a).localeCompare(katalogLabel(b), "de")) }));
 }
+// Optionen (gruppiert nach Fahrzeugart) für das Fahrzeugkatalog-Auswahlfeld bei der Erfassung.
+function katalogOptionsHtml(org){
+  const grps = katalogGruppen(org);
+  const opts = grps.length
+    ? grps.map(g => `<optgroup label="${esc(g.grp)}">${g.items.map(k => `<option value="${k._i}">${esc(katalogLabel(k))}</option>`).join("")}</optgroup>`).join("")
+    : "";
+  return `<option value="">${grps.length ? "– Fahrzeug wählen, füllt alles vor –" : "– keine Fahrzeuge dieser Organisation im Katalog –"}</option>${opts}`;
+}
+// Für Dubletten-Checks: trimmen, Groß-/Kleinschreibung und doppelte/uneinheitliche Leerzeichen ignorieren.
+function normVergleich(s){ return (s||"").trim().toLowerCase().replace(/\s+/g," "); }
 function katalogHinzufuegen(u){
   const kat = state.config.katalog || (state.config.katalog = []);
-  const norm = s => (s||"").trim().toLowerCase();
-  const da = kat.some(k => (k.org||"FW") === u.org && norm(k.name) === norm(u.name) && norm(k.kennung) === norm(u.kennung));
+  const da = kat.some(k => (k.org||"FW") === u.org && normVergleich(k.name) === normVergleich(u.name) && normVergleich(k.kennung) === normVergleich(u.kennung));
   if(da || (!u.name && !u.kennung)) return;
   kat.push({ grp:"Weitere Fahrzeuge", typ:"", name:u.name, kennung:u.kennung,
     f:u.f|0, u:u.u|0, m:u.m|0, agt:u.agt|0, csa:u.csa|0, org:u.org });
@@ -248,8 +259,9 @@ function stichwortGruppen(){
 }
 /* Führungskräfte-Stammdaten – je Einheit pflegbar, beim Erfassen per Dropdown wählbar.
    Weitere Stammdaten folgen; alle unter Einstellungen erweiter-/löschbar. */
-function fkStammGruppen(){
-  const list = (state.config.fkStamm || []).map((p,i) => ({...p, _i:i}));
+// Mit org: nur Führungskräfte dieser Organisation (für die Erfassung – erst Organisation, dann passende Stammdaten).
+function fkStammGruppen(org){
+  const list = (state.config.fkStamm || []).map((p,i) => ({...p, _i:i})).filter(p => !org || (p.org||"FW") === org);
   const grps = [...new Set(list.map(p => (p.einheit||"").trim() || "Ohne Einheit"))]
     .sort((a,b) => a.localeCompare(b, "de"));
   return grps.map(g => ({ grp:g,
@@ -257,14 +269,27 @@ function fkStammGruppen(){
       .sort((a,b) => (a.name||"").localeCompare(b.name||"", "de")) }));
 }
 function fkStammLabel(p){ return [p.name, p.funktion, p.funkrufname].map(s=>(s||"").trim()).filter(Boolean).join(" · "); }
+// Optionen (gruppiert nach Einheit) für das Stammdaten-Auswahlfeld bei der Erfassung.
+function fkStammOptionsHtml(org){
+  const grps = fkStammGruppen(org);
+  const opts = grps.length
+    ? grps.map(g => `<optgroup label="${esc(g.grp)}">${g.items.map(p => `<option value="${p._i}">${esc(fkStammLabel(p))}</option>`).join("")}</optgroup>`).join("")
+    : "";
+  return `<option value="">${grps.length ? "– neue Führungskraft –" : "– keine Stammdaten dieser Organisation –"}</option>${opts}`;
+}
 function fkStammHinzufuegen(p){
   const list = state.config.fkStamm || (state.config.fkStamm = []);
-  const norm = s => (s||"").trim().toLowerCase();
   if(!(p.name||"").trim() && !(p.funkrufname||"").trim()) return;
-  const da = list.some(x => norm(x.name) === norm(p.name) && norm(x.funkrufname) === norm(p.funkrufname));
+  // Dieselbe Person erkennen: Name ist die stabile Kennung (Funktion/Funkruf können je Einsatz
+  // wechseln) – ohne Namen ersatzweise am Funkrufnamen. Sonst würde dieselbe Person bei jeder
+  // Änderung erneut als „neue“ Führungskraft in den Stammdaten landen.
+  const org = p.org || "FW";
+  const da = (p.name||"").trim()
+    ? list.some(x => (x.org||"FW") === org && normVergleich(x.name) === normVergleich(p.name))
+    : list.some(x => (x.org||"FW") === org && normVergleich(x.funkrufname) === normVergleich(p.funkrufname));
   if(da) return;
   list.push({ name:(p.name||"").trim(), funktion:(p.funktion||"").trim(),
-    funkrufname:(p.funkrufname||"").trim(), einheit:(p.einheit||"").trim(), org:p.org||"FW" });
+    funkrufname:(p.funkrufname||"").trim(), einheit:(p.einheit||"").trim(), org });
 }
 const FUNKTIONEN = ["Einsatzleiter","Örtlicher Einsatzleiter","Abschnittsleiter","Zugführer",
   "Gruppenführer","Organisatorischer Leiter","Einsatzleiter Rettungsdienst","Fachberater THW","Zugtruppführer","Polizeiführer"];
@@ -315,6 +340,7 @@ const BESATZUNG_MATRIX_DEFAULT = [
 function defaultConfig(){
   return {
     ugName:"UG-Weiden",
+    logo:"",                          // eigenes Logo (Data-URL) – ersetzt die LOTSE112-Marke oben rechts im Bericht
     elwFunk:"Kater Weiden 1/12/1",   // Funkrufname des ELW – vorbelegt als Empfänger im Funktagebuch
     w3wKey:"VLTV5K26",                // what3words-API-Key (für die 3-Wörter → Adresse-Umwandlung, nur online)
     geoProvider:"nominatim",          // Geocoding-Anbieter: nominatim | geoapify | photon
@@ -1060,7 +1086,7 @@ function lgPrintFoerder(line){
           <h1>${esc(e.stichwort) || "Wasserförderung"}</h1>
           <div>${esc(e.ort)}${line.text ? " · " + esc(line.text) : ""}</div>
         </div>
-        <div class="p-mark">LOTSE112</div>
+        ${pMarkHtml()}
       </div>
       ${lgFoerderUebersichtHtml(line)}
       <p style="font-size:8pt;color:#666;margin-top:16px">Anhalt nach Faustformel – keine hydraulische Berechnung. Gedruckt am ${new Date().toLocaleString("de-DE")} · LOTSE112 · ${esc(state.config.ugName)}<br>${DRUCK_HINWEIS}</p>
@@ -1185,6 +1211,26 @@ function resizeImage(file, maxDim, cb){
   };
   rd.readAsDataURL(file);
 }
+/* Logo fürs Einstellungen-Formular: als PNG (Transparenz bleibt erhalten), moderat verkleinert –
+   reicht für den Druck oben rechts im Bericht, bläht aber Speicher/Sync nicht unnötig auf. */
+function resizeLogoImage(file, cb){
+  const rd = new FileReader();
+  rd.onload = () => {
+    const img = new Image();
+    img.onload = () => {
+      const maxDim = 400;
+      const s = Math.min(1, maxDim / Math.max(img.width, img.height));
+      const c = document.createElement("canvas");
+      c.width = Math.round(img.width * s); c.height = Math.round(img.height * s);
+      c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+      cb(c.toDataURL("image/png"));
+    };
+    img.onerror = () => cb(null);
+    img.src = rd.result;
+  };
+  rd.onerror = () => cb(null);
+  rd.readAsDataURL(file);
+}
 /* Sprachdiktat (Web Speech API) – Komfortfunktion am ELW, braucht Browser-Unterstützung */
 function attachDictation(btn, target){
   // Nur iPhone/iPad ausblenden (WebKit kann kein Web-Diktat → Tastatur-🎤 nutzen).
@@ -1236,7 +1282,18 @@ function dauerStr(vonIso, bisIso){
 /* ---------------- Rechtliches (inhaltsgleich mit lotse112.de/nutzungsbedingungen) ----------------
    Kurzhinweis beim ersten Start, Volltext in den Einstellungen, Fußzeile in jedem Ausdruck. */
 const RECHTS_STAND = "August 2026";
-const DRUCK_HINWEIS = "Erstellt mit LOTSE112 – Unterstützungswerkzeug; die fachliche Verantwortung liegt beim Ersteller.";
+const DRUCK_ERSTELLT = "Erstellt mit LOTSE112";
+const DRUCK_DISCLAIMER = "Unterstützungswerkzeug; die fachliche Verantwortung liegt beim Ersteller.";
+const DRUCK_HINWEIS = `${DRUCK_ERSTELLT} – ${DRUCK_DISCLAIMER}`;
+/* Berichtskopf-Marke oben rechts: eigenes Logo aus den Einstellungen (Stammdaten), sonst die
+   LOTSE112-Wortmarke als Fallback. tag="span" für Tabellen-Layouts (Word-Export). */
+function pMarkHtml(tag){
+  tag = tag === "span" ? "span" : "div";
+  const logo = state.config.logo;
+  return logo
+    ? `<${tag} class="p-mark p-logo"><img src="${esc(logo)}" alt="${esc(state.config.ugName || "Logo")}"></${tag}>`
+    : `<${tag} class="p-mark">LOTSE112</${tag}>`;
+}
 const RECHTS_VOLL = `
   <p>Diese Bedingungen regeln die Nutzung der Website sowie der Anwendungen <b>LOTSE112 Einsatzleitung</b> und <b>LOTSE112 Geräte</b> (zusammen „LOTSE112“), bereitgestellt von Thomas Schell, Weiden i.d.OPf. (Kontakt: <a href="mailto:lotse112@gmail.com">lotse112@gmail.com</a>).</p>
   <h3>1. Leistungsgegenstand</h3>
@@ -1380,7 +1437,7 @@ $("#btnMenu").addEventListener("click", openMenu);
 const SETTINGS_TABS = [
   { id:"allgemein", label:"Allgemein" },
   { id:"einsatz",   label:"Einsatz" },
-  { id:"fahrzeuge", label:"Fahrzeuge" },
+  { id:"fahrzeuge", label:"Kräfte" },
   { id:"karten",    label:"Karten" },
   { id:"sync",      label:"Sync" },
 ];
@@ -1418,6 +1475,17 @@ function renderSettingsSheet(){
           <label for="cfg-ug">Name der Einheit / Organisation</label>
           <input id="cfg-ug" value="${esc(c.ugName)}" placeholder="z. B. UG-Weiden" autocomplete="off">
           <p class="hint">Erscheint auf Startbildschirm, Kopfzeile und Einsatzbericht – so ist die Anwendung je Installation anpassbar (UG, Feuerwehr, Landkreis …).</p>
+        </div>
+        <div class="field"><label style="margin-bottom:10px">Logo für Berichte</label>
+          <div class="logo-row">
+            ${c.logo ? `<img class="logo-preview" src="${esc(c.logo)}" alt="Logo">` : `<div class="logo-preview logo-preview-empty">kein Logo</div>`}
+            <div class="logo-row-btns">
+              <button type="button" class="btn btn-ghost" id="cfg-logo-btn">${c.logo ? "Logo ersetzen" : "Logo hochladen"}</button>
+              ${c.logo ? `<button type="button" class="btn btn-danger-ghost" id="cfg-logo-del">Entfernen</button>` : ""}
+              <input type="file" id="cfg-logo-file" accept="image/*" style="display:none">
+            </div>
+          </div>
+          <p class="hint">Wird oben rechts auf dem Ausdruck/Bericht angedruckt.</p>
         </div>
         <div class="field"><label style="margin-bottom:10px">Rechtliches</label>
           <button type="button" class="btn btn-ghost btn-block" id="cfg-rechts">Nutzungsbedingungen &amp; Haftung</button>
@@ -1476,26 +1544,18 @@ function renderSettingsSheet(){
               <div class="kat-grp">${esc(g.grp)}</div>
               ${g.items.map(p => `
                 <div class="kat-row">
-                  <span>${esc(fkStammLabel(p))}</span>
+                  <span>${esc((ORGS[p.org]||ORGS.FW).short)} · ${esc(fkStammLabel(p))}</span>
                   <button class="kat-x" data-fkdel="${p._i}" aria-label="Aus Stammdaten entfernen">✕</button>
                 </div>`).join("")}`).join("")
               : `<p class="hint" style="margin:6px 4px">Noch keine Führungskräfte hinterlegt.</p>`}
           </div>
-          <div class="kat-add kat-add-fk">
-            <input id="cfg-fk-name" placeholder="Name" autocomplete="off">
-            <input id="cfg-fk-funktion" list="cfg-fk-funktionen" placeholder="Funktion" autocomplete="off">
-            <input id="cfg-fk-funkruf" class="mono" placeholder="Funkrufname" autocomplete="off">
-            <input id="cfg-fk-einheit" placeholder="Einheit / Abschnitt" autocomplete="off">
-            <button type="button" class="btn btn-ghost" id="cfg-fk-add">Hinzufügen</button>
-            <datalist id="cfg-fk-funktionen">${FUNKTIONEN.map(x=>`<option value="${esc(x)}">`).join("")}</datalist>
-          </div>
-          <p class="hint">Je Einheit pflegbar. Beim Erfassen einer Führungskraft per Dropdown wählbar – neu erfasste Personen landen automatisch hier.</p>
+          <p class="hint">Neue Führungskräfte werden bei der Erfassung (Tab „Kräfte“) automatisch aufgenommen und beim nächsten Mal per Dropdown wählbar. Mit ✕ entfernen.</p>
         </div>
         <div class="field"><label style="margin-bottom:10px">Fahrzeugkatalog (${(c.katalog||[]).length})</label>
           <div class="kat-list">
             ${katalogListe().map(k => `
               <div class="kat-row">
-                <span>${esc(katalogLabel(k))}</span>
+                <span>${esc((ORGS[k.org]||ORGS.FW).short)} · ${esc(katalogLabel(k))}</span>
                 <button class="kat-x" data-katdel="${k._i}" aria-label="Aus Katalog entfernen">✕</button>
               </div>`).join("")}
           </div>
@@ -1589,6 +1649,23 @@ function renderSettingsSheet(){
     renderSettingsSheet();
   }));
   $("#cfg-rechts").addEventListener("click", zeigeRechtstext);
+  const logoBtn = $("#cfg-logo-btn"), logoFile = $("#cfg-logo-file"), logoDel = $("#cfg-logo-del");
+  if(logoBtn) logoBtn.addEventListener("click", () => logoFile.click());
+  if(logoFile) logoFile.addEventListener("change", () => {
+    const file = logoFile.files && logoFile.files[0];
+    if(!file) return;
+    resizeLogoImage(file, dataUrl => {
+      if(!dataUrl){ modalInfo("Logo konnte nicht gelesen werden."); return; }
+      leseSettings();
+      state.config.logo = dataUrl;
+      save(); renderSettingsSheet();
+    });
+  });
+  if(logoDel) logoDel.addEventListener("click", () => {
+    leseSettings();
+    state.config.logo = "";
+    save(); renderSettingsSheet();
+  });
   document.querySelectorAll("[data-theme-opt]").forEach(b => b.addEventListener("click", () => {
     state.config.theme = b.dataset.themeOpt;
     document.querySelectorAll("[data-theme-opt]").forEach(x => x.classList.toggle("active", x.dataset.themeOpt===state.config.theme));
@@ -1622,18 +1699,6 @@ function renderSettingsSheet(){
     state.config.fkStamm.splice(Number(b.dataset.fkdel), 1);
     save(); renderSettingsSheet();
   }));
-  const fkAdd = () => {
-    const name = $("#cfg-fk-name").value.trim();
-    const funkruf = $("#cfg-fk-funkruf").value.trim();
-    if(!name && !funkruf){ $("#cfg-fk-name").focus(); return; }
-    fkStammHinzufuegen({ name, funktion:$("#cfg-fk-funktion").value.trim(),
-      funkrufname:funkruf, einheit:$("#cfg-fk-einheit").value.trim(), org:"FW" });
-    leseSettings();
-    save(); renderSettingsSheet();
-  };
-  $("#cfg-fk-add").addEventListener("click", fkAdd);
-  ["cfg-fk-name","cfg-fk-funktion","cfg-fk-funkruf","cfg-fk-einheit"].forEach(id =>
-    $("#"+id).addEventListener("keydown", e => { if(e.key === "Enter"){ e.preventDefault(); fkAdd(); } }));
   const geoProvSel = $("#cfg-geoprov");
   if(geoProvSel) geoProvSel.addEventListener("change", () => {   // passendes Zusatzfeld zeigen
     const v = geoProvSel.value;
@@ -1817,7 +1882,7 @@ function renderEinsatz(){
         <p class="hint" style="margin:.4rem 0 0">3 Wörter in eine Adresse umwandeln und in den Einsatzort übernehmen (online; API-Key im Zahnrad).</p></div>
       <div class="field"><label for="f-beg">Alarmzeit</label>
         <input id="f-beg" data-ez="beginn" type="datetime-local" value="${esc(e.beginn)}"></div>
-      <div class="field"><label for="f-ende">Einsatzende <span style="text-transform:none;font-weight:500">(wird beim Beenden gesetzt)</span></label>
+      <div class="field"><label for="f-ende">Einsatzende <span style="text-transform:none;font-weight:500">(falls leer, wird beim Beenden „jetzt" eingetragen)</span></label>
         <input id="f-ende" data-ez="ende" type="datetime-local" value="${esc(e.ende||"")}"></div>
       <div class="field"><label for="f-el">Einsatzleiter</label>
         <input id="f-el" data-ez="leiter" value="${esc(e.leiter)}" placeholder="Name / Funktion"></div>
@@ -2254,7 +2319,7 @@ async function endeEinsatz(){
     modalInfo("Es ist kein Einsatz mit Daten vorhanden."); return;
   }
   if(!(await modalConfirm("Einsatz jetzt beenden? Er wird archiviert und die Erfassung geleert."))) return;
-  state.einsatz.ende = nowLocalInput();   // Einsatzende auf jetzt setzen (wird mit archiviert/gedruckt)
+  if(!state.einsatz.ende) state.einsatz.ende = nowLocalInput();   // nur setzen, falls nicht schon manuell erfasst
   const entry = await baueArchivEintrag();
   state.archiv.push(entry);
   state.einsatzId = uid(); state.einsatzStart = new Date().toISOString();
@@ -2924,14 +2989,11 @@ function renderSheet(){
       <button class="sheet-close" data-close="1" aria-label="Schließen">×</button>
     </div>
     <div class="sheet-body">
-      <div class="field"><label for="e-katalog">Fahrzeugkatalog (Fuhrpark)</label>
-        <select id="e-katalog">
-          <option value="">– Fahrzeug wählen, füllt alles vor –</option>
-          ${katalogListe().map(k => `<option value="${k._i}">${esc(katalogLabel(k))}</option>`).join("")}
-        </select>
-        <p class="hint">Neue Fahrzeuge landen automatisch im Katalog; verwalten (löschen) in den Einstellungen.</p>
-      </div>
       <div class="field"><label>Organisation</label><div class="orgpick">${orgPickHtml(u.org)}</div></div>
+      <div class="field"><label for="e-katalog">Fahrzeugkatalog (Fuhrpark)</label>
+        <select id="e-katalog">${katalogOptionsHtml(u.org)}</select>
+        <p class="hint">Zeigt nur Fahrzeuge der gewählten Organisation. Neue Fahrzeuge landen automatisch im Katalog; verwalten (löschen) in den Einstellungen.</p>
+      </div>
       <div class="field">
         <div class="rufname-row">
           <div><label for="e-name">Funkrufname</label>
@@ -3003,6 +3065,8 @@ function wireSheet(){
   document.querySelectorAll("[data-org]").forEach(b => b.addEventListener("click", () => {
     const prevDefault = pfx(u.org);
     u.org = b.dataset.org;
+    // Fahrzeugkatalog-Auswahl auf die neue Organisation umstellen (vorherige Auswahl passt ggf. nicht mehr)
+    $("#e-katalog").innerHTML = katalogOptionsHtml(u.org);
     // Präfix nur ersetzen, wenn der Nutzer noch nichts Eigenes geschrieben hat
     if(!u.name.trim() || u.name.trim() === prevDefault){
       const p = pfx(u.org);
@@ -3298,14 +3362,11 @@ function renderFkSheet(){
       <button class="sheet-close" data-close="1" aria-label="Schließen">×</button>
     </div>
     <div class="sheet-body">
+      <div class="field"><label>Organisation</label><div class="orgpick">${orgPickHtml(f.org)}</div></div>
       ${(state.config.fkStamm||[]).length ? `
       <div class="field"><label for="fk-stamm">Aus Stammdaten übernehmen</label>
-        <select id="fk-stamm">
-          <option value="">– neue Führungskraft –</option>
-          ${fkStammGruppen().map(g => `<optgroup label="${esc(g.grp)}">${g.items.map(p => `<option value="${p._i}">${esc(fkStammLabel(p))}</option>`).join("")}</optgroup>`).join("")}
-        </select>
-        <p class="hint">Vorhandene Person wählen – die Felder werden ausgefüllt. Neue Person unten erfassen; sie wird beim Speichern in die Stammdaten übernommen.</p></div>` : ""}
-      <div class="field"><label>Organisation</label><div class="orgpick">${orgPickHtml(f.org)}</div></div>
+        <select id="fk-stamm">${fkStammOptionsHtml(f.org)}</select>
+        <p class="hint">Zeigt nur Personen der gewählten Organisation. Vorhandene Person wählen – die Felder werden ausgefüllt. Neue Person unten erfassen; sie wird beim Speichern in die Stammdaten übernommen.</p></div>` : ""}
       <div class="field"><label for="fk-name">Name</label>
         <input id="fk-name" value="${esc(f.name)}" placeholder="Name" autocomplete="off"></div>
       <div class="field"><label for="fk-funktion">Funktion</label>
@@ -3346,6 +3407,9 @@ function renderFkSheet(){
   document.querySelectorAll("[data-org]").forEach(b => b.addEventListener("click", () => {
     f.org = b.dataset.org;
     document.querySelectorAll("[data-org]").forEach(x => x.setAttribute("aria-pressed", x.dataset.org===f.org));
+    // Stammdaten-Auswahl auf die neue Organisation umstellen (vorherige Auswahl passt ggf. nicht mehr)
+    const sel = $("#fk-stamm");
+    if(sel) sel.innerHTML = fkStammOptionsHtml(f.org);
   }));
   const stammSel = $("#fk-stamm");
   if(stammSel) stammSel.addEventListener("change", () => {
@@ -3538,7 +3602,7 @@ function doPrintFunk(){
         <h1>${esc(e.stichwort) || "Ohne Stichwort"}</h1>
         <div>${esc(e.ort)}${e.beginn ? " · Alarm " + fmtDatum(e.beginn) + " " + fmtZeit(e.beginn) + " Uhr" : ""}</div>
       </div>
-      <div class="p-mark">LOTSE112</div>
+      ${pMarkHtml()}
     </div>
     <table><thead><tr><th>Nr.</th><th>Zeit</th><th>Art</th><th>Von</th><th>An</th><th>Inhalt</th></tr></thead><tbody>
       ${rows}
@@ -3965,7 +4029,8 @@ function truppCard(t){
     const tr = state.asTraeger.find(x => x.id === id);
     if(!tr) return "?";
     const d = (t.druck||{})[id] || {};
-    const dr = (d.start || d.end) ? ` <span class="as-druck">${d.start?esc(d.start):"–"}${d.end?"→"+esc(d.end):""} bar</span>` : "";
+    const dr = tr.filterModus ? ` <span class="as-typ">Filter</span>`
+      : (d.start || d.end) ? ` <span class="as-druck">${d.start?esc(d.start):"–"}${d.end?"→"+esc(d.end):""} bar</span>` : "";
     return `${esc(tr.name)}${t.tf===id?` <span class="as-typ">TF</span>`:""}${tr.csa?` <span class="as-typ">CSA</span>`:""}${dr}`;
   }).join("<br>");
   const rz = asRzTrupp(t);
@@ -4018,7 +4083,7 @@ function renderASSammelstelle(){
     <button class="as-traeger ${trupp?"gebunden":""} ${tr.ausserDienst?"ausser":""}" data-astraegeredit="${tr.id}">
       <div style="flex:1;min-width:0">
         <div class="as-tr-name">${esc(tr.name) || "<span style='color:var(--ink3)'>ohne Name</span>"}</div>
-        <div class="as-sub2">${esc(tr.feuerwehr||"")}${tr.geraeteNr?` · Gerät ${esc(tr.geraeteNr)}`:""}${tr.maskeNr?` · Maske ${esc(tr.maskeNr)}`:""}${tr.lungenNr?` · LA ${esc(tr.lungenNr)}`:""}</div>
+        <div class="as-sub2">${esc(tr.feuerwehr||"")}${tr.filterModus?" · Filter":(tr.geraeteNr?` · Gerät ${esc(tr.geraeteNr)}`:"")}${tr.maskeNr?` · Maske ${esc(tr.maskeNr)}`:""}${tr.filterModus?"":(tr.lungenNr?` · LA ${esc(tr.lungenNr)}`:"")}</div>
       </div>
       ${tr.csa ? `<span class="badge-agt" style="margin-right:6px">CSA</span>` : ""}
       ${tr.ausserDienst ? `<span class="chip">außer Dienst</span>` : trupp ? `<span class="chip">Trupp ${trupp.nr}</span>` : `<span class="chip chip-POL">frei</span>`}
@@ -4064,6 +4129,8 @@ function renderASUeberwachung(){
     const below = asBelow(t);   // Rückzug fällig (Umkehrdruck erreicht oder Hinweg zu verbrauchsintensiv)
     const mit = (t.memberIds||[]).map(id => {
       const tr = state.asTraeger.find(x => x.id === id) || {};
+      if(tr.filterModus) return `<div class="as-uz">${esc(tr.name||"?")}${t.tf===id?` <span class="as-typ">TF</span>`:""}${tr.csa?` <span class="as-typ">CSA</span>`:""}
+        <span class="as-typ">Filter – keine Druck-/Restzeitüberwachung</span></div>`;
       const d = (t.druck||{})[id] || {};
       const rz = asRzMember(d.start, d.ziel, reserve);
       const ist = d.k23 || d.k13;   // gemeldeter Ist-Druck bei der Druckkontrolle
@@ -4391,7 +4458,7 @@ function openDruckkontrolle(id){
 function openTraegerEditor(id){
   const neu = !id;
   const tr = id ? {...state.asTraeger.find(x => x.id === id)}
-    : { id:uid(), name:"", feuerwehr:"", geraetetyp:AS_GERAETETYP, geraeteNr:"", maskeNr:"", lungenNr:"", csa:false };
+    : { id:uid(), name:"", feuerwehr:"", geraetetyp:AS_GERAETETYP, geraeteNr:"", maskeNr:"", lungenNr:"", csa:false, filterModus:false };
   $("#sheetHost").innerHTML = `
   <div class="sheet-backdrop" data-close="1"></div>
   <div class="sheet" role="dialog" aria-modal="true" aria-label="${neu?"Träger registrieren":"Träger bearbeiten"}">
@@ -4403,7 +4470,15 @@ function openTraegerEditor(id){
       <div class="field"><label for="tr-fw">Feuerwehr</label>
         <input id="tr-fw" value="${esc(tr.feuerwehr)}" list="tr-fw-list" placeholder="Name der Feuerwehr" autocomplete="off">
         <datalist id="tr-fw-list">${[...new Set(state.asTraeger.map(x=>x.feuerwehr).filter(Boolean))].map(x=>`<option value="${esc(x)}">`).join("")}</datalist></div>
-      <div class="field"><label style="margin-bottom:8px">Gerät, Maske &amp; Lungenautomat <span style="text-transform:none;font-weight:500;color:var(--accent)">· Pflicht (${esc(AS_GERAETETYP)})</span></label>
+      <div class="field">
+        <div class="field-head">
+          <label for="tr-filter" style="margin:0">Atemschutz</label>
+          <button type="button" id="tr-filter" class="wlan-switch" role="switch" aria-checked="${tr.filterModus?"true":"false"}" title="Statt Flasche + Lungenautomat nur mit Filter in den Einsatz">
+            <span>Nur Maske + Filter (ohne Flasche)</span><span class="track"></span>
+          </button>
+        </div>
+      </div>
+      <div class="field" id="tr-pa-feld"><label style="margin-bottom:8px">Gerät, Maske &amp; Lungenautomat <span style="text-transform:none;font-weight:500;color:var(--accent)">· Pflicht (${esc(AS_GERAETETYP)})</span></label>
         <div style="display:flex;gap:10px;flex-wrap:wrap">
           <div style="flex:1;min-width:120px"><label for="tr-gnr" style="font-size:.72rem">Gerätenummer</label>
             <input id="tr-gnr" class="mono" value="${esc(tr.geraeteNr||"")}" placeholder="PA-Nr." inputmode="numeric" autocomplete="off"></div>
@@ -4413,6 +4488,10 @@ function openTraegerEditor(id){
             <input id="tr-lnr" class="mono" value="${esc(tr.lungenNr||"")}" placeholder="LA-Nr." inputmode="numeric" autocomplete="off"></div>
         </div>
         <p class="hint">Lungenautomat wird mit der Gerätenummer vorbelegt (oft identisch) – bei Bedarf überschreiben.</p></div>
+      <div class="field" id="tr-filter-feld" style="display:none"><label style="margin-bottom:8px">Maske <span style="text-transform:none;font-weight:500;color:var(--accent)">· Pflicht</span></label>
+        <div style="max-width:220px"><label for="tr-mnr2" style="font-size:.72rem">Maskennummer</label>
+          <input id="tr-mnr2" class="mono" value="${esc(tr.maskeNr||"")}" placeholder="Masken-Nr." inputmode="numeric" autocomplete="off"></div>
+        <p class="hint">Nur Filter statt Flasche: kein Behälterdruck – Druck-/Restzeit-Überwachung entfällt für diesen Träger.</p></div>
       <div class="field"><label>Zusatz</label>
         <label class="as-check"><input type="checkbox" id="tr-csa" ${tr.csa?"checked":""}> CSA-Träger (Chemikalienschutzanzug)</label>
         <label class="as-check"><input type="checkbox" id="tr-raus" ${tr.ausserDienst?"checked":""}> Kein weiterer Atemschutz-Einsatz (außer Dienst) – nicht mehr für Trupps wählbar</label></div>
@@ -4424,11 +4503,24 @@ function openTraegerEditor(id){
   </div>`;
   document.querySelectorAll("[data-close]").forEach(el => el.addEventListener("click", closeEditor));
   // Lungenautomat-Nr. mit Gerätenummer vorbelegen, solange sie nicht eigenständig bearbeitet wurde
-  const gnr = $("#tr-gnr"), lnr = $("#tr-lnr");
+  const gnr = $("#tr-gnr"), lnr = $("#tr-lnr"), mnr2 = $("#tr-mnr2");
   let laManuell = !!(tr.lungenNr && tr.lungenNr !== tr.geraeteNr);
   const syncLA = () => { if(!laManuell) lnr.value = gnr.value.trim(); };
   gnr.addEventListener("input", syncLA);
   lnr.addEventListener("input", () => { laManuell = lnr.value.trim() !== "" && lnr.value.trim() !== gnr.value.trim(); });
+  // Filter-Schieber: blendet Geräte-/LA-Nr. aus (kein Behälterdruck ⇒ keine Druck-/Restzeit-Überwachung)
+  const filterBtn = $("#tr-filter"), paFeld = $("#tr-pa-feld"), filterFeld = $("#tr-filter-feld");
+  const syncFilterUI = () => {
+    paFeld.style.display = tr.filterModus ? "none" : "";
+    filterFeld.style.display = tr.filterModus ? "" : "none";
+    if(tr.filterModus) mnr2.value = $("#tr-mnr").value; else $("#tr-mnr").value = mnr2.value;
+  };
+  filterBtn.addEventListener("click", () => {
+    tr.filterModus = !tr.filterModus;
+    filterBtn.setAttribute("aria-checked", tr.filterModus ? "true" : "false");
+    syncFilterUI();
+  });
+  syncFilterUI();
   const del = $("#tr-del");
   if(del) del.addEventListener("click", () => {
     const trupp = asTruppOf(tr.id);
@@ -4440,15 +4532,21 @@ function openTraegerEditor(id){
     tr.name = $("#tr-name").value.trim();
     tr.feuerwehr = $("#tr-fw").value.trim();
     tr.geraetetyp = AS_GERAETETYP;
-    tr.geraeteNr = $("#tr-gnr").value.trim();
-    tr.maskeNr = $("#tr-mnr").value.trim();
-    tr.lungenNr = $("#tr-lnr").value.trim() || tr.geraeteNr;
     tr.csa = $("#tr-csa").checked;
     tr.ausserDienst = $("#tr-raus").checked;
     delete tr.zusatz;
     if(!tr.name){ $("#tr-name").focus(); return; }
-    const fehlt = !tr.geraeteNr ? "#tr-gnr" : !tr.maskeNr ? "#tr-mnr" : !tr.lungenNr ? "#tr-lnr" : null;
-    if(fehlt){ modalInfo("Geräte-, Masken- und Lungenautomatennummer sind Pflichtfelder."); $(fehlt).focus(); return; }
+    if(tr.filterModus){
+      tr.maskeNr = $("#tr-mnr2").value.trim();
+      tr.geraeteNr = ""; tr.lungenNr = "";   // Flasche/LA entfallen bei Filter
+      if(!tr.maskeNr){ modalInfo("Maskennummer ist Pflichtfeld."); $("#tr-mnr2").focus(); return; }
+    }else{
+      tr.geraeteNr = $("#tr-gnr").value.trim();
+      tr.maskeNr = $("#tr-mnr").value.trim();
+      tr.lungenNr = $("#tr-lnr").value.trim() || tr.geraeteNr;
+      const fehlt = !tr.geraeteNr ? "#tr-gnr" : !tr.maskeNr ? "#tr-mnr" : !tr.lungenNr ? "#tr-lnr" : null;
+      if(fehlt){ modalInfo("Geräte-, Masken- und Lungenautomatennummer sind Pflichtfelder."); $(fehlt).focus(); return; }
+    }
     const i = state.asTraeger.findIndex(x => x.id === tr.id);
     if(i>=0) state.asTraeger[i] = tr; else state.asTraeger.push(tr);
     markChange(); closeEditor(); render();
@@ -4492,7 +4590,7 @@ function openTruppEditor(id, vorbelegt){
         <div class="as-pick">
           ${waehlbar.length ? waehlbar.map(tr => `
             <button type="button" data-pick="${tr.id}" class="${t.memberIds.includes(tr.id)?"active":""}">
-              <span>${esc(tr.name)}${tr.csa?" · CSA":""}</span><small>${esc(tr.feuerwehr||"")}${tr.geraeteNr?` · Gerät ${esc(tr.geraeteNr)}`:""}</small>
+              <span>${esc(tr.name)}${tr.csa?" · CSA":""}</span><small>${esc(tr.feuerwehr||"")}${tr.filterModus?" · Filter":(tr.geraeteNr?` · Gerät ${esc(tr.geraeteNr)}`:"")}</small>
             </button>`).join("") : `<p class="hint" style="margin:0">Keine freien Träger – erst welche registrieren.</p>`}
         </div>
         <p class="hint" id="tr-count">${t.memberIds.length} ausgewählt</p></div>
@@ -4540,8 +4638,9 @@ function openTruppEditor(id, vorbelegt){
     t.druck[inp.dataset.druck].start = inp.value.trim();
   });
   const baueDruck = () => {
-    $("#tp-druck-feld").style.display = t.memberIds.length ? "" : "none";
-    $("#tp-druck").innerHTML = t.memberIds.map(mid => {
+    const nichtFilter = t.memberIds.filter(mid => !(state.asTraeger.find(x => x.id === mid)||{}).filterModus);
+    $("#tp-druck-feld").style.display = nichtFilter.length ? "" : "none";
+    $("#tp-druck").innerHTML = nichtFilter.map(mid => {
       const tr = state.asTraeger.find(x => x.id === mid) || {};
       const d = (t.druck[mid]||{}).start || String(AS_START_DEFAULT);
       return `<div class="as-druckrow">
@@ -4600,10 +4699,13 @@ function openTruppEditor(id, vorbelegt){
   $("#tp-save").addEventListener("click", () => {
     if(t.memberIds.length < 2){ modalInfo("Ein Trupp braucht mindestens 2 Träger."); return; }
     leseDruck();
-    // Druck-Einträge auf aktuelle Mitglieder begrenzen
-    Object.keys(t.druck).forEach(k => { if(!t.memberIds.includes(k)) delete t.druck[k]; });
-    // Startdruck prüfen: über 50, höchstens 350 bar
+    // Druck-Einträge auf aktuelle (Nicht-Filter-)Mitglieder begrenzen – Filter-Träger haben keine Flasche
+    Object.keys(t.druck).forEach(k => {
+      if(!t.memberIds.includes(k) || (state.asTraeger.find(x => x.id === k)||{}).filterModus) delete t.druck[k];
+    });
+    // Startdruck prüfen: über 50, höchstens 350 bar (nur für Träger mit Flasche, nicht bei Filter)
     for(const mid of t.memberIds){
+      if((state.asTraeger.find(x => x.id === mid)||{}).filterModus) continue;
       const s = Number((t.druck[mid]||{}).start);
       if(!(s > AS_START_MIN && s <= AS_START_MAX)){
         modalInfo(`Startdruck muss über ${AS_START_MIN} und höchstens ${AS_START_MAX} bar sein (${asTraegerName(mid)}).`);
@@ -4641,7 +4743,7 @@ function doPrintAtemschutz(){
       const istTf = t.tf ? id === t.tf : idx === 0;
       return `<tr>
         <td class="p-mono">${idx===0?t.nr:""}${idx===0&&t.name?`<br><span style="font-weight:400;color:#666">${esc(t.name)}</span>`:""}${idx===0&&t.sicherheitstrupp?`<br><span style="font-weight:400;color:#666">Sicherheitstrupp</span>`:""}</td>
-        <td>${esc(tr.name||"?")}${istTf?` <b>(TF)</b>`:""}${tr.feuerwehr?`<br><span style="color:#666">FF ${esc(tr.feuerwehr)}</span>`:""}<br><span style="color:#666;font-size:.85em;white-space:nowrap">Gerät <span class="p-mono">${esc(tr.geraeteNr||"–")}</span> · Maske <span class="p-mono">${esc(tr.maskeNr||"–")}</span> · Lungenautomat <span class="p-mono">${esc(tr.lungenNr||"–")}</span></span></td>
+        <td>${esc(tr.name||"?")}${istTf?` <b>(TF)</b>`:""}${tr.feuerwehr?`<br><span style="color:#666">FF ${esc(tr.feuerwehr)}</span>`:""}<br><span style="color:#666;font-size:.85em;white-space:nowrap">${tr.filterModus?`Filter · Maske <span class="p-mono">${esc(tr.maskeNr||"–")}</span>`:`Gerät <span class="p-mono">${esc(tr.geraeteNr||"–")}</span> · Maske <span class="p-mono">${esc(tr.maskeNr||"–")}</span> · Lungenautomat <span class="p-mono">${esc(tr.lungenNr||"–")}</span>`}</span></td>
         <td style="text-align:center">${tr.csa?"CSA":""}</td>
         <td class="p-mono">${d.start?esc(d.start):""}</td>
         <td class="p-mono">${d.ziel?esc(d.ziel):""}</td>
@@ -4663,7 +4765,7 @@ function doPrintAtemschutz(){
         <h1>${esc(e.stichwort) || "Ohne Stichwort"}</h1>
         <div>${esc(e.ort)}${e.beginn ? " · Alarm " + fmtDatum(e.beginn) + " " + fmtZeit(e.beginn) + " Uhr" : ""}</div>
       </div>
-      <div class="p-mark">LOTSE112</div>
+      ${pMarkHtml()}
     </div>
     <table class="meta">
       <tr><td>Gerätetyp</td><td>${esc(AS_GERAETETYP)} (Pressluftatmer)</td></tr>
@@ -7336,7 +7438,7 @@ function doPrintLagekarte(){
           <h1>${esc(e.stichwort) || "Ohne Stichwort"}</h1>
           <div>${esc(e.ort)}${e.beginn ? " · Alarm " + fmtDatum(e.beginn) + " " + fmtZeit(e.beginn) + " Uhr" : ""}</div>
         </div>
-        <div class="p-mark">LOTSE112</div>
+        ${pMarkHtml()}
       </div>
       ${printMapHtml(state.lage)}
       ${printLegendHtml(state.lage.items, state.einheiten)}
@@ -7353,7 +7455,7 @@ function reportHead(e, pEnde, opts){
   if(opts && opts.word){
     return `<table class="p-headw"><tr>
       <td class="p-headw-l"><div class="p-sub">${sub}</div><h1>${titel}</h1><div>${ort}</div></td>
-      <td class="p-headw-r"><span class="p-mark">LOTSE112</span></td>
+      <td class="p-headw-r">${pMarkHtml("span")}</td>
     </tr></table>`;
   }
   return `<div class="p-head">
@@ -7362,7 +7464,7 @@ function reportHead(e, pEnde, opts){
         <h1>${titel}</h1>
         <div>${ort}</div>
       </div>
-      <div class="p-mark">LOTSE112</div>
+      ${pMarkHtml()}
     </div>`;
 }
 function reportBodyHtml(data, sel, opts){
@@ -7534,7 +7636,7 @@ function reportBodyHtml(data, sel, opts){
           const istTf = t.tf ? id === t.tf : idx === 0;
           return `<tr>
             <td class="p-mono">${idx===0?t.nr:""}</td>
-            <td>${esc(tr.name||"?")}${istTf?` <b>(TF)</b>`:""}${tr.feuerwehr?`<br><span style="color:#666">FF ${esc(tr.feuerwehr)}</span>`:""}<br><span style="color:#666;font-size:.85em;white-space:nowrap">Gerät <span class="p-mono">${esc(tr.geraeteNr||"–")}</span> · Maske <span class="p-mono">${esc(tr.maskeNr||"–")}</span> · Lungenautomat <span class="p-mono">${esc(tr.lungenNr||"–")}</span></span></td>
+            <td>${esc(tr.name||"?")}${istTf?` <b>(TF)</b>`:""}${tr.feuerwehr?`<br><span style="color:#666">FF ${esc(tr.feuerwehr)}</span>`:""}<br><span style="color:#666;font-size:.85em;white-space:nowrap">${tr.filterModus?`Filter · Maske <span class="p-mono">${esc(tr.maskeNr||"–")}</span>`:`Gerät <span class="p-mono">${esc(tr.geraeteNr||"–")}</span> · Maske <span class="p-mono">${esc(tr.maskeNr||"–")}</span> · Lungenautomat <span class="p-mono">${esc(tr.lungenNr||"–")}</span>`}</span></td>
             <td style="text-align:center">${tr.csa?"CSA":""}</td>
             <td class="p-mono">${d.start?esc(d.start):""}</td>
             <td class="p-mono">${d.ziel?esc(d.ziel):""}</td>
@@ -7747,15 +7849,15 @@ async function exportWord(data, sel){
   catch(err){ console.warn("[LOTSE112] Word-Grafik fehlgeschlagen, nutze HTML:", err && err.message); }
   const titel = (e.stichwort || "Einsatzbericht") + (e.ort ? " – " + e.ort : "");
   const kopfText = `${esc(state.config.ugName)} · ${esc(e.stichwort) || "Einsatzbericht"}${pEnde ? "" : " · Zwischenstand"}`;
-  // Laufende Kopfzeile auf JEDER Seite (mso-header) – links Kontext, rechts der LOTSE112-Kasten.
+  // Laufende Kopfzeile auf JEDER Seite (mso-header) – links Kontext, rechts das Logo/die Marke.
   const header = `<div style='mso-element:header' id='eh1'>
     <table class="w-run"><tr>
       <td class="w-run-l">${kopfText}</td>
-      <td class="w-run-r"><span class="p-mark">LOTSE112</span></td>
+      <td class="w-run-r">${pMarkHtml("span")}</td>
     </tr></table></div>`;
-  // Laufende Fußzeile mit Seitenzahl (auf jeder Seite, inkl. Seite 1).
+  // Laufende Fußzeile mit Seitenzahl (auf jeder Seite, inkl. Seite 1) – LOTSE112-Kästchen + Disclaimer.
   const footerInner = `<table class="w-run"><tr>
-      <td class="w-run-l">LOTSE112 – Einsatzbericht · ${esc(state.config.ugName)} · ${DRUCK_HINWEIS}</td>
+      <td class="w-run-l"><span class="w-box">${DRUCK_ERSTELLT}</span> – Einsatzbericht · ${esc(state.config.ugName)} · ${DRUCK_DISCLAIMER}</td>
       <td class="w-run-r">Seite ${msoField("PAGE")} von ${msoField("NUMPAGES")}</td>
     </tr></table>`;
   const footer = `<div style='mso-element:footer' id='ef1'>${footerInner}</div>`;
@@ -7813,14 +7915,18 @@ const WORD_STYLE = `
   .p-headw-l .p-sub{font-size:8pt;letter-spacing:.10em;text-transform:uppercase;color:#444}
   .p-headw-r{text-align:right;white-space:nowrap;width:2.6cm}
   .p-mark{border:1.5pt solid #000;padding:3pt 8pt;font-weight:800;font-family:Consolas,"Courier New",monospace;font-size:10pt}
+  .p-mark.p-logo{border:none;padding:0}
+  .p-mark.p-logo img{max-height:16mm;max-width:45mm}
   /* Laufende Kopf-/Fußzeilen-Tabelle. */
   .w-run{width:100%;border-collapse:collapse}
   .w-run td{border:none;padding:0;font-size:8pt;color:#555}
   .w-run-l{text-align:left;letter-spacing:.04em;vertical-align:middle}
   .w-run-r{text-align:right;vertical-align:middle;white-space:nowrap}
+  .w-box{display:inline-block;border:1pt solid #999;border-radius:3pt;padding:.5pt 5pt;font-weight:700;color:#333}
   #eh1 .w-run{border-bottom:1pt solid #000}
   #eh1 .w-run td{padding-bottom:3pt}
   #eh1 .p-mark{font-size:8.5pt;padding:1pt 5pt;border-width:1pt}
+  #eh1 .p-mark.p-logo img{max-height:9mm;max-width:30mm}
   #ef1 .w-run{border-top:.75pt solid #999}
   #ef1 .w-run td{padding-top:2pt}
   h2{font-size:10pt;letter-spacing:.05em;text-transform:uppercase;border-bottom:1px solid #000;padding-bottom:2px;margin:12pt 0 4pt}
