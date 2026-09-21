@@ -513,7 +513,8 @@ async function pruefeAufUpdate(){
 /* ---------------- HTTP ---------------- */
 function lanUrls(){
   const urls = [];
-  for(const liste of Object.values(os.networkInterfaces())){
+  for(const [name, liste] of Object.entries(os.networkInterfaces())){
+    if(/^(utun|ppp|tun|tap|ipsec|awdl|llw|bridge)/i.test(name)) continue; // VPN/Tunnel/virtuelle Interfaces sind nie das Einsatz-WLAN
     for(const ni of liste || []){
       if(ni.family === "IPv4" && !ni.internal) urls.push(`http://${ni.address}:${PORT}/`);
     }
