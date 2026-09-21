@@ -1282,8 +1282,8 @@ function dauerStr(vonIso, bisIso){
 /* ---------------- Rechtliches (inhaltsgleich mit lotse112.de/nutzungsbedingungen) ----------------
    Kurzhinweis beim ersten Start, Volltext in den Einstellungen, Fußzeile in jedem Ausdruck. */
 const RECHTS_STAND = "August 2026";
-const DRUCK_ERSTELLT = "Erstellt mit LOTSE112";
-const DRUCK_DISCLAIMER = "Unterstützungswerkzeug; die fachliche Verantwortung liegt beim Ersteller.";
+const DRUCK_ERSTELLT = "LOTSE112 – Einsatzleitung";
+const DRUCK_DISCLAIMER = "Die fachliche Verantwortung liegt beim Ersteller!";
 const DRUCK_HINWEIS = `${DRUCK_ERSTELLT} – ${DRUCK_DISCLAIMER}`;
 /* Berichtskopf-Marke oben rechts: eigenes Logo aus den Einstellungen (Stammdaten), sonst die
    LOTSE112-Wortmarke als Fallback. tag="span" für Tabellen-Layouts (Word-Export). */
@@ -4443,15 +4443,24 @@ function openDruckkontrolle(id){
   </div>`;
   document.querySelectorAll("[data-close]").forEach(el => el.addEventListener("click", closeEditor));
   $("#kd-save").addEventListener("click", () => {
+    // Zwischen Öffnen und Speichern kann ein Sync-Zyklus den Trupp-Datensatz in state.asTrupps
+    // durch ein frisches Objekt ersetzt haben (mergeDeltaCollection) – die beim Öffnen
+    // eingefangene Referenz `t` wäre dann verwaist und ein Speichern darauf ginge verloren
+    // (Symptom: „Druckkontrolle gespeichert“, Karte blinkt aber unverändert weiter).
+    // Deshalb hier frisch nachschlagen und auf dem aktuell LEBENDEN Objekt speichern.
+    const live = state.asTrupps.find(x => x.id === id);
+    if(!live){ closeEditor(); render(); return; }
+    live.druck = live.druck || {};
+    live.checks = live.checks || {};
     document.querySelectorAll("[data-kd]").forEach(inp => {
-      t.druck[inp.dataset.kd] = t.druck[inp.dataset.kd] || {};
+      live.druck[inp.dataset.kd] = live.druck[inp.dataset.kd] || {};
       const v = inp.value.trim();
-      if(v) t.druck[inp.dataset.kd][stageKey] = v;
+      if(v) live.druck[inp.dataset.kd][stageKey] = v;
     });
     const tv = $("#kd-zeit").value;
     const d = new Date();
     if(tv){ const [h,m] = tv.split(":").map(Number); d.setHours(h,m,0,0); }
-    t.checks[stage] = d.toISOString();
+    live.checks[stage] = d.toISOString();
     markChange(); closeEditor(); render();
   });
 }
@@ -4735,12 +4744,14 @@ function doPrintAtemschutz(){
     const mem = t.memberIds||[];
     // Truppführer zuerst listen (steht oben mit den Zeiten)
     const ids = (t.tf && mem.includes(t.tf)) ? [t.tf, ...mem.filter(x => x !== t.tf)] : mem;
-    const rz = asRzTrupp(t);
+    const reserve = asReserve(t);
     const dauer = dauerStr(asMonitorStart(t), t.rueckkehr);
     return ids.map((id,idx) => {
       const tr = (state.asTraeger||[]).find(x=>x.id===id) || {};
       const d = (t.druck||{})[id] || {};
       const istTf = t.tf ? id === t.tf : idx === 0;
+      // Rückzugsdruck je Träger (eigener Startdruck kann vom TF abweichen) – Filter-Träger haben keinen.
+      const rzM = tr.filterModus ? null : asRzMember(d.start, d.ziel, reserve);
       return `<tr>
         <td class="p-mono">${idx===0?t.nr:""}${idx===0&&t.name?`<br><span style="font-weight:400;color:#666">${esc(t.name)}</span>`:""}${idx===0&&t.sicherheitstrupp?`<br><span style="font-weight:400;color:#666">Sicherheitstrupp</span>`:""}</td>
         <td>${esc(tr.name||"?")}${istTf?` <b>(TF)</b>`:""}${tr.feuerwehr?`<br><span style="color:#666">FF ${esc(tr.feuerwehr)}</span>`:""}<br><span style="color:#666;font-size:.85em;white-space:nowrap">${tr.filterModus?`Filter · Maske <span class="p-mono">${esc(tr.maskeNr||"–")}</span>`:`Gerät <span class="p-mono">${esc(tr.geraeteNr||"–")}</span> · Maske <span class="p-mono">${esc(tr.maskeNr||"–")}</span> · Lungenautomat <span class="p-mono">${esc(tr.lungenNr||"–")}</span>`}</span></td>
@@ -4748,7 +4759,7 @@ function doPrintAtemschutz(){
         <td class="p-mono">${d.start?esc(d.start):""}</td>
         <td class="p-mono">${d.ziel?esc(d.ziel):""}</td>
         <td class="p-mono">${d.end?esc(d.end):""}</td>
-        <td class="p-mono">${idx===0&&rz?(rz.sofort?"sofort":rz.bar+(rz.dyn?"":" (vorl.)")):""}</td>
+        <td class="p-mono">${rzM?(rzM.sofort?"sofort":rzM.bar+(rzM.dyn?"":" (vorl.)")):""}</td>
         <td>${idx===0?esc(t.abschnitt||"–")+(t.funkruf?" / "+esc(t.funkruf):""):""}</td>
         <td class="p-mono">${idx===0&&t.ausgerueckt?fmtZeit(t.ausgerueckt):""}</td>
         <td class="p-mono">${idx===0&&t.angeschlossen?fmtZeit(t.angeschlossen):""}</td>
@@ -4935,7 +4946,7 @@ function monAbPages(){
   const cols = monAbColumns();
   const pages = [];
   for(let i = 0; i < n; i += cols) pages.push({ start:i, count: Math.min(cols, n - i) });
-  return pages.length ? pages : [{ start: 0, count: 0 }];
+  return pages;
 }
 function renderMonitor(){
   const e = state.einsatz;
@@ -5273,7 +5284,8 @@ function monCardsData(){
       return;
     }
     const a = state.abschnitte.find(x => x.id === id);
-    if(a && !hid[a.id]) cards.push({ key:a.id, title:a.name, units:act.filter(u => u.abschnitt === a.id),
+    const auEinheiten = a ? act.filter(u => u.abschnitt === a.id) : [];
+    if(a && auEinheiten.length && !hid[a.id]) cards.push({ key:a.id, title:a.name, units:auEinheiten,
       opts:{ fuehrung:a.fuehrung, arbeit:a.arbeit, ansprechpartner:abAnsprech(a) } });
   });
   // Legacy-BR-Kachel nur, wenn kein echter Bereitstellungs-Abschnitt existiert (sonst doppelt)

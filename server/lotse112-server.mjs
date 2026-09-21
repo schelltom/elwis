@@ -187,6 +187,7 @@ function backupSchreiben(json){
 
 // Speicher-Gesundheit (für /api/health und die Client-Warnung)
 let letzterSaveOk = standGeladen ? Date.now() : 0;
+let letzteGespeicherteSeq = standGeladen ? stand.seq : 0;   // seq, die tatsächlich schon auf Platte liegt
 let saveFehler = null;
 let freierPlatzMB = null;
 
@@ -210,7 +211,7 @@ function speichern(){
     catch(e){ saveFehler = "Serialisieren: " + e.message; console.error(saveFehler); return; }
     try{
       snapshotSchreiben(json);
-      letzterSaveOk = Date.now(); saveFehler = null;
+      letzterSaveOk = Date.now(); letzteGespeicherteSeq = seqJetzt; saveFehler = null;
       journalKuerzen(seqJetzt);   // alles ≤ seqJetzt steckt jetzt im Snapshot
       const t = Date.now();
       if(t - letztesBackup >= SICHER_INTERVALL){ letztesBackup = t; backupSchreiben(json); }
@@ -245,12 +246,12 @@ setInterval(pruefePlatz, 60000).unref(); pruefePlatz();
 function serverWarnung(){
   if(saveFehler) return `Der ELW-Server kann den Einsatz nicht mehr speichern (${saveFehler}). Bitte jetzt „Einsatz exportieren“.`;
   if(freierPlatzMB != null && freierPlatzMB < 150) return `Wenig Speicherplatz am ELW-Server (${freierPlatzMB} MB frei) – Einsatz sichern.`;
-  if(letzterSaveOk && stand.seq > 0 && Date.now() - letzterSaveOk > 10 * 60 * 1000) return "Der ELW-Server hat seit über 10 Minuten nicht gespeichert.";
+  if(letzterSaveOk && stand.seq > 0 && stand.seq !== letzteGespeicherteSeq && Date.now() - letzterSaveOk > 10 * 60 * 1000) return "Der ELW-Server hat seit über 10 Minuten nicht gespeichert.";
   return null;
 }
 
 if(standGeladen){ backupSchreiben(JSON.stringify(stand)); letztesBackup = Date.now(); }  // Snapshot beim Start
-if(journalZeilen > 0){ try{ snapshotSchreiben(JSON.stringify(stand)); journalKuerzen(stand.seq); letzterSaveOk = Date.now(); }catch(e){ console.error("Checkpoint nach Journal-Replay fehlgeschlagen:", e.message); } }
+if(journalZeilen > 0){ try{ snapshotSchreiben(JSON.stringify(stand)); journalKuerzen(stand.seq); letzterSaveOk = Date.now(); letzteGespeicherteSeq = stand.seq; }catch(e){ console.error("Checkpoint nach Journal-Replay fehlgeschlagen:", e.message); } }
 
 /* Aktive Geräte (Client-IDs, zuletzt gesehen) */
 const geraete = new Map();
@@ -539,7 +540,7 @@ const server = http.createServer((req, res) => {
     try{ backups = fs.readdirSync(SICHER_DIR).filter(f => f.endsWith(".json")).length; }catch(_){}
     try{ fotos = fs.readdirSync(FOTO_DIR).filter(f => FOTO_ID_RX.test(f)).length; }catch(_){}
     sendeJson(req, res, 200, { ok: !saveFehler, seq: stand.seq, einsatzId: stand.einsatzId,
-      letzterSaveOk: letzterSaveOk || null, saveFehler, warnung: serverWarnung(),
+      letzterSaveOk: letzterSaveOk || null, letzteGespeicherteSeq, saveFehler, warnung: serverWarnung(),
       journalZeilen, freierPlatzMB, backups, fotos, clients: aktiveGeraete() });
     return;
   }
