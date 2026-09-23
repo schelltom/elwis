@@ -779,7 +779,7 @@ function qrDataUrl(text){
   catch(e){ return ""; }
 }
 function gesamt(u){ return (u.f|0)+(u.u|0)+(u.m|0); }
-function staerkeStr(u){ return `${u.f}/${u.u}/${u.m}/${gesamt(u)}`; }
+function staerkeStr(u){ return `${u.f}/${u.u}/${u.m}=${gesamt(u)}`; }
 function fullName(u){ return [u.name, u.kennung].map(s => (s||"").trim()).filter(Boolean).join(" "); }
 /* Virtuelle „Einsatzleitung": kein echter Abschnitt, aber als Zuordnungsziel
    überall wählbar und in den Abschnittslisten sichtbar (feste ID "EL"). */
@@ -1075,9 +1075,87 @@ function lgPumpAddresses(line, onEach){
   };
   next();
 }
-// Materialübersicht drucken (fürs Klemmbrett)
-function lgPrintFoerder(line){
+// Pumpen-Haltepunkte einer Wasserförderungs-Strecke: FP (Saugstelle) · P1…Pn (Verstärker) · V (Verteiler).
+function lgFoerderRouteStops(line){
+  const pts = line.llpoints;
+  return [{ label:"FP", cls:"fp", lat:pts[0].lat, lng:pts[0].lng }]
+    .concat((line.pumps||[]).map((pu, idx) => ({ label:`P${idx+1}`, cls:"", lat:pu.lat, lng:pu.lng })))
+    .concat([{ label:"V", cls:"v", lat:pts[pts.length-1].lat, lng:pts[pts.length-1].lng }]);
+}
+// Kartenbild rund um die Strecke einfangen, auf die Druckseite zugeschnitten (Seitenverhältnis wie
+// .p-map-route in app.css) – analog lgSnapBildBackfill/lgLuftbildEinfangen. `kind` "strasse" holt eine
+// Straßenkarte (BKG TopPlusOpen) statt des Luftbilds (Bayern-WMS DOP). Liefert null bei Offline/Fehler,
+// dann zeichnet lgFoerderRouteMapHtml den schematischen Ersatz (Positionen ohne Kartenbild).
+async function lgFoerderRouteCapture(line, kind){
+  if(navigator.onLine === false || typeof L === "undefined") return null;
+  const pts = line.llpoints;
+  if(!Array.isArray(pts) || pts.length < 2) return null;
+  const P = ll => L.CRS.EPSG3857.project(ll);
+  const bounds = L.latLngBounds(pts.map(p => L.latLng(p.lat, p.lng))).pad(0.12);
+  const sw = P(bounds.getSouthWest()), ne = P(bounds.getNorthEast());
+  const cx = (sw.x+ne.x)/2, cy = (sw.y+ne.y)/2;
+  let hw = Math.max(60, (ne.x-sw.x)/2), hh = Math.max(40, (ne.y-sw.y)/2);
+  const A = 1.64;   // Seitenverhältnis der Druckseite (siehe .p-map-route in app.css)
+  if(hw/hh < A) hw = hh*A; else hh = hw/A;
+  const minX = cx-hw, maxX = cx+hw, minY = cy-hh, maxY = cy+hh;
+  const W = 1760, H = Math.round(W/A);
+  let bg; try{ bg = await (kind === "strasse" ? lgWmsStrasse(minX, minY, maxX, maxY, W, H) : lgWmsDop(minX, minY, maxX, maxY, W, H)); }catch(e){ return null; }
+  const stops = lgFoerderRouteStops(line);
+  const proj = lgProjItemsTo([{ type:"line", llpoints:pts }, ...stops.map(s => ({ ll:[s.lat, s.lng] }))], minX, maxX, minY, maxY);
+  return { bg, bgW:W, bgH:H, routePts: proj[0].points,
+    markers: stops.map((s, i) => ({ label:s.label, cls:s.cls, x:proj[i+1].x, y:proj[i+1].y })) };
+}
+// Karte der Strecke fürs Querformat-Blatt: Wegverlauf + Standort jeder Pumpe (FP, P1…Pn, Verteiler).
+// Mit `capture` (siehe lgFoerderRouteCapture) auf echtem Karten-Hintergrund (Luftbild oder Straßenkarte),
+// sonst schematisch (nur Positionen aus GPS, eigene Projektion über die Punkte DIESER Linie → füllt die
+// Seite optimal aus). `kartenArt` benennt den versuchten Hintergrund im Schema-Hinweistext.
+function lgFoerderRouteMapHtml(line, capture, kartenArt){
+  const pts = line.llpoints;
+  if(!Array.isArray(pts) || pts.length < 2) return "";
+  if(capture && capture.bg){
+    const routeItem = { id:"route", type:"line", color:line.color, points: capture.routePts };
+    const markers = capture.markers.map(s => `<div class="lg-item" style="left:${s.x}%;top:${s.y}%">
+        <div class="lg-mk"><span class="lg-pump ${s.cls}">${esc(s.label)}</span></div>
+      </div>`).join("");
+    return `<div class="p-map p-map-route" style="aspect-ratio:${capture.bgW}/${capture.bgH}">
+      <div class="lg-canvas hasbg" style="background-image:url('${capture.bg}');background-size:100% 100%">
+        ${lgShapesSvg([routeItem], null)}
+        ${markers}
+      </div>
+      <div class="p-map-note">FP = Förderpumpe (Saugstelle) · P1…Pn = Verstärkerpumpe · V = Verteiler (Einsatzstelle)</div>
+    </div>`;
+  }
+  let minLat=Infinity, maxLat=-Infinity, minLng=Infinity, maxLng=-Infinity;
+  for(const p of pts){ minLat=Math.min(minLat,p.lat); maxLat=Math.max(maxLat,p.lat); minLng=Math.min(minLng,p.lng); maxLng=Math.max(maxLng,p.lng); }
+  const spanLat = (maxLat-minLat) || 1e-5, spanLng = (maxLng-minLng) || 1e-5;
+  const M = 8;   // Rand in Prozent, damit Route/Pumpen nicht am Blattrand kleben
+  const prX = lng => M + ((lng-minLng)/spanLng) * (100-2*M);
+  const prY = lat => M + ((maxLat-lat)/spanLat) * (100-2*M);   // Nord = oben
+  const routeItem = { id:"route", type:"line", color:line.color, points: pts.map(p => ({ x:prX(p.lng), y:prY(p.lat) })) };
+  const markers = lgFoerderRouteStops(line).map(s => `<div class="lg-item" style="left:${prX(s.lng)}%;top:${prY(s.lat)}%">
+      <div class="lg-mk"><span class="lg-pump ${s.cls}">${esc(s.label)}</span></div>
+    </div>`).join("");
+  return `<div class="p-map p-map-schema p-map-route">
+    <div class="lg-canvas">
+      ${lgShapesSvg([routeItem], null)}
+      ${markers}
+    </div>
+    <div class="p-map-note">Schematischer Streckenverlauf – ${esc(kartenArt || "Kartenbild")} nicht verfügbar (Gerät offline?), Positionen aus GPS, nicht maßstabsgetreu. FP = Förderpumpe (Saugstelle) · P1…Pn = Verstärkerpumpe · V = Verteiler (Einsatzstelle)</div>
+  </div>`;
+}
+// Materialübersicht drucken (fürs Klemmbrett) + Streckenkarte quer als zwei weitere Blätter
+// (Luftbild + Straßenkarte, je falls online)
+async function lgPrintFoerder(line){
   const e = state.einsatz;
+  const [captureLuft, captureStrasse] = await Promise.all([
+    lgFoerderRouteCapture(line, "luftbild"), lgFoerderRouteCapture(line, "strasse") ]);
+  const seite = (capture, kartenArt, titel) => {
+    const map = lgFoerderRouteMapHtml(line, capture, kartenArt);
+    return map ? `<section class="p-land">
+      <h2>Streckenverlauf &amp; Pumpen-Standorte – ${esc(titel)}</h2>
+      ${map}
+    </section>` : "";
+  };
   $("#printArea").innerHTML = `
     <section class="p-doc">
       <div class="p-head">
@@ -1090,7 +1168,9 @@ function lgPrintFoerder(line){
       </div>
       ${lgFoerderUebersichtHtml(line)}
       <p style="font-size:8pt;color:#666;margin-top:16px">Anhalt nach Faustformel – keine hydraulische Berechnung. Gedruckt am ${new Date().toLocaleString("de-DE")} · LOTSE112 · ${esc(state.config.ugName)}<br>${DRUCK_HINWEIS}</p>
-    </section>`;
+    </section>
+    ${seite(captureLuft, "Luftbild", "Luftbild")}
+    ${seite(captureStrasse, "Straßenkarte", "Straßenkarte")}`;
   window.print();
 }
 /* ---- Löschwasser-Bilanz ---- */
@@ -4969,7 +5049,7 @@ function renderMonitor(){
     <div class="orgrow">
       <span class="chip chip-${o.key}">${o.short}</span>
       <div class="bar-wrap"><div class="bar" style="width:${Math.round(g/maxG*100)}%;background:var(${o.cssVar})"></div></div>
-      <span class="num mono">${o.sum.f}/${o.sum.u}/${o.sum.m}/${g} <small>· ${o.units.length} Einh.</small></span>
+      <span class="num mono">${o.sum.f}/${o.sum.u}/${o.sum.m}=${g} <small>· ${o.units.length} Einh.</small></span>
     </div>`;
   }).join("") || `<p class="hint">Noch keine Kräfte an der Einsatzstelle.</p>`;
 
@@ -5020,7 +5100,7 @@ function renderMonitor(){
           <h4>${esc(title)}</h4>
           ${opts.sub ? `<div class="ab-cardsub">${esc(opts.sub)}</div>` : ""}
         </div>
-        <div class="ab-staerke mono">${sf}/${su.u}/${su.m}/${g}</div>
+        <div class="ab-staerke mono">${sf}/${su.u}/${su.m}=${g}</div>
       </div>
       <div class="ab-sub">
         <span><strong class="mono">${units.length}</strong> Einheiten</span>
@@ -5101,7 +5181,7 @@ function renderMonitor(){
         <div class="mon-clockbox">
           <div class="mon-clock mono" id="monClock">--:--</div>
           <div class="mon-dauer" id="monDauer"></div>
-          ${e.lagebespr ? `<div class="mon-lb">Nächste Lage <strong class="mono">${esc(e.lagebespr)}</strong> <span id="monLbRel"></span></div>` : ""}
+          ${e.lagebespr ? `<div class="mon-lb">Nächste Lagebesprechung <strong class="mono">${esc(e.lagebespr)}</strong> <span id="monLbRel"></span></div>` : ""}
         </div>
         <div class="mon-headctrl">
           <button class="btn btn-ghost" id="btnMonHide">Kacheln</button>
@@ -5148,6 +5228,12 @@ function renderMonitor(){
           ...arrows.map(a => `<div class="lg-leg-item"><button class="lg-leg-badge" data-lgfind="${esc(a.id)}" aria-label="Auf der Karte zeigen">${lgArrowBadge(sc(a))}</button>${legText(esc(a.text||""), laengeStr(geoLineM(a.llpoints)))}</div>`),
           ...circles.map(c => `<div class="lg-leg-item"><button class="lg-leg-badge" data-lgfind="${esc(c.id)}" aria-label="Auf der Karte zeigen">${lgCircleBadge(sc(c))}</button>${legText(esc(c.text||""), c.radiusM > 0 ? "r " + laengeStr(c.radiusM) : "")}</div>`),
           ...sectors.map(s => `<div class="lg-leg-item"><button class="lg-leg-badge" data-lgfind="${esc(s.id)}" aria-label="Auf der Karte zeigen">${lgSectorBadge(sc(s))}</button>${legText(esc(s.text||""), s.reachM > 0 ? laengeStr(s.reachM) + " · " + windHimmel(s.bearingDeg) : "")}</div>`),
+          // Alle übrigen Punkt-Marker (EL, Brandstelle, Wasserentnahme, Verletztenablage, Text,
+          // taktische Zeichen aus dem Symbol-Katalog) – sonst fehlen sie hier in der Legende.
+          ...state.lage.items.filter(i => Array.isArray(i.ll) && !LG_LEG_OWN_TYPES.has(i.type)).map(i => {
+            const name = lgLegOtherName(i), txt = (i.label||"").trim();
+            return `<div class="lg-leg-item"><button class="lg-leg-badge" data-lgfind="${esc(i.id)}" aria-label="Auf der Karte zeigen">${lgLegBadge(i)}</button>${legText(esc(txt || name), txt ? name : "")}</div>`;
+          }),
         ].join("");
         const gefItems = gefahren.map(i => `<div class="lg-leg-item"><button class="lg-leg-badge" data-lgfind="${esc(i.id)}" aria-label="Auf der Karte zeigen"><span class="lg-leg-num tri">${esc(i.num)}</span></button>${legText(esc(i.text||""))}</div>`).join("");
         const carItems = cars.map(i => {
@@ -5443,8 +5529,9 @@ let lgTool = null;        // aktives Symbol-Werkzeug
 let lgSubmenu = null;     // offenes Werkzeug-Untermenü (z. B. "brand", "wasser")
 // Werkzeuge mit Auswahl-Untermenü: Klick öffnet die Optionen, Auswahl setzt das passende Symbol.
 const LG_SUBMENUS = {
-  brand:  { label:"Brandstelle", opts:[
-    { sym:"brand1", n:"Kleinbrand" }, { sym:"brand2", n:"Mittelbrand" }, { sym:"brand3", n:"Großbrand" } ] },
+  brand:  { label:"Brand", opts:[
+    { sym:"brand1", n:"Entstehungsbrand" }, { sym:"brand2", n:"fortentwickelter Brand" },
+    { sym:"brand3", n:"Vollbrand" }, { sym:"flaechenbrand", n:"Flächenbrand" } ] },
   wasser: { label:"Wasserentnahme", opts:[
     { sym:"hydrant", n:"Hydrant" }, { sym:"hydrantO", n:"Überflurhydrant" },
     { sym:"gewaesser", n:"Offenes Gewässer" }, { sym:"zisterne", n:"Zisterne / Behälter" } ] },
@@ -5468,11 +5555,26 @@ const LG_ARROWHEAD_SVG = `<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M
 // Kleine Legenden-Symbole für Pfeil/Radius-Kreis (Farbe via CSS-Variable, z. B. var(--fw))
 function lgArrowBadge(c){ return `<svg viewBox="0 0 30 12" style="width:28px;height:12px" aria-hidden="true"><line x1="2" y1="6" x2="20" y2="6" stroke="${c}" stroke-width="3" stroke-linecap="round"/><path d="M18 1.5 L29 6 L18 10.5 Z" fill="${c}"/></svg>`; }
 function lgCircleBadge(c){ return `<svg viewBox="0 0 24 24" style="width:22px;height:22px" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="none" stroke="${c}" stroke-width="2.5"/><circle cx="12" cy="12" r="1.7" fill="${c}"/></svg>`; }
+// Brandausdehnung (vereinfachte Dreieck-Darstellung, angelehnt an DIN 14034): 1–3 offene Dreiecke
+// nebeneinander = Entstehungsbrand/fortentwickelter Brand/Vollbrand, Ellipse drumherum = Flächenbrand.
+const SYM_BRAND1 = `<svg viewBox="0 0 100 90" aria-hidden="true"><path d="M50 8 L64 80 L36 80 Z" fill="none" stroke="#D8392E" stroke-width="5" stroke-linejoin="round"/></svg>`;
+const SYM_BRAND2 = `<svg viewBox="0 0 100 90" aria-hidden="true">
+  <path d="M35 36 L58 80 L12 80 Z" fill="none" stroke="#D8392E" stroke-width="5" stroke-linejoin="round"/>
+  <path d="M66 14 L89 80 L43 80 Z" fill="none" stroke="#D8392E" stroke-width="5" stroke-linejoin="round"/></svg>`;
+const SYM_BRAND3 = `<svg viewBox="0 0 100 90" aria-hidden="true">
+  <path d="M25 18 L47 80 L3 80 Z" fill="none" stroke="#D8392E" stroke-width="5" stroke-linejoin="round"/>
+  <path d="M50 18 L72 80 L28 80 Z" fill="none" stroke="#D8392E" stroke-width="5" stroke-linejoin="round"/>
+  <path d="M75 18 L97 80 L53 80 Z" fill="none" stroke="#D8392E" stroke-width="5" stroke-linejoin="round"/></svg>`;
+const SYM_FLAECHENBRAND = `<svg viewBox="0 0 100 90" aria-hidden="true">
+  <ellipse cx="50" cy="48" rx="44" ry="32" fill="none" stroke="#D8392E" stroke-width="5"/>
+  <path d="M34 34 L47 66 L21 66 Z" fill="none" stroke="#D8392E" stroke-width="4" stroke-linejoin="round"/>
+  <path d="M50 28 L63 66 L37 66 Z" fill="none" stroke="#D8392E" stroke-width="4" stroke-linejoin="round"/>
+  <path d="M66 34 L79 66 L53 66 Z" fill="none" stroke="#D8392E" stroke-width="4" stroke-linejoin="round"/></svg>`;
 const LG_TOOLS = [
   { t:"num",     n:"Marker 1·2·3",    preview:'<span class="lg-num">1</span>' },
   { t:"car",     n:"Fahrzeug",        preview:`<span class="lg-car" style="color:var(--fw)">${LG_CAR_SVG}</span>` },
   { t:"el",      n:"Einsatzleitung",  preview:'<span class="lg-rect" style="--oc:var(--warn)">EL</span>' },
-  { t:"brand",   n:"Brandstelle",     preview:lgFlameSvg() },
+  { t:"brand",   n:"Brand",           preview:`<span style="display:inline-flex;width:34px;height:31px">${SYM_BRAND3}</span>` },
   { t:"gefahr",  n:"Gefahr",          preview:'<span class="lg-tri">!</span>' },
   { t:"wasser",  n:"Wasserentnahme",  preview:'<span class="lg-circle">W</span>' },
   { t:"text",    n:"Text",            preview:'<span class="lg-text">Abc</span>' },
@@ -5488,12 +5590,6 @@ const LG_TOOLS = [
 const LG_SHAPE_COLORS = ["fw","thw","brk","pol","orange","violett","tuerkis"];
 const LG_COLOR_NAMES = { fw:"Rot", thw:"Blau", brk:"Gold", pol:"Grün", orange:"Orange", violett:"Violett", tuerkis:"Türkis" };
 
-/* Taktische Zeichen nach DV 102 (vereinfachte Darstellung) – Brandstufen als 1–3 Flammen */
-function symFlames(n){
-  const fl = `<svg viewBox="0 0 24 24" style="width:13px;height:17px;fill:currentColor;stroke:none">
-    <path d="M12 2c1.2 3.6-3.8 6-3.8 10.4a3.8 3.8 0 0 0 7.6 0c0-1.5-.8-2.6-.8-2.6s3.4 1.4 3.4 5A6.4 6.4 0 0 1 5.6 15C5.6 8.4 10.8 7.2 12 2z"/></svg>`;
-  return fl.repeat(n);
-}
 // Taktisches Zeichen „Bereitstellungsraum" (Quelle: Wikimedia Commons, T. Schuff, CC BY-SA 3.0):
 // gelbe Scheibe mit schwarzem Rand + oben offener „Behälter".
 const SYM_BEREITSTELLUNG = `<svg viewBox="0 0 601 599" aria-hidden="true"><circle cx="300.5" cy="299.3" r="300" fill="#1a1a1a"/><circle cx="300.5" cy="299.3" r="270" fill="#ffd400"/><path d="M489.8 438.5 L110.2 438.5 L110.2 158.9 C110.2 158.9 201.3 216.8 296.2 216.8 C391.1 216.8 489.8 158.9 489.8 158.9 Z" fill="none" stroke="#1a1a1a" stroke-width="22"/></svg>`;
@@ -5502,9 +5598,10 @@ const SYM_OEL = `<svg viewBox="0 0 120 84" aria-hidden="true"><rect x="5" y="7" 
 const SYM_VERPFLEGUNG = `<svg viewBox="0 0 100 100" aria-hidden="true"><path d="M50 50 L12 28 A44 44 0 1 1 12 72 Z" fill="#F4C21A" stroke="#1A1A1A" stroke-width="5" stroke-linejoin="round"/></svg>`;
 const SYM_SAMMELSTELLE = `<svg viewBox="0 0 100 100" aria-hidden="true"><circle cx="50" cy="50" r="44" fill="#F7F3EA" stroke="#1A1A1A" stroke-width="5"/><g stroke="#1A1A1A" stroke-width="5" fill="none" stroke-linecap="round" stroke-linejoin="round"><line x1="20" y1="50" x2="60" y2="50"/><polyline points="52,43 62,50 52,57"/></g><circle cx="72" cy="50" r="7" fill="none" stroke="#1A1A1A" stroke-width="5"/></svg>`;
 const SYM_KATALOG = [
-  { key:"brand1",   name:"Kleinbrand / Entstehungsbrand", color:"var(--fw)",  flames:1 },
-  { key:"brand2",   name:"Mittelbrand / fortgeschrittener Brand", color:"var(--fw)", flames:2 },
-  { key:"brand3",   name:"Großbrand / Vollbrand",         color:"var(--fw)",  flames:3 },
+  { key:"brand1",   name:"Entstehungsbrand",              color:"var(--fw)",  svg:SYM_BRAND1 },
+  { key:"brand2",   name:"fortentwickelter Brand",        color:"var(--fw)",  svg:SYM_BRAND2 },
+  { key:"brand3",   name:"Vollbrand",                     color:"var(--fw)",  svg:SYM_BRAND3 },
+  { key:"flaechenbrand", name:"Flächenbrand",             color:"var(--fw)",  svg:SYM_FLAECHENBRAND },
   { key:"expl",     name:"Explosionsgefahr",              color:"var(--fw)",  kurz:"EXPL" },
   { key:"gefstoff", name:"Gefährliche Stoffe / Gefahrgut",color:"var(--brk)", kurz:"GG" },
   { key:"strom",    name:"Gefahr durch Elektrizität",     color:"var(--brk)", kurz:"⚡" },
@@ -5527,8 +5624,27 @@ const SYM_KATALOG = [
 ];
 function symTile(s, small){
   if(s.svg) return `<span class="lg-symsvg"${small ? ' style="transform:scale(.85)"' : ""}>${s.svg}</span>`;
-  const inner = s.flames ? symFlames(s.flames) : esc(s.kurz);
-  return `<span class="lg-sym ${s.circle ? "circle" : ""}" style="--sc:${s.color};${small ? "transform:scale(.85)" : ""}">${inner}</span>`;
+  return `<span class="lg-sym ${s.circle ? "circle" : ""}" style="--sc:${s.color};${small ? "transform:scale(.85)" : ""}">${esc(s.kurz)}</span>`;
+}
+// Marker-Typen, die eine eigene Mini-Darstellung in der Legende haben (Zahl, Gefahr, Fahrzeug,
+// Form/Linie/Pfeil/Kreis/Gefahrenbereich, Fläche) – alles andere (EL, Brandstelle, Wasserentnahme,
+// Verletztenablage, Text, taktische Zeichen aus dem Symbol-Katalog, …) läuft über lgLegBadge/lgLegOther.
+const LG_LEG_OWN_TYPES = new Set(["num","gefahr","car","form","line","arrow","circle","sector","area"]);
+// Kompaktes Badge (ohne die kartengroße Beschriftungs-Caption) für diese „übrigen" Marker-Typen,
+// für die 34px-Spalte der Legende (siehe .lg-leg-badge-Overrides in app.css).
+function lgLegBadge(i){
+  if(i.type === "sym"){ const s = SYM_KATALOG.find(x => x.key === i.sym); return s ? symTile(s) : `<span class="lg-rect">?</span>`; }
+  if(i.type === "el") return `<span class="lg-rect" style="--oc:var(--warn)">EL</span>`;
+  if(i.type === "brand") return lgFlameSvg();
+  if(i.type === "wasser") return `<span class="lg-circle">W</span>`;
+  if(i.type === "patient") return `<span class="lg-cross">+</span>`;
+  if(i.type === "text") return `<span class="lg-text">Abc</span>`;
+  return `<span class="lg-rect">${esc((i.type||"?").slice(0,3).toUpperCase())}</span>`;
+}
+// Anzeigename dieser „übrigen" Marker-Typen – taktisches Zeichen aus dem Katalog, sonst Standard-Beschriftung.
+function lgLegOtherName(i){
+  if(i.type === "sym"){ const s = SYM_KATALOG.find(x => x.key === i.sym); return s ? s.name : "Taktisches Zeichen"; }
+  return lgDefaultLabel(i.type) || "Symbol";
 }
 function lgShapesSvg(items, draw){
   const istForm = i => ["line","area","arrow","circle","sector"].includes(i.type);
@@ -5714,9 +5830,18 @@ function renderLagekarte(){
   const sectors = state.lage.items.filter(i => i.type === "sector");
   const sectorItems = sectors.map(s => legRow(lgSectorBadge(shpCol(s)),
     { id:s.id, text:(s.text||"").trim(), sub: s.reachM > 0 ? laengeStr(s.reachM) + " · " + windHimmel(s.bearingDeg) : "" }, "Gefahrenbereich beschriften …")).join("");
+  // Alle übrigen Punkt-Marker ohne eigene Mini-Darstellung (EL, Brandstelle, Wasserentnahme,
+  // Verletztenablage, Text, taktische Zeichen aus dem Symbol-Katalog wie Bereitstellungsraum) –
+  // sonst tauchen frisch platzierte Symbole gar nicht in der Legende auf.
+  const others = state.lage.items.filter(i => Array.isArray(i.ll) && !LG_LEG_OWN_TYPES.has(i.type));
+  const otherItems = others.map(i => {
+    const name = lgLegOtherName(i);
+    const txt = (i.label||"").trim();
+    return legRow(lgLegBadge(i), { id:i.id, text: txt || name, sub: txt ? name : "" }, "Beschriftung antippen …");
+  }).join("");
   const secMarker = `
         <div class="lg-leg-sec"><h3>Marker</h3>
-          ${(eaItems || areaItems || nums.length || forms.length || lines.length || arrows.length || circles.length || sectors.length) ? eaItems + areaItems + numItems + formItems + lineItems + arrowItems + circleItems + sectorItems
+          ${(eaItems || areaItems || otherItems || nums.length || forms.length || lines.length || arrows.length || circles.length || sectors.length) ? eaItems + areaItems + otherItems + numItems + formItems + lineItems + arrowItems + circleItems + sectorItems
           : `<p class="hint" style="margin:0">Noch keine Marker. Werkzeug wählen und auf die Karte tippen.</p>`}
         </div>`;
   const secGefahr = gefahren.length ? `
@@ -5861,17 +5986,29 @@ document.addEventListener("paste", e => {
 });
 /* WMS-DOP-Luftbild für eine 3857-Bounding-Box laden → JPEG-Daten-URL. CORS-fähig (crossOrigin)
    → aufs Canvas → toDataURL OHNE Tainted-Canvas. WMS liefert EIN Bild pro Ausschnitt. */
-function lgWmsDop(minX, minY, maxX, maxY, W, H){
-  const url = "https://geoservices.bayern.de/od/wms/dop/v1/dop40?SERVICE=WMS&REQUEST=GetMap&VERSION=1.3.0"
-    + "&LAYERS=by_dop40c&STYLES=&FORMAT=image/png&CRS=EPSG:3857"
-    + "&BBOX=" + [minX, minY, maxX, maxY].join(",") + "&WIDTH=" + W + "&HEIGHT=" + H;
+// Bild-URL laden → Canvas → Daten-URL (CORS-fähig, ohne Tainted-Canvas). Gemeinsame Basis für
+// Luftbild (DOP) und Straßenkarte (TopPlusOpen), je ein WMS-GetMap-Request pro Ausschnitt.
+function lgWmsLoad(url, W, H, fehlermeldung){
   return new Promise((res, rej) => {
     const img = new Image(); img.crossOrigin = "anonymous";
     img.onload = () => { try{ const c = document.createElement("canvas"); c.width = img.naturalWidth || W; c.height = img.naturalHeight || H;
       c.getContext("2d").drawImage(img, 0, 0); res(c.toDataURL("image/jpeg", 0.85)); }catch(e){ rej(e); } };
-    img.onerror = () => rej(new Error("Luftbild-Server nicht erreichbar (Internet/CORS)"));
+    img.onerror = () => rej(new Error(fehlermeldung));
     img.src = url; setTimeout(() => rej(new Error("Zeitüberschreitung")), 12000);
   });
+}
+function lgWmsDop(minX, minY, maxX, maxY, W, H){
+  const url = "https://geoservices.bayern.de/od/wms/dop/v1/dop40?SERVICE=WMS&REQUEST=GetMap&VERSION=1.3.0"
+    + "&LAYERS=by_dop40c&STYLES=&FORMAT=image/png&CRS=EPSG:3857"
+    + "&BBOX=" + [minX, minY, maxX, maxY].join(",") + "&WIDTH=" + W + "&HEIGHT=" + H;
+  return lgWmsLoad(url, W, H, "Luftbild-Server nicht erreichbar (Internet/CORS)");
+}
+// Straßenkarte (BKG TopPlusOpen, bundesweit) für eine 3857-Bounding-Box – Alternative zum Luftbild.
+function lgWmsStrasse(minX, minY, maxX, maxY, W, H){
+  const url = "https://sgx.geodatenzentrum.de/wms_topplus_open/service?SERVICE=WMS&REQUEST=GetMap&VERSION=1.3.0"
+    + "&LAYERS=web&STYLES=&FORMAT=image/png&CRS=EPSG:3857"
+    + "&BBOX=" + [minX, minY, maxX, maxY].join(",") + "&WIDTH=" + W + "&HEIGHT=" + H;
+  return lgWmsLoad(url, W, H, "Straßenkarten-Server nicht erreichbar (Internet/CORS)");
 }
 /* Items in eine 3857-Bounding-Box projizieren → NEUE Kopien mit x/y (%) bzw. points (%). */
 function lgProjItemsTo(items, minX, maxX, minY, maxY){
@@ -7232,7 +7369,11 @@ function openLgShapeEdit(id){
     lgPumpAddresses(c, refresh);   // Straße/Hausnummer im Hintergrund nachladen
   });
   const printBtn = $("#sh-print-btn");
-  if(printBtn) printBtn.addEventListener("click", () => lgPrintFoerder(cur()));
+  if(printBtn) printBtn.addEventListener("click", async () => {   // Luftbild für die Streckenkarte braucht kurz Netz
+    printBtn.disabled = true; printBtn.textContent = "… Kartenbilder werden geladen";
+    try{ await lgPrintFoerder(cur()); }
+    finally{ printBtn.disabled = false; printBtn.textContent = "Übersicht drucken"; }
+  });
   const abSel = $("#sh-abschnitt");
   if(abSel) abSel.addEventListener("change", () => {
     cur().abschnittId = abSel.value || "";
@@ -7491,7 +7632,7 @@ function reportBodyHtml(data, sel, opts){
   // Gesamtzahl der Kräfte (Personen): Einheiten-Stärke + Führungskräfte (je 1 Person)
   const persGesamt = sAll.f + sAll.u + sAll.m + fkN;
   const persVorOrt = s.f + s.u + s.m + fkN;
-  const staerkeGesamt = `${s.f+fkN}/${s.u}/${s.m}/${s.f+s.u+s.m+fkN}`;
+  const staerkeGesamt = `${s.f+fkN}/${s.u}/${s.m}=${s.f+s.u+s.m+fkN}`;
   const units = [...data.einheiten].sort((a,b) => fullName(a).localeCompare(fullName(b), "de"));
   const unitRows = units.map(u => `
     <tr>
@@ -7522,7 +7663,7 @@ function reportBodyHtml(data, sel, opts){
       <tr><td>Alarmzeit</td><td>${e.beginn ? fmtDatum(e.beginn)+" "+fmtZeit(e.beginn)+" Uhr" : "–"}</td></tr>
       <tr><td>Einsatzende</td><td>${pEnde ? fmtDatum(pEnde)+" "+fmtZeit(pEnde)+" Uhr" : "– (Einsatz läuft)"}</td></tr>
       <tr><td>Einsatzdauer</td><td>${dauerStr(e.beginn, pEnde) || "–"}</td></tr>
-      <tr><td>Kräfte gesamt</td><td><strong>${persGesamt} Einsatzkräfte</strong> · ${data.einheiten.length} Einheiten, ${fkN} Führungskräfte · Stärke <span class="p-mono">${sAll.f+fkN}/${sAll.u}/${sAll.m}/${persGesamt}</span> · AGT ${sAll.agt}, CSA ${sAll.csa}${pEnde ? "" : ` · aktuell vor Ort: <span class="p-mono">${persVorOrt}</span>`}</td></tr>
+      <tr><td>Kräfte gesamt</td><td><strong>${persGesamt} Einsatzkräfte</strong> · ${data.einheiten.length} Einheiten, ${fkN} Führungskräfte · Stärke <span class="p-mono">${sAll.f+fkN}/${sAll.u}/${sAll.m}=${persGesamt}</span> · AGT ${sAll.agt}, CSA ${sAll.csa}${pEnde ? "" : ` · aktuell vor Ort: <span class="p-mono">${persVorOrt}</span>`}</td></tr>
       <tr><td>Einsatzleiter</td><td>${esc(e.leiter) || "–"}</td></tr>
       ${e.bereitstellungsraum ? `<tr><td>${e.bereitstellung ? "Bereitstellungsraum" : "Verfügungsraum"}</td><td>${esc(e.bereitstellungsraum)}</td></tr>` : ""}
       ${(!pEnde && e.lagebespr) ? `<tr><td>Nächste Lagebesprechung</td><td>${esc(e.lagebespr)} Uhr</td></tr>` : ""}
@@ -7714,8 +7855,8 @@ function reportBodyHtml(data, sel, opts){
     ${reportHead(e, pEnde, opts)}
     ${secEinsatz}${secAbschnitte}${secKraefte}${secFunk}${secSkizze}${secBespr}${secFotos}${secListen}${secAtem}${secLage}
     <p class="p-sum">
-      Gesamtstärke über den Einsatz: <span class="p-mono">${sAll.f+(data.fuehrung||[]).length}/${sAll.u}/${sAll.m}/${sAll.f+sAll.u+sAll.m+(data.fuehrung||[]).length}</span> · AGT: ${sAll.agt} · CSA: ${sAll.csa}
-      ${data.ende ? "" : ` &nbsp;|&nbsp; aktuell vor Ort: <span class="p-mono">${s.f+(data.fuehrung||[]).length}/${s.u}/${s.m}/${s.f+s.u+s.m+(data.fuehrung||[]).length}</span>`}
+      Gesamtstärke über den Einsatz: <span class="p-mono">${sAll.f+(data.fuehrung||[]).length}/${sAll.u}/${sAll.m}=${sAll.f+sAll.u+sAll.m+(data.fuehrung||[]).length}</span> · AGT: ${sAll.agt} · CSA: ${sAll.csa}
+      ${data.ende ? "" : ` &nbsp;|&nbsp; aktuell vor Ort: <span class="p-mono">${s.f+(data.fuehrung||[]).length}/${s.u}/${s.m}=${s.f+s.u+s.m+(data.fuehrung||[]).length}</span>`}
     </p>
     <div class="p-foot">
       <div class="p-sign">Ort, Datum</div>

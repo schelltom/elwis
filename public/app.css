@@ -793,6 +793,14 @@
   .lg-find{background:none;border:0;padding:0;cursor:pointer;line-height:0}
   /* Legenden-Badge (klickbar → wackeln/blinken) für Marker, Formen, Linien */
   .lg-leg-badge{flex:none;width:34px;display:grid;place-items:center;background:none;border:0;padding:0;cursor:pointer}
+  /* Verkleinerte Varianten der echten Karten-Symbole (EL/Brand/Wasser/Verletztenablage/Text/taktische
+     Zeichen) für die 34px-Badge-Spalte der Legende – sonst würden die kartengroßen Icons überstehen. */
+  .lg-leg-badge .lg-rect{min-width:0;width:30px;height:22px;padding:0;font-size:.6rem;border-width:2px}
+  .lg-leg-badge .lg-flame svg{width:20px;height:20px}
+  .lg-leg-badge .lg-circle{width:26px;height:26px;font-size:.72rem}
+  .lg-leg-badge .lg-cross{width:26px;height:26px;font-size:.95rem}
+  .lg-leg-badge .lg-text{font-size:.62rem;padding:2px 5px}
+  .lg-leg-badge .lg-symsvg{width:28px;height:28px}
   .lg-mini-form{width:24px;height:20px;border:2.5px solid var(--sc);background:var(--surface)}
   .lg-mini-form.circle{border-radius:50%;width:22px;height:22px}
   .lg-mini-form.square{border-radius:4px;width:22px;height:22px}
@@ -831,6 +839,7 @@
     background:var(--thw);color:#fff;font-weight:800;font-size:.78rem;border:2.5px solid #fff;
     box-shadow:0 1px 5px rgba(0,0,0,.55);cursor:move;white-space:nowrap}
   .lg-pump.fp{background:var(--brk);cursor:default}   /* Förderpumpe an der Saugstelle (gold) */
+  .lg-pump.v{background:var(--fw);cursor:default}      /* Verteiler an der Einsatzstelle (rot) */
   /* Wasserförderung-Parameterfelder im Dialog */
   .lg-fparam{display:flex;flex-direction:column;gap:3px;font-size:.72rem;font-weight:700;color:var(--ink2)}
   .lg-fparam input{font-size:.95rem;font-weight:600;padding:6px 8px;width:100%}
@@ -1113,20 +1122,11 @@
     #printArea .p-fotos img{width:100%;border:1px solid #999;border-radius:3px}
     #printArea .p-fotos .p-foto-cap{font-size:8.5pt;color:#333;margin-top:2px;line-height:1.3}
     /* Seitenkopf/-fuß + Seitenzahl über @page-Randboxen (kein position:fixed → keine Überlagerung
-       des Inhalts). Kopftext kommt aus der versteckten Quelle .p-run-src via string-set.
-       LOTSE112-Kennzeichnung links unten bleibt auf jeder Seite stehen, auch wenn oben rechts ein
-       eigenes Logo steht – einzeilig und knapp, LOTSE112 fett voran (plakativ), damit der Block
-       flach bleibt. (Zwei getrennte Randboxen für Marke+Text wurden verworfen: die Eckbox
-       "bottom-left-corner" hat eine vom linken Seitenrand fix vorgegebene Breite und läuft bei
-       "LOTSE112" über – sie überlappt dann die Nachbarbox statt sich einzupassen.) */
+       des Inhalts). Kopftext kommt aus der versteckten Quelle .p-run-src via string-set. */
     @page{
       margin:20mm 13mm 13mm;
       @top-right{content:string(rptHead);
         font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;font-size:8pt;color:#777}
-      @bottom-left{content:"LOTSE112 – Einsatzleitung – Die fachliche Verantwortung liegt beim Ersteller!";
-        font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;font-weight:700;
-        font-size:6.5pt;color:#555;
-        border:1px solid #bbb;border-radius:3px;padding:2px 6px;background:#fafafa}
       @bottom-right{content:"Seite " counter(page) " von " counter(pages);
         font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;font-size:8pt;color:#777}
     }
@@ -1151,6 +1151,9 @@
     #printArea .p-land > h2{ break-after:avoid; margin-top:0 }
     #printArea .p-land .p-map{ max-height:145mm; margin-inline:auto }
     #printArea .p-land .p-skizze{ margin-top:10px }
+    /* Streckenkarte der Wasserförderung: alleiniger Inhalt der Seite (keine Legende darunter) →
+       darf fast die ganze Höhe/Breite ausfüllen, statt auf 145mm gedeckelt zu sein. */
+    #printArea .p-land .p-map.p-map-route{ max-height:165mm; aspect-ratio:1.64; margin-inline:auto }
   }
 
 /* ---------- Druck-Auswahl (welche Bereiche in den Bericht) ---------- */
