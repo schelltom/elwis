@@ -1,7 +1,7 @@
 /* LOTSE112 Service Worker – macht die App nach dem ersten Besuch offline nutzbar.
    Strategie: Precache der App-Dateien, danach stale-while-revalidate
    (aus dem Cache antworten, im Hintergrund aktualisieren). */
-const VERSION = "elwis-v163";
+const VERSION = "elwis-v164";
 const ASSETS = [
   "./",
   "./app.css",
@@ -16,10 +16,27 @@ const ASSETS = [
   "./vendor/leaflet.js",
   "./vendor/qrcode.js",
 ];
+// Schwergewichte (OCR, PDF-Import): ebenfalls vorab laden, damit sie im Einsatz ohne
+// Netz da sind. Getrennt vom App-Shell-Precache, damit ein Abbruch bei schwachem Netz
+// die Installation nicht verhindert – fehlende Dateien werden dann bei Nutzung nachgeholt.
+// Nur die SIMD-Variante von Tesseract (alle aktuellen Geräte); die Nicht-SIMD-Variante
+// wird bei Bedarf per stale-while-revalidate gecacht.
+const ASSETS_SCHWER = [
+  "./vendor/tesseract/tesseract.min.js",
+  "./vendor/tesseract/worker.min.js",
+  "./vendor/tesseract/deu.traineddata.gz",
+  "./vendor/tesseract/tesseract-core-simd-lstm.wasm.js",
+  "./vendor/tesseract/tesseract-core-simd-lstm.wasm",
+  "./vendor/pdfjs/pdf.min.js",
+  "./vendor/pdfjs/pdf.worker.min.js",
+];
 
 self.addEventListener("install", (e) => {
   e.waitUntil(
-    caches.open(VERSION).then((c) => c.addAll(ASSETS)).then(() => self.skipWaiting())
+    caches.open(VERSION)
+      .then((c) => c.addAll(ASSETS).then(() =>
+        Promise.all(ASSETS_SCHWER.map((u) => c.add(u).catch(() => {})))))
+      .then(() => self.skipWaiting())
   );
 });
 
