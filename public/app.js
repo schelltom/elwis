@@ -2575,7 +2575,7 @@ function unitCard(u){
         ${u.agt>0 ? `<span class="badge-agt">AGT ${u.agt}</span>` : ""}
         ${u.csa>0 ? `<span class="badge-agt">CSA ${u.csa}</span>` : ""}
         <span class="mono">${fmtZeit(u.ankunft)}</span>
-        ${u.abgerueckt ? "<span>abgerückt</span>" : ""}
+        ${u.abgerueckt ? `<span>abgerückt${u.abgerueckZeit ? " " + fmtZeit(u.abgerueckZeit) : ""}</span>` : ""}
         ${u.tatsaechlich === false ? `<span class="badge-schaetz">~ Schätzung</span>` : ""}
       </div>
     </div>
@@ -3189,6 +3189,7 @@ function wireSheet(){
   const left = $("#e-left");
   if(left) left.addEventListener("click", () => {
     u.abgerueckt = !u.abgerueckt;
+    if(u.abgerueckt) u.abgerueckZeit = new Date().toISOString(); else delete u.abgerueckZeit;
     left.setAttribute("aria-pressed", u.abgerueckt);
   });
   const tat = $("#e-tat");
@@ -5031,6 +5032,10 @@ function monAbPages(){
 function renderMonitor(){
   const e = state.einsatz;
   const act = aktive(), s = summen(act);
+  const gone = state.einheiten.filter(u => u.abgerueckt), sg = summen(gone);
+  const persAktiv = s.f+s.u+s.m+state.fuehrung.length;   // Führungskräfte haben keinen Abgerückt-Status
+  const persAbg = sg.f+sg.u+sg.m;
+  const persGes = persAktiv + persAbg;
   // Fortschritt: wie viele Einträge (alle Einheiten + Führungskräfte) sind tatsächlich abgefragt
   // (nicht mehr Schätzung)? Zählt Einträge, nicht Personenstärke – daher alle, inkl. abgerückt.
   const bestKraefte = state.einheiten.filter(u => u.tatsaechlich !== false).length + state.fuehrung.filter(f => f.tatsaechlich !== false).length;
@@ -5074,16 +5079,18 @@ function renderMonitor(){
 
   // Abschnitts-Kacheln: Stärke, Erreichbarkeit, Fahrzeuge ausgeschrieben & alphabetisch
   const abCard = (title, units, opts) => {
-    const su = summen(units);
+    const su = summen(units);   // inkl. abgerückter Einheiten (Gesamt für den Bericht)
+    const nGone = units.filter(u => u.abgerueckt).length;
     // Diesem Abschnitt zugeordnete Führungskräfte (z. B. Abschnittsleiter) zählen als Führer
     // in die Stärke mit rein (Zuordnung = f.einheit === Abschnittsname).
     const fks = state.fuehrung.filter(f => f.einheit === title);
     const sf = su.f + fks.length;
     const g = sf + su.u + su.m;
     // Kacheln wachsen nach unten – bei Großlagen stehen viele Fahrzeuge im Abschnitt
-    const sorted = [...units].sort((x,y) => fullName(x).localeCompare(fullName(y), "de"));
-    const rows = sorted.map(u => `
-      <tr>
+    const sorted = [...units].sort((x,y) => (x.abgerueckt?1:0)-(y.abgerueckt?1:0) || fullName(x).localeCompare(fullName(y), "de"));
+    const firstGone = nGone && nGone < units.length ? sorted.findIndex(u => u.abgerueckt) : -1;   // Trennlinie nur, wenn beide Gruppen da sind
+    const rows = sorted.map((u, i) => `${i === firstGone ? `<tr class="gone-sep"><td colspan="4">abgerückt</td></tr>` : ""}
+      <tr class="${u.abgerueckt ? "gone" : ""}"${u.abgerueckt ? ' title="abgerückt"' : ""}>
         <td><span class="chip chip-${esc(u.org)}">${esc((ORGS[u.org]||ORGS.SON).short)}</span></td>
         <td class="name mono">${esc(fullName(u).replace(/\bFlorian\b/gi, "Fl."))}</td>
         <td class="num mono">${staerkeStr(u)}</td>
@@ -5103,7 +5110,7 @@ function renderMonitor(){
         <div class="ab-staerke mono">${sf}/${su.u}/${su.m}=${g}</div>
       </div>
       <div class="ab-sub">
-        <span><strong class="mono">${units.length}</strong> Einheiten</span>
+        <span><strong class="mono">${units.length}</strong> Einheiten${nGone ? ` <span class="gone-note">(${nGone} abgerückt)</span>` : ""}</span>
         ${fks.length ? `<span>Führung <strong class="mono">${fks.length}</strong> (${fks.map(f => esc(f.name || f.funktion || "FK")).join(", ")})</span>` : ""}
         <span>AGT <strong class="mono">${su.agt}</strong></span>
         <span>CSA <strong class="mono">${su.csa}</strong></span>
@@ -5194,7 +5201,9 @@ function renderMonitor(){
         <div class="panel" style="grid-column:1/-1">
           <div class="panel-head"><h3>Kräfteübersicht</h3></div>
           <div class="kpis-compact">
-            <div class="kpic accent"><span class="k">Gesamtstärke</span><span class="v mono">${s.f+s.u+s.m+state.fuehrung.length}</span><span class="s mono">${s.f+state.fuehrung.length}/${s.u}/${s.m}</span></div>
+            <div class="kpic accent"><span class="k">Aktive Kräfte</span><span class="v mono">${persAktiv}</span><span class="s mono">${s.f+state.fuehrung.length}/${s.u}/${s.m}</span></div>
+            <div class="kpic"><span class="k">Gesamtkräfte</span><span class="v mono">${persGes}</span><span class="s mono">${s.f+sg.f+state.fuehrung.length}/${s.u+sg.u}/${s.m+sg.m}</span></div>
+            <div class="kpic ${persAbg ? "gone" : ""}"><span class="k">Bereits abgerückt</span><span class="v mono">${persAbg}</span><span class="s">${gone.length} Einheiten</span></div>
             ${gesKraefte ? (() => { const pct = Math.round(bestKraefte/gesKraefte*100);
               const ampel = pct <= 40 ? "ist-rot" : pct <= 70 ? "ist-gelb" : "ist-gruen";
               return `<div class="kpic ${bestKraefte < gesKraefte ? "warn" : ""} ${ampel}"><span class="k">Ist-Stärke bestätigt</span><span class="v mono">${bestKraefte}/${gesKraefte}</span><span class="kpi-bar"><i style="width:${pct}%"></i></span></div>`; })() : ""}
@@ -5204,7 +5213,6 @@ function renderMonitor(){
             <div class="kpi-break"></div>
             ${state.anforderungen.some(a => a.status !== "eingetroffen") ? `<div class="kpic warn"><span class="k">Anrollend</span><span class="v mono">${state.anforderungen.filter(a => a.status !== "eingetroffen").length}</span><span class="s">nachgefordert</span></div>` : ""}
             ${brUnits.length ? `<div class="kpic"><span class="k">Bereitstellung</span><span class="v mono">${brUnits.length}</span><span class="s">Einheiten</span></div>` : ""}
-            <div class="kpic"><span class="k">Abgerückt</span><span class="v mono">${state.einheiten.length - act.length}</span><span class="s">Einheiten</span></div>
           </div>
         </div>
         <div class="panel"><h3>Stärke nach Organisation</h3>${orgRows}</div>
@@ -5357,7 +5365,7 @@ function renderMonitor(){
 }
 /* Kachel-Daten des Monitors – ausgeblendete Abschnitte fliegen auch aus der Rotation */
 function monCardsData(){
-  const act = aktive();
+  const act = state.einheiten;   // abgerückte bleiben in ihrem Abschnitt (ausgegraut) – Einsatzbericht bleibt stimmig
   const hid = state.monHide.ab;
   const cards = [];
   const brUnits = act.filter(u => u.abschnitt === "BR");
@@ -5413,7 +5421,7 @@ function openMonHideSheet(){
       <span class="check-text" style="text-decoration:none;color:${hidden ? "var(--ink3)" : "var(--ink)"}">${esc(label)}</span>
       <span class="check-zeit">${hidden ? "ausgeblendet" : "sichtbar"}</span>
     </button>`;
-  const act = aktive();
+  const act = state.einheiten;
   const hatBR = act.some(u => u.abschnitt === "BR");
   const hatRest = state.abschnitte.length > 0 && act.some(u => u.abschnitt !== "BR" && u.abschnitt !== AB_EL_ID &&
     (!u.abschnitt || !state.abschnitte.some(a => a.id === u.abschnitt)));
@@ -6205,7 +6213,7 @@ function renderFunkskizze(src){
   const fgS = abschnitte.map(a => gruppeStr(a.fuehrung));
   const commonFg = (n > 1 && fgS.every(s => s && s === fgS[0])) ? abschnitte[0].fuehrung : null;
   const branchEls = abschnitte.map(a => {
-    const units = act.filter(u => u.abschnitt === a.id);
+    const units = (src.einheiten || []).filter(u => u.abschnitt === a.id);   // inkl. abgerückter (Druck = Gesamtbild)
     const via = a.arbeit && a.arbeit.via;
     return `
     <div class="fk-branch">
@@ -7643,7 +7651,7 @@ function reportBodyHtml(data, sel, opts){
       <td class="p-mono" style="text-align:right">${staerkeStr(u)}</td>
       <td class="p-mono" style="text-align:right">${u.agt||"–"}</td>
       <td class="p-mono" style="text-align:right">${u.csa||"–"}</td>
-      <td>${u.abgerueckt?"abgerückt":"vor Ort"}</td>
+      <td>${u.abgerueckt ? "abgerückt" + (u.abgerueckZeit ? " " + fmtZeit(u.abgerueckZeit) : "") : "vor Ort"}</td>
     </tr>`).join("");
   const fkRows = [...data.fuehrung].sort((a,b) => (a.name||"").localeCompare(b.name||"", "de")).map(f => `
     <tr>
