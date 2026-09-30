@@ -5067,7 +5067,7 @@ function renderMonitor(){
 
   const fsMonRows = fsThreads(state.funk).filter(t => !t.storno && !t.waise)
     .sort((a,b) => (b.effektiv.zeit||"").localeCompare(a.effektiv.zeit||""))
-    .slice(0, 6).map(t => { const f = t.effektiv; return `
+    .map(t => { const f = t.effektiv; return `
     <div class="fsm">
       <div class="fsm-top">
         ${f.wichtig ? `<span class="imp-dot" title="Wichtig"></span>` : ""}
@@ -5300,9 +5300,9 @@ function renderMonitor(){
           </div>`;
         }).join("");
         return `
-      <div class="mon-grid" style="grid-template-columns:1fr 1fr">
-        <div class="panel"><h3>Letzte ETB-Einträge</h3>${fsMonRows || `<p class="hint">Noch keine erfasst.</p>`}</div>
-        <div class="panel"><h3>Checklisten</h3>${checksListe || `<p class="hint">Noch keine Checkliste.</p>`}</div>
+      <div class="mon-grid mon-fill" style="grid-template-columns:1fr 1fr">
+        <div class="panel mon-scrollpanel"><h3>Einsatztagebuch</h3><div class="mon-scroll">${fsMonRows || `<p class="hint">Noch keine erfasst.</p>`}</div></div>
+        <div class="panel mon-scrollpanel"><h3>Checklisten</h3><div class="mon-scroll">${checksListe || `<p class="hint">Noch keine Checkliste.</p>`}</div></div>
       </div>`;
       })()
       : isAsPage ? (() => {

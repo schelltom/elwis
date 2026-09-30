@@ -670,6 +670,8 @@
      oben unangetastet bleibt. */
   body:not(.mon-fullscreen) .mon-grid.mon-fill{height:min(64vh,640px)}
   .lg-legend{overflow-y:auto}
+  .mon-scrollpanel{display:flex;flex-direction:column;min-height:0;overflow:hidden}
+  .mon-scroll{flex:1;min-height:0;overflow-y:auto;padding-right:6px}
   body.mon-fullscreen main{max-width:none;margin:0;padding:10px}
   body.mon-fullscreen .monitor{border-radius:0;min-height:calc(100vh - 20px);padding:16px}
   /* Rotations-Steuerung oben, rechtsbündig auf gleicher Kante wie die Kopf-Buttons */
