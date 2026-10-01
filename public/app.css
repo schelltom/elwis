@@ -250,7 +250,7 @@
   .sync-pill{
     display:inline-flex;align-items:center;gap:7px;
     border-radius:999px;padding:7px 12px;font-size:.8rem;font-weight:650;
-    background:var(--warn-bg);color:var(--warn);white-space:nowrap}
+    background:var(--warn-bg);color:var(--warn);white-space:nowrap;cursor:pointer}
   .sync-pill.good{background:var(--good-bg);color:var(--good)}
   .sync-pill .dot{width:8px;height:8px;border-radius:50%;background:currentColor;flex:none}
   .sync-pill.busy .dot{animation:pulse 1s ease-in-out infinite}

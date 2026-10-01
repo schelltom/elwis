@@ -8492,6 +8492,7 @@ async function syncTick(){
   try{
     const { out, pending, snap: vorher } = syncDiff();   // vorher = aktueller Stand VOR dem Merge
     SYNC.pending = pending;
+    const vorherEinsatz = state.einsatzId, hatteDaten = einsatzHatDaten();
     const res = await fetch("./api/sync", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify(out),
@@ -8508,6 +8509,8 @@ async function syncTick(){
     if(!d.unchanged){
       syncApply(d);   // übernimmt Merge + stellt SYNC.seq erst NACH Erfolg weiter
       SYNC.pending = 0;
+      if(hatteDaten && vorherEinsatz && state.einsatzId !== vorherEinsatz)
+        modalInfo(`Dieses Gerät wurde auf den Einsatz des ELW-Servers umgestellt (gestartet ${syncUhrzeit(state.einsatzStart)}). Die lokalen Daten des bisherigen Einsatzes wurden ersetzt.`);
       // Merge hat etwas verändert und niemand tippt → sanft neu zeichnen: render(true)
       // baut das DOM nur um, wenn sich der Inhalt der aktiven Ansicht wirklich ändert.
       if(!snapGleich(syncSnapLoad(), vorher) && !syncTipptGerade()) render(true);
@@ -8525,6 +8528,22 @@ async function syncTick(){
     SYNC.busy = false;
   }
 }
+function syncUhrzeit(iso, mitDatum){
+  const t = new Date(iso);
+  if(!iso || isNaN(t)) return "?";
+  const opt = mitDatum ? { day:"2-digit", month:"2-digit", hour:"2-digit", minute:"2-digit" } : { hour:"2-digit", minute:"2-digit" };
+  return t.toLocaleString("de-DE", opt) + (mitDatum ? "" : " Uhr");
+}
+/* Antippen der Sync-Anzeige = jetzt abgleichen (bzw. Server-Suche sofort neu versuchen). */
+document.addEventListener("click", async e => {
+  const pill = e.target.closest && e.target.closest("#syncPill");
+  if(!pill) return;
+  if(!SYNC.aktiv){ clearTimeout(syncInitTimer); syncInitTimer = null; syncInit(); return; }
+  pill.classList.add("busy");
+  await syncTick();
+  renderHeader();
+  if(SYNC.verbunden && !syncTipptGerade()) render(true);
+});
 function syncPill(){
   if(!SYNC.aktiv) return;
   const pill = $("#syncPill"), txt = $("#syncText");
@@ -8532,10 +8551,12 @@ function syncPill(){
   pill.classList.remove("busy");
   if(SYNC.verbunden){
     pill.classList.add("good");
-    txt.textContent = `Synchron · ${SYNC.clients} Gerät${SYNC.clients === 1 ? "" : "e"}`;
+    txt.textContent = `Synchron · ${SYNC.clients} Gerät${SYNC.clients === 1 ? "" : "e"} · Einsatz ${syncUhrzeit(state.einsatzStart).replace(" Uhr", "")}`;
+    pill.title = `Verbunden mit dem ELW-Server · Einsatz seit ${syncUhrzeit(state.einsatzStart, true)} · Kennung ${String(state.einsatzId || "").slice(-5)}`;
   }else{
     pill.classList.remove("good");
     txt.textContent = `Offline · ${SYNC.pending} lokal`;
+    pill.title = `Keine Verbindung zum ELW-Server – es wird weiter versucht. Einsatz seit ${syncUhrzeit(state.einsatzStart, true)}.`;
   }
   const fn = $("#footNote");
   if(fn && SYNC.urls.length){
@@ -8647,11 +8668,20 @@ function frageEinsatzKonflikt(){
   });
 }
 
+let syncInitTimer = null;
 async function syncInit(){
+  syncInitTimer = null;
+  let d;
   try{
     const res = await fetch("./api/info", { cache: "no-store" });
-    if(!res.ok) return;
-    const d = await res.json();
+    if(!res.ok) return;   // kein ELW-Server (z. B. Pages-Hosting) → eigenständig
+    d = await res.json();
+  }catch(e){
+    // Netz/Server gerade nicht erreichbar → nicht still aufgeben, sondern weiter versuchen
+    if(!syncInitTimer) syncInitTimer = setTimeout(syncInit, 8000);
+    return;
+  }
+  try{
     if(!d || !d.elwis) return;
     SYNC.aktiv = true;
     SYNC.urls = d.urls || [];
@@ -8676,6 +8706,10 @@ async function syncInit(){
     }
     syncTick();
     setInterval(syncTick, 3000);
+    // Sofort abgleichen, wenn das Gerät wieder aktiv wird (Hintergrund-Tabs/Tablets im Ruhemodus
+    // pausieren den 3-s-Takt) bzw. das Netz zurückkommt.
+    document.addEventListener("visibilitychange", () => { if(!document.hidden) syncTick(); });
+    window.addEventListener("online", () => syncTick());
     render();
   }catch(e){ /* kein ELW-Server erreichbar → App läuft eigenständig weiter */ }
 }
