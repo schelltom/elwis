@@ -27,7 +27,7 @@ Keine externen Abhängigkeiten – nur Node (≥ 18) auf dem NAS.
 
 1. Merge in den RAM-Stand (`mergeStand`), `seq` erhöht.
 2. **Journal**: der rohe Client-Body wird als Zeile `{ s: seq, m: jetzt, b: body }` angehängt (alle 2 s `fsync`).
-3. **Snapshot**: entprellt (~500 ms) `elwis-daten.json` neu schreiben (`.prev`-Rotation, `fsync`), dann das Journal auf Einträge `> seq` kürzen.
+3. **Snapshot**: entprellt (~500 ms, aber spätestens nach 5 s – `ELWIS_SPEICHER_MAXWARTE_MS` – auch bei Dauer-Syncs) `elwis-daten.json` neu schreiben (`.prev`-Rotation, `fsync`), dann das Journal auf Einträge `> seq` kürzen.
 4. **Start**: `elwis-daten.json` → `.prev` → neueste Backups (je auf Plausibilität geprüft), dann Journal-Einträge mit `s > snapshot.seq` nachspielen (`mergeStand` mit der ursprünglichen Uhrzeit `m` → deterministisch), sofort ein frischer Checkpoint.
 5. Persistenz-Probleme (kein Platz, Schreibfehler) landen als `serverWarnung` in jeder Antwort → Client-Banner „Einsatz jetzt exportieren"; Details unter `GET /api/health`.
 

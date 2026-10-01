@@ -202,9 +202,17 @@ function snapshotSchreiben(json){
 }
 
 let speicherTimer = null;
+// Entprellen (500 ms), aber mit Obergrenze: Ohne sie schiebt jeder weitere Sync den Snapshot
+// erneut nach hinten – bei mehreren Geräten im Dauertakt wurde nie geschrieben.
+const SPEICHER_MAXWARTE_MS = Number(process.env.ELWIS_SPEICHER_MAXWARTE_MS) || 5000;
+let ersteOffeneAenderung = 0;
 function speichern(){
   clearTimeout(speicherTimer);
+  const jetzt = Date.now();
+  if(!ersteOffeneAenderung) ersteOffeneAenderung = jetzt;
+  const verzoegerung = Math.max(0, Math.min(500, SPEICHER_MAXWARTE_MS - (jetzt - ersteOffeneAenderung)));
   speicherTimer = setTimeout(() => {
+    ersteOffeneAenderung = 0;
     const seqJetzt = stand.seq;
     let json;
     try{ json = JSON.stringify(stand); }
@@ -219,7 +227,7 @@ function speichern(){
       saveFehler = e.message;
       console.error("Speichern fehlgeschlagen:", e.message, "– Journal übernimmt die Wiederherstellung.");
     }
-  }, 500);
+  }, verzoegerung);
 }
 function beendenUndSichern(){
   try{
