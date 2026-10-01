@@ -8493,11 +8493,14 @@ async function syncTick(){
     const { out, pending, snap: vorher } = syncDiff();   // vorher = aktueller Stand VOR dem Merge
     SYNC.pending = pending;
     const vorherEinsatz = state.einsatzId, hatteDaten = einsatzHatDaten();
+    const t0 = Date.now();
     const res = await fetch("./api/sync", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify(out),
     });
+    const t1 = Date.now();
     if(!res.ok) throw new Error("HTTP " + res.status);
+    pruefeUhr(res, t0, t1);
     const d = await res.json();
     syncErsetzen = false;   // Push kam an → Ersetzen-Wunsch ist erledigt
     const warOffline = !SYNC.verbunden;
@@ -8527,6 +8530,20 @@ async function syncTick(){
   }finally{
     SYNC.busy = false;
   }
+}
+/* Geräteuhr gegen die Serveruhr prüfen (HTTP-Date-Header, auf 1 s genau – reicht für Minuten-Abweichung).
+   Nur Hinweis, keine automatische Korrektur: Zeiten im Einsatz kommen von der Geräteuhr. */
+const UHR_WARN_MS = 2 * 60 * 1000;
+function pruefeUhr(res, t0, t1){
+  const hdr = res.headers.get("Date");
+  const srv = hdr ? Date.parse(hdr) : NaN;
+  if(isNaN(srv)){ zeigeServerWarnung(null, "uhrWarnBar"); return; }
+  const abw = srv - (t0 + t1) / 2;   // >0: Gerät geht nach, <0: Gerät geht vor
+  if(Math.abs(abw) < UHR_WARN_MS){ zeigeServerWarnung(null, "uhrWarnBar"); return; }
+  const min = Math.round(Math.abs(abw) / 60000);
+  const txt = min >= 90 ? `${Math.round(min / 6) / 10} Std.` : `${min} Min.`;
+  zeigeServerWarnung(`Die Uhr dieses Geräts ${abw > 0 ? "geht nach" : "geht vor"} (ca. ${txt} Abweichung zum ELW-Server). `
+    + "Bitte Datum/Uhrzeit in den Systemeinstellungen korrigieren – sonst stimmen Zeiten im Einsatz nicht und Änderungen können sich falsch überschreiben.", "uhrWarnBar");
 }
 function syncUhrzeit(iso, mitDatum){
   const t = new Date(iso);
@@ -8606,12 +8623,12 @@ function zeigeUpdateHinweis(update){
 /* Live-Warnung vom ELW-Server (Persistenz-Problem: kein Platz, Speicherfehler …).
    Kommt als `serverWarnung` in jeder /api/info- und /api/sync-Antwort; verschwindet
    von selbst, sobald der Server wieder ok meldet. */
-function zeigeServerWarnung(text){
-  let bar = document.getElementById("srvWarnBar");
+function zeigeServerWarnung(text, barId = "srvWarnBar"){
+  let bar = document.getElementById(barId);
   if(!text){ if(bar) bar.remove(); return; }
   if(!bar){
     bar = document.createElement("div");
-    bar.id = "srvWarnBar";
+    bar.id = barId;
     bar.className = "update-bar srv-warn";
     bar.setAttribute("role", "alert");
     const header = document.querySelector("#app header.topbar");

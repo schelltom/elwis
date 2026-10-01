@@ -62,6 +62,7 @@ Keine externen Abhängigkeiten – nur Node (≥ 18) auf dem NAS.
   schreibt einen neuen Snapshot und rendert neu – **außer** es tippt gerade jemand
   in ein Feld (3-Sekunden-Schonfrist, `syncTipptGerade()`), dann nur der Kopf.
 - Größere `/api/sync`-Antworten werden gzip-komprimiert.
+- **Uhr-Hinweis:** Der Client vergleicht seine Uhr mit dem HTTP-`Date`-Header der Sync-Antwort und zeigt ab 2 min Abweichung eine Warnleiste (`pruefeUhr()`). Bewusst nur ein Hinweis, keine automatische Korrektur – Zeiten im Einsatz kommen von der Geräteuhr; LWW-Vergleiche (`_m`) nutzen ebenfalls die Geräteuhr.
 
 ### API-Endpunkte des Servers
 
