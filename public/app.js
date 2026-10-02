@@ -2246,6 +2246,24 @@ function importEinsatz(file){
   };
   rd.readAsText(file);
 }
+// Foto bildschirmfüllend zeigen (schwarzer Hintergrund); Tippen, ✕ oder Esc schließt.
+function fotoVollbild(src){
+  if(!src) return;
+  const ov = document.createElement("div");
+  ov.className = "foto-vollbild";
+  ov.innerHTML = `<img src="${esc(src)}" alt="Einsatzfoto Vollbild"><button type="button" class="foto-vollbild-x" aria-label="Schließen">✕</button>`;
+  const zu = () => {
+    document.removeEventListener("keydown", taste, true);
+    if(document.fullscreenElement === ov){ try{ document.exitFullscreen(); }catch(_){} }
+    ov.remove();
+  };
+  const taste = e => { if(e.key === "Escape"){ e.stopPropagation(); zu(); } };
+  document.addEventListener("keydown", taste, true);
+  ov.addEventListener("click", zu);
+  document.body.appendChild(ov);
+  if(ov.requestFullscreen){ ov.requestFullscreen().catch(() => {}); }
+  ov.addEventListener("fullscreenchange", () => { if(!document.fullscreenElement && ov.isConnected) zu(); });
+}
 function openFotoSheet(id){
   const f = state.fotos.find(x => x.id === id);
   if(!f) return;
@@ -2257,7 +2275,8 @@ function openFotoSheet(id){
       <button class="sheet-close" data-close="1" aria-label="Schließen">×</button>
     </div>
     <div class="sheet-body">
-      <img data-foto="${esc(f.id)}" alt="Einsatzfoto" style="width:100%;border-radius:12px;margin-bottom:14px">
+      <img data-foto="${esc(f.id)}" id="foto-gross" alt="Einsatzfoto" title="Antippen für Vollbild" style="width:100%;border-radius:12px;margin-bottom:6px;cursor:zoom-in">
+      <p class="hint" style="margin:0 0 14px">Foto antippen für Vollbild.</p>
       <div class="field"><label for="foto-notiz">Kommentar</label>
         <div class="dictate-wrap">
           <textarea id="foto-notiz" rows="3" placeholder="z. B. Giebelwand Ostseite, Riss sichtbar">${esc(f.notiz||"")}</textarea>
@@ -2272,6 +2291,7 @@ function openFotoSheet(id){
   </div>`;
   document.querySelectorAll("[data-close]").forEach(el => el.addEventListener("click", closeEditor));
   fotosEinblenden($("#sheetHost"));
+  $("#foto-gross").addEventListener("click", e => fotoVollbild(e.currentTarget.src));
   attachDictation($("#foto-mic"), $("#foto-notiz"));
   $("#foto-del").addEventListener("click", () => {
     modalConfirm("Dieses Foto wirklich löschen?").then(ok => { if(!ok) return;
