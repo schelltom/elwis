@@ -2700,14 +2700,25 @@ async function pdfSeiten(file){
 function ocrKandidaten(text){
   // Fahrzeugzeilen „… <Funkruf> <Ort> <Funkkennung>": FL = Florian (Löschfahrzeug), Kater = ELW
   // → Feuerwehr; Heros = THW. Danach Ort, danach Kennung. Andere Zeilen werden ignoriert.
-  const RE = /\b(F[LI1]|Kater|Heros)\b\s+([A-Za-zÄÖÜäöüß.\-]+(?:\s+[A-Za-zÄÖÜäöüß.\-]+){0,2})\s+(\d{1,2}\/\d{1,2}(?:\/\d{1,3})?)/i;
+  // Funkrufwörter: feste (FL, Kater, Heros) + die Präfixe aus den Einstellungen (Organisation → Präfix).
+  const pf = state.config.prefixes || {};
+  const extra = Object.values(pf).map(x => (x || "").trim()).filter(Boolean).map(x => x.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  const RE = new RegExp("\\b(F[LI1]|Kater|Heros" + (extra.length ? "|" + extra.join("|") : "") + ")\\b\\s+([A-Za-zÄÖÜäöüß.\\-]+(?:\\s+[A-Za-zÄÖÜäöüß.\\-]+){0,2})\\s+(\\d{1,2}(?:\\/\\d{1,2}(?:\\/\\d{1,3})?)?)(?!\\d)", "i");
   const out = [];
   (text || "").split(/\r?\n/).forEach(line => {
     const l = line.replace(/\s+/g, " ").trim();
+    const th = l.match(/\bTHW\s+([A-Za-zÄÖÜäöüß.]+(?:\s+[A-Za-zÄÖÜäöüß.]+){0,2}?)\s*[-–—]\s*Fachberater/i);
+    if(th){   // „THW Weiden - Fachberater“ → THW-Führungskraft „THW Fachberater“ (Funkrufname/Nummer, z. B. Heros Weiden 1 / 3/2, steht nicht im Alarm)
+      const ort = th[1].trim();
+      out.push({ raw: l, ort, kennung: "", name: "THW Fachberater", org: "THW", fuehrung: true });
+      return;
+    }
     const m = l.match(RE);
     if(!m) return;
-    const funk = /^kater/i.test(m[1]) ? "Kater" : /^heros/i.test(m[1]) ? "Heros" : "Florian";
-    const org = funk === "Heros" ? "THW" : "FW";
+    const w = m[1];
+    const orgKey = Object.keys(pf).find(k => (pf[k] || "").trim().toLowerCase() === w.toLowerCase());
+    const funk = /^kater/i.test(w) ? "Kater" : /^heros/i.test(w) ? "Heros" : /^f[li1]$/i.test(w) ? "Florian" : w;
+    const org = funk === "Heros" ? "THW" : (orgKey && orgKey !== "SON" ? orgKey : "FW");
     const ort = m[2].trim();
     out.push({ raw: l, ort, kennung: m[3], name: `${funk} ${ort}`.trim(), org });
   });
@@ -2785,12 +2796,15 @@ function ocrStichwort(text){
   return val.replace(/\|/g, "").replace(/^[#>\s]+/, "").replace(/\s+/g, " ").trim();
 }
 // Default-Besatzung (Schätzung) aus der Funkkennung. Typ-Zahl = zweitletzte Ziffernstelle
-// (z. B. 1/40/2 → 40, 46/1 → 46). < 10 ⇒ Führungskraft. Personenzahl je Typ-Bereich kommt aus
+// (z. B. 1/40/2 → 40, 46/1 → 46, 1/23 → 23); einzelne Zahl = Typ (Weiden 1). < 10 ⇒ Führungskraft. Personenzahl je Typ-Bereich kommt aus
 // der (in den Einstellungen editierbaren) besatzungMatrix; kein Treffer ⇒ 3 (Trupp).
 function defaultBesatzung(kennung){
   const teile = String(kennung || "").split("/").map(x => parseInt(x, 10)).filter(n => !isNaN(n));
-  if(teile.length < 2) return null;
-  const typ = teile[teile.length - 2];
+  if(!teile.length) return null;
+  let typ;
+  if(teile.length === 1) typ = teile[0];                        // „Florian Weiden 1“, „Heros Weiden 3“ → Führungskraft
+  else if(teile.length === 2 && teile[0] < 10 && teile[1] >= 10) typ = teile[1];   // Standort/Typ, z. B. 1/23
+  else typ = teile[teile.length - 2];
   if(!(typ >= 0)) return null;
   if(typ < 10) return { fuehrung: true };
   const matrix = (state && state.config && state.config.besatzungMatrix) || BESATZUNG_MATRIX_DEFAULT;
@@ -2816,8 +2830,9 @@ function ocrMergeKopf(text){ ocrMergeDatum(text); ocrMergeStichwort(text); ocrMe
 function ocrMerge(kandidaten){
   const norm = s => (s || "").replace(/\s/g, "").toLowerCase();
   for(const c of kandidaten){
-    const key = c.kennung ? "k:" + norm(c.kennung) : "r:" + norm(c.raw);
-    if(ocrList.some(x => (x.kennung ? "k:" + norm(x.kennung) : "r:" + norm(x.raw)) === key)) continue;
+    // Schlüssel = Funkrufname + Kennung: „Weiden 1“ und „Neustadt Land 1“ bzw. „Mantel 11/1“ und „Neunkirchen 11/1“ sind verschiedene Einheiten.
+    const schl = x => x.kennung ? "k:" + norm(x.name) + "|" + norm(x.kennung) : "r:" + norm(x.raw);
+    if(ocrList.some(x => schl(x) === schl(c))) continue;
     c.kat = ocrKatalogTreffer(c.kennung);
     ocrList.push(c);
   }
@@ -2880,18 +2895,23 @@ function ocrNixErkannt(){
   if(ocrList.length || ocrAddr || ocrDateVal || ocrStw) return "";
   return "Nichts erkannt (weder Alarmzeit, Stichwort, Einsatzort noch Fahrzeug). Bitte ein neues, schärferes Foto aufnehmen oder „Datei / PDF wählen“ – du kannst mehrere Fotos nacheinander einlesen.";
 }
+function ocrIstFk(c){ const b = defaultBesatzung(c.kennung); return !!(c.fuehrung || (b && b.fuehrung)); }
 function renderOcrSheet(){
-  const rows = ocrList.map((c, i) => {
-    const kat = c.kat;
+  const zeile = (c) => {
+    const kat = c.kat, fk = ocrIstFk(c);
     const label = kat ? katalogLabel(kat) : `${c.name || "Florian"}${c.kennung ? " " + c.kennung : ""}`;
     const schonDa = kat && state.einheiten.some(u => (u.kennung||"").replace(/\s/g,"") === (kat.kennung||"").replace(/\s/g,"") && !u.abgerueckt);
-    const tag = kat ? (schonDa ? `<span class="ocr-tag da">bereits erfasst</span>` : `<span class="ocr-tag ok">im Katalog</span>`)
+    const tag = fk ? `<span class="ocr-tag neu">Führungskraft</span>`
+              : kat ? (schonDa ? `<span class="ocr-tag da">bereits erfasst</span>` : `<span class="ocr-tag ok">im Katalog</span>`)
                     : `<span class="ocr-tag neu">neu</span>`;
     return `<div class="kat-row">
       <span>${esc(label)} ${tag}</span>
-      <button class="kat-x" data-ocrdel="${i}" aria-label="Entfernen">✕</button>
     </div>`;
-  }).join("");
+  };
+  const fzRows = ocrList.map((c, i) => ocrIstFk(c) ? "" : zeile(c)).join("");
+  const fkRows = ocrList.map((c, i) => ocrIstFk(c) ? zeile(c) : "").join("");
+  const nFk = ocrList.filter(ocrIstFk).length, nFz = ocrList.length - nFk;
+  const rows = fzRows;
   $("#sheetHost").innerHTML = `
   <div class="sheet-backdrop" data-close="1"></div>
   <div class="sheet" role="dialog" aria-modal="true" aria-label="Aus Alarm-Foto einlesen">
@@ -2906,7 +2926,7 @@ function renderOcrSheet(){
         </div>
         <input id="ocr-cam" type="file" accept="image/*" capture="environment" style="display:none">
         <input id="ocr-file" type="file" accept="image/*,application/pdf" multiple style="display:none">
-        <p class="hint">Läuft offline auf dem Gerät. <strong>Mehrere Fotos nacheinander</strong> möglich (z. B. Startseite + Fahrzeugliste); Erkanntes wird zusammengeführt, Doppelte fallen weg. Alarmzeit, Stichwort, Einsatzort und Fahrzeuge lassen sich per ✕ verwerfen; vor der Übernahme kommt eine Übersicht. <span id="ocr-progress"></span></p>
+        <p class="hint">Läuft offline auf dem Gerät. <strong>Mehrere Fotos nacheinander</strong> möglich (z. B. Startseite + Fahrzeugliste); Erkanntes wird zusammengeführt, Doppelte fallen weg. Alarmzeit, Stichwort und Einsatzort lassen sich per ✕ verwerfen; in der Übersicht vor der Übernahme kannst du einzelne Fahrzeuge und Führungskräfte per ✕ herausnehmen. <span id="ocr-progress"></span></p>
       </div>
       <div class="field"><label for="ocr-date">Alarmzeit (erkannt – bitte prüfen)</label>
         <div class="ocr-kopf">
@@ -2923,18 +2943,18 @@ function renderOcrSheet(){
           <input id="ocr-addr" value="${esc(ocrAddr)}" placeholder="Straße Nr., PLZ Ort (wird in Straße / PLZ / Ort aufgeteilt)">
           <button type="button" class="kat-x" data-ocr-clear="addr" aria-label="Einsatzort verwerfen"${ocrAddr ? "" : " disabled"}>✕</button>
         </div></div>
-      <div class="field"><label style="margin-bottom:8px">Erkannte Fahrzeuge (${ocrList.length})</label>
-        <div class="kat-list" id="ocr-list">${rows || `<p class="hint" style="margin:6px 4px">Noch nichts eingelesen – Bild wählen.</p>`}</div>
+      <div class="field"><label style="margin-bottom:8px">Erkannte Fahrzeuge (${nFz})</label>
+        <div class="kat-list" id="ocr-list">${rows || `<p class="hint" style="margin:6px 4px">${ocrList.length ? "Keine Fahrzeuge erkannt." : "Noch nichts eingelesen – Bild wählen."}</p>`}</div>
       </div>
+      ${nFk ? `<div class="field"><label style="margin-bottom:8px">Erkannte Führungskräfte (${nFk})</label>
+        <div class="kat-list" id="ocr-list-fk">${fkRows}</div>
+      </div>` : ""}
     </div>
     <div class="sheet-foot">
       <button class="btn btn-primary" id="ocr-add" style="flex:1"${(ocrList.length || ocrDateVal || (ocrStw||"").trim() || (ocrAddr||"").trim()) ? "" : " disabled"}>Übernehmen …</button>
     </div>
   </div>`;
   document.querySelectorAll("[data-close]").forEach(el => el.addEventListener("click", closeEditor));
-  document.querySelectorAll("[data-ocrdel]").forEach(b => b.addEventListener("click", () => {
-    ocrList.splice(Number(b.dataset.ocrdel), 1); renderOcrSheet();
-  }));
   const setAddBtn = () => { const add = $("#ocr-add"); if(add) add.disabled =
     !(ocrList.length || ($("#ocr-date") && $("#ocr-date").value) || ($("#ocr-stw") && $("#ocr-stw").value.trim()) || ($("#ocr-addr") && $("#ocr-addr").value.trim())); };
   const dInp = $("#ocr-date"); if(dInp) dInp.addEventListener("input", () => { ocrDateVal = dInp.value; ocrDateTouched = true; setAddBtn(); });
@@ -2988,11 +3008,11 @@ function ocrUebernehmen(){
   const stw   = ($("#ocr-stw")  ? $("#ocr-stw").value  : ocrStw).trim();
   const ort   = ($("#ocr-addr") ? $("#ocr-addr").value : ocrAddr).trim();
   const norm = s => (s || "").replace(/\s/g, "").toLowerCase();
-  const vorhanden = new Set(state.einheiten.filter(u => !u.abgerueckt).map(u => norm(u.kennung)).filter(Boolean));
+  const vorhanden = new Set(state.einheiten.filter(u => !u.abgerueckt).filter(u => u.kennung).map(u => norm(u.name) + "|" + norm(u.kennung)));
   const neueEinheiten = [], neueFk = [], fahrzeugeDisp = [], fkDisp = [], dubletten = [];
   for(const c of ocrList){
     const k = c.kat, bes = defaultBesatzung(c.kennung);
-    if(bes && bes.fuehrung){
+    if(c.fuehrung || (bes && bes.fuehrung)){
       // Kennung < 10 → Führungskraft (Schätzung); Funkrufname bis zur Klärung im Namensfeld.
       const funkruf = [c.name, c.kennung].filter(Boolean).join(" ");
       neueFk.push({ id:uid(), org: c.org || "FW", name:funkruf, funktion:"", funkrufname:funkruf, einheit:AB_EL.name, tatsaechlich:false });
@@ -3002,8 +3022,9 @@ function ocrUebernehmen(){
       const name = k ? k.name : (c.name || "Florian");
       const kennung = k ? k.kennung : (c.kennung || "");
       const label = [name, kennung].filter(Boolean).join(" ");
-      if(kennung && vorhanden.has(norm(kennung))){ dubletten.push({ org, label }); continue; }   // schon erfasst → überspringen
-      if(kennung) vorhanden.add(norm(kennung));
+      const dk = norm(name) + "|" + norm(kennung);   // gleiche Kennung bei anderem Ort (Mantel 11/1 / Neunkirchen 11/1) ist eine andere Einheit
+      if(kennung && vorhanden.has(dk)){ dubletten.push({ org, label }); continue; }   // schon erfasst → überspringen
+      if(kennung) vorhanden.add(dk);
       // Besatzung immer aus der Kennungs-Matrix (Vorgabe je Fahrzeugtyp) schätzen – nicht aus dem,
       // was beim letzten Einsatz zufällig im Katalog gelandet ist (kann schwanken, z. B. Gruppe
       // statt voller Stärke). Nur wenn die Kennung nicht auswertbar ist, zählt der Katalog-Wert.
@@ -3014,8 +3035,18 @@ function ocrUebernehmen(){
       fahrzeugeDisp.push({ org, label });
     }
   }
-  const body = ocrUebersichtHtml({ datum, stw, ort, fahrzeugeDisp, fkDisp, dubletten });
-  modal({ titel: "Diese Daten übernehmen?", html: body, ok: "Übernehmen", abbrechen: "Abbrechen" }).then(ok => {
+  const body = () => ocrUebersichtHtml({ datum, stw, ort, fahrzeugeDisp, fkDisp, dubletten });
+  const p = modal({ titel: "Diese Daten übernehmen?", html: `<div class="ok-wrap">${body()}</div>`, ok: "Übernehmen", abbrechen: "Abbrechen" });
+  // ✕ hinter einem Eintrag: aus der Übernahme herausnehmen (Anzeige und Daten parallel).
+  const wrap = document.querySelector("#modalHost .ok-wrap");
+  if(wrap) wrap.addEventListener("click", e => {
+    const b = e.target.closest("[data-ok-del]"); if(!b) return;
+    const [art, i] = b.dataset.okDel.split(":"), n = +i;
+    if(art === "fz"){ fahrzeugeDisp.splice(n, 1); neueEinheiten.splice(n, 1); }
+    else            { fkDisp.splice(n, 1);        neueFk.splice(n, 1); }
+    wrap.innerHTML = body();
+  });
+  p.then(ok => {
     if(!ok) return;
     if(datum) state.einsatz.beginn = datum;
     if(stw)   state.einsatz.stichwort = stw;
@@ -3033,7 +3064,8 @@ function ocrUebersichtHtml({ datum, stw, ort, fahrzeugeDisp, fkDisp, dubletten }
       <span class="ok-ico">${ico}</span>
       <div class="ok-body"><div class="ok-tt">${titel}</div>${inhalt}</div>
     </div>`;
-  const liste = arr => `<ul class="ok-ul">${arr.map(x => `<li>${chip(x.org)} <span>${esc(x.label)}</span></li>`).join("")}</ul>`;
+  const liste = (arr, art) => `<ul class="ok-ul">${arr.map((x, i) => `<li>${chip(x.org)} <span>${esc(x.label)}</span>${
+    art ? `<button type="button" class="ok-del" data-ok-del="${art}:${i}" aria-label="${esc(x.label)} entfernen">✕</button>` : ""}</li>`).join("")}</ul>`;
   const teile = [];
   if(datum){ const dt = new Date(datum);
     const disp = isNaN(dt) ? datum : dt.toLocaleString("de-DE", { day:"2-digit", month:"2-digit", year:"numeric", hour:"2-digit", minute:"2-digit" }) + " Uhr";
@@ -3041,8 +3073,8 @@ function ocrUebersichtHtml({ datum, stw, ort, fahrzeugeDisp, fkDisp, dubletten }
   if(stw) teile.push(sektion("🔺", "Einsatzstichwort", `<div class="ok-addr">${esc(stw)}</div>`));
   if(ort){ const a = adresseSplit(ort);   // so wird es in die Stammdatenfelder übernommen
     teile.push(sektion("📍", "Einsatzort", `<div class="ok-addr">${esc(a.strasse || "–")}</div><div class="ok-addr">${esc([a.plz, a.ort].filter(Boolean).join(" ") || "–")}</div>`, "ok-ort")); }
-  if(fahrzeugeDisp.length) teile.push(sektion("🚒", `${fahrzeugeDisp.length} Fahrzeug${fahrzeugeDisp.length===1?"":"e"}`, liste(fahrzeugeDisp), "ok-fz"));
-  if(fkDisp.length) teile.push(sektion("👤", `${fkDisp.length} Führungskraft${fkDisp.length===1?"":"/-kräfte"}`, liste(fkDisp), "ok-fk"));
+  if(fahrzeugeDisp.length) teile.push(sektion("🚒", `${fahrzeugeDisp.length} Fahrzeug${fahrzeugeDisp.length===1?"":"e"}`, liste(fahrzeugeDisp, "fz"), "ok-fz"));
+  if(fkDisp.length) teile.push(sektion("👤", `${fkDisp.length} Führungskraft${fkDisp.length===1?"":"/-kräfte"}`, liste(fkDisp, "fk"), "ok-fk"));
   if(dubletten.length) teile.push(sektion("↩︎", `${dubletten.length} bereits erfasst – wird übersprungen`, liste(dubletten), "ok-dup"));
   if(!teile.length) return `<p>Nichts ausgewählt.</p>`;
   return `<div class="ok-list">${teile.join("")}</div>
