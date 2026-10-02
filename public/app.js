@@ -370,7 +370,7 @@ function defaultState(){
   return {
     einsatzId: uid(),                      // Identität für den Sync (welcher Einsatz?)
     einsatzStart: new Date().toISOString(),
-    einsatz: { stichwort:"", ort:"", objekt:"", beginn:"", ende:"", leiter:"", bereitstellungsraum:"", bereitstellung:false, bemerkung:"", ilsGruppe:{mode:"TMO",gruppe:"2772"} },
+    einsatz: { stichwort:"", strasse:"", plz:"", ort:"", objekt:"", beginn:"", ende:"", leiter:"", bereitstellungsraum:"", bereitstellung:false, bemerkung:"", ilsGruppe:{mode:"TMO",gruppe:"2772"} },
     einheiten: [], fuehrung: [], abschnitte: [], archiv: [],
     lage: { items: [], bg: "", snapshots: [], mode: "raster", mapView: null, mapLayer: "luftbild" },
     funk: [], besprechungen: [], anforderungen: [], checks: [], fotos: [],
@@ -424,6 +424,8 @@ function zustandAufbauen(stored){
     if(a.arbeit.via == null) a.arbeit.via = "";   // "", "gateway" oder "repeater"
   });
   // Leitstellen-Rufgruppe (Einsatz + Config) von Freitext „TMO 2772“ auf {mode,gruppe} migrieren
+  // Einsatzadresse: neue Felder Straße/PLZ; Altbestand ("Straße, PLZ Ort" in einem Feld) wenn erkennbar zerlegen
+  einsatzAdresseMigrieren();
   state.einsatz.ilsGruppe = parseGruppe(state.einsatz.ilsGruppe);
   state.config.ilsGruppe  = parseGruppe(state.config.ilsGruppe);
   if(!state.asSub) state.asSub = "sammelstelle";
@@ -1162,7 +1164,7 @@ async function lgPrintFoerder(line){
         <div>
           <div class="p-sub">${esc(state.config.ugName)} · Wasserförderung über lange Wegstrecke</div>
           <h1>${esc(e.stichwort) || "Wasserförderung"}</h1>
-          <div>${esc(e.ort)}${line.text ? " · " + esc(line.text) : ""}</div>
+          <div>${esc(einsatzAdresse(e))}${line.text ? " · " + esc(line.text) : ""}</div>
         </div>
         ${pMarkHtml()}
       </div>
@@ -1695,6 +1697,12 @@ function renderSettingsSheet(){
           <div id="cfg-backups" class="kat-list"><p class="hint" style="margin:6px 4px">Sicherungen werden geladen …</p></div>
           <p class="hint">Der ELW-Server sichert den Einsatzstand automatisch. Beim Wiederherstellen übernehmen alle verbundenen Geräte den gewählten Stand.</p>
         </div>` : ""}
+        <div class="field"><label style="margin-bottom:6px">Einsatz-WLAN (nur dieses Gerät)</label>
+          <input id="cfg-wlan-ssid" value="${esc(wlanLaden().ssid)}" placeholder="WLAN-Name (SSID)" autocomplete="off" autocapitalize="off" spellcheck="false">
+          <input id="cfg-wlan-pass" class="mono" value="${esc(wlanLaden().pass)}" placeholder="Passwort (leer = offenes Netz)" autocomplete="off" autocapitalize="off" spellcheck="false" style="margin-top:8px">
+          <div id="cfg-wlan-qr" style="margin-top:10px"></div>
+          <p class="hint">Vorbelegung für die Monitor-Kachel „Zugang“ (WLAN-QR-Code); ein-/ausgeblendet wird sie im Monitor über „Kacheln“. Wird nur in diesem Browser gespeichert – nicht synchronisiert, nicht exportiert, nicht im Freigabe-Link. Ohne Eintrag lässt sich der Name auch direkt in der Kachel eingeben.</p>
+        </div>
       </div>
     </div>
     <div class="sheet-foot" style="flex-wrap:wrap">
@@ -1703,6 +1711,19 @@ function renderSettingsSheet(){
     </div>
   </div>`;
   zeigeAppVersion();
+  {
+    const ssidEl = $("#cfg-wlan-ssid"), passEl = $("#cfg-wlan-pass"), qrEl = $("#cfg-wlan-qr");
+    const wlanUebernehmen = () => {
+      const ssid = ssidEl.value.trim(), pass = passEl.value;
+      wlanSpeichern(ssid ? { ssid, pass } : null);   // sofort ablegen – kein extra „Speichern" nötig
+      qrEl.innerHTML = ssid ? `<img src="${qrDataUrl(wlanQrText(ssid, pass))}" alt="WLAN-QR-Code" width="176" height="176" style="image-rendering:pixelated;background:#fff;padding:6px;border-radius:8px">` : "";
+    };
+    if(ssidEl && passEl && qrEl){
+      ssidEl.addEventListener("input", wlanUebernehmen);
+      passEl.addEventListener("input", wlanUebernehmen);
+      wlanUebernehmen();
+    }
+  }
   const leseSettings = () => {
     state.config.ugName = $("#cfg-ug").value.trim();
     state.config.elwFunk = $("#cfg-elw").value.trim();
@@ -1950,10 +1971,16 @@ function renderEinsatz(){
         <input id="f-stw" data-ez="stichwort" list="stw-liste" autocomplete="off" value="${esc(e.stichwort)}" placeholder="z. B. B 4 – Brand Gewerbeanlage">
         <datalist id="stw-liste">${stichwortGruppen().flatMap(g => g.items).map(s => `<option value="${esc(s.text)}">`).join("")}</datalist>
         <p class="hint" style="margin:.4rem 0 0">Aus der Liste wählen oder frei eintippen. Stichwörter pflegen in den Einstellungen (Zahnrad).</p></div>
-      <div class="field"><label for="f-ort">Einsatzort</label>
-        <input id="f-ort" data-ez="ort" value="${esc(e.ort)}" placeholder="Straße, Ort"></div>
-      <div class="field"><label for="f-obj">Objekt</label>
-        <input id="f-obj" data-ez="objekt" value="${esc(e.objekt||"")}" placeholder="z. B. Klinikum Weiden"></div>
+      <div class="span2 ort-row"><div class="ort-row-in">
+        <div class="field"><label for="f-str">Einsatzort · Straße, Nr.</label>
+          <input id="f-str" data-ez="strasse" value="${esc(e.strasse||"")}" placeholder="Musterweg 5" autocomplete="off"></div>
+        <div class="field"><label for="f-plz">PLZ</label>
+          <input id="f-plz" data-ez="plz" value="${esc(e.plz||"")}" placeholder="92637" inputmode="numeric" autocomplete="off"></div>
+        <div class="field"><label for="f-ort">Ort</label>
+          <input id="f-ort" data-ez="ort" value="${esc(e.ort)}" placeholder="Weiden" autocomplete="off"></div>
+        <div class="field"><label for="f-obj">Objekt</label>
+          <input id="f-obj" data-ez="objekt" value="${esc(e.objekt||"")}" placeholder="z. B. Klinikum" autocomplete="off"></div>
+      </div></div>
       <div class="field span2"><label for="f-w3w">Einsatzort per what3words</label>
         <div class="w3w-row">
           <input id="f-w3w" placeholder="wort.wort.wort" autocomplete="off" spellcheck="false">
@@ -2166,6 +2193,7 @@ async function exportEinsatz(){
    `importEinsatz` (Datei) und dem Freigabe-Auto-Import (`freigabeViewerBoot`). */
 function importEinsatzKern(d){
   state.einsatz = d.einsatz || {};
+  einsatzAdresseMigrieren();
   state.einheiten = d.einheiten || [];
   state.fuehrung = d.fuehrung || [];
   state.abschnitte = d.abschnitte || [];
@@ -2373,6 +2401,7 @@ async function aktiviereArchiv(id){
   if(hatInhalt) state.archiv.push(await baueArchivEintrag());
   state.archiv = state.archiv.filter(x => x.id !== id);
   state.einsatz = {...a.einsatz};
+  einsatzAdresseMigrieren();
   state.einheiten = (a.einheiten || []).map(x => ({...x}));
   state.fuehrung = (a.fuehrung || []).map(x => ({...x}));
   state.abschnitte = (a.abschnitte || []).map(x => ({...x}));
@@ -2404,7 +2433,7 @@ async function endeEinsatz(){
   state.archiv.push(entry);
   state.einsatzId = uid(); state.einsatzStart = new Date().toISOString();
   einsatzErsetzenErzwingen();   // geleerten Stand erzwungen an den Server (Archiv bleibt lokal)
-  state.einsatz = { stichwort:"", ort:"", objekt:"", beginn:nowLocalInput(), ende:"", leiter:"", bereitstellungsraum:"", bereitstellung:false, bemerkung:"", ilsGruppe:{mode:"TMO",gruppe:"2772"} };
+  state.einsatz = { stichwort:"", strasse:"", plz:"", ort:"", objekt:"", beginn:nowLocalInput(), ende:"", leiter:"", bereitstellungsraum:"", bereitstellung:false, bemerkung:"", ilsGruppe:{mode:"TMO",gruppe:"2772"} };
   state.einheiten = []; state.fuehrung = []; state.abschnitte = [];
   state.lage = { items: [], bg: "", snapshots: [], mode: "raster", mapView: null, mapLayer: "luftbild" };
   state.funk = []; state.besprechungen = [];
@@ -2437,7 +2466,7 @@ async function loadDemo(){
   demo = JSON.parse(JSON.stringify(demo));   // tiefe Kopie, Original-Fetch unangetastet
   demoRebaseZeiten(demo);                      // Zeitstempel auf „jetzt" schieben
   state.einsatz = Object.assign(
-    { stichwort:"", ort:"", objekt:"", beginn:"", ende:"", leiter:"", bereitstellungsraum:"", bereitstellung:false, bemerkung:"", ilsGruppe:{mode:"TMO",gruppe:""} },
+    { stichwort:"", strasse:"", plz:"", ort:"", objekt:"", beginn:"", ende:"", leiter:"", bereitstellungsraum:"", bereitstellung:false, bemerkung:"", ilsGruppe:{mode:"TMO",gruppe:""} },
     demo.einsatz || {});
   state.abschnitte    = demo.abschnitte    || [];
   state.einheiten     = demo.einheiten     || [];
@@ -2591,6 +2620,7 @@ function fkCard(f){
       <div class="u-meta">
         <span class="chip chip-${esc(f.org)}">${esc(org.short)}</span>
         <span>${esc(f.funktion)}</span>
+        ${f.fahrzeug ? `<span>· 🚒 ${esc(f.fahrzeug)}</span>` : ""}
         ${f.funkrufname && f.funkrufname !== f.name ? `<span class="mono">· ${esc(f.funkrufname)}</span>` : ""}
         ${f.tatsaechlich === false ? `<span class="badge-schaetz">~ Schätzung</span>` : ""}
         ${f.einheit ? `<span>· ${esc(f.einheit)}</span>` : ""}
@@ -2711,6 +2741,9 @@ function ocrAdresse(text){
                    .replace(/^[^A-Za-zÄÖÜäöüß]+/, "")
                    .replace(/[^0-9A-Za-zÄÖÜäöüß.]+$/, "")
                    .replace(/\s+/g, " ").trim();
+  // Steht die PLZ schon in der Straßenzeile („Musterweg 5, 92637 Weiden"), den Ort nicht noch einmal anhängen
+  const plzInOrt = (ort.match(/\b\d{5}\b/) || [])[0];
+  if(plzInOrt && strasse.includes(plzInOrt)) ort = "";
   return [strasse, ort].filter(Boolean).join(", ");
 }
 /* Alarmzeit aus dem Alarm-Foto lesen (steht ganz oben, z. B. „27.07.26 08:42  Alarmierung“).
@@ -2887,7 +2920,7 @@ function renderOcrSheet(){
         </div></div>
       <div class="field"><label for="ocr-addr">Einsatzort (erkannt – bitte prüfen)</label>
         <div class="ocr-kopf">
-          <input id="ocr-addr" value="${esc(ocrAddr)}" placeholder="Straße Nr., PLZ Ort">
+          <input id="ocr-addr" value="${esc(ocrAddr)}" placeholder="Straße Nr., PLZ Ort (wird in Straße / PLZ / Ort aufgeteilt)">
           <button type="button" class="kat-x" data-ocr-clear="addr" aria-label="Einsatzort verwerfen"${ocrAddr ? "" : " disabled"}>✕</button>
         </div></div>
       <div class="field"><label style="margin-bottom:8px">Erkannte Fahrzeuge (${ocrList.length})</label>
@@ -2986,7 +3019,7 @@ function ocrUebernehmen(){
     if(!ok) return;
     if(datum) state.einsatz.beginn = datum;
     if(stw)   state.einsatz.stichwort = stw;
-    if(ort)   state.einsatz.ort = ort;
+    if(ort)   Object.assign(state.einsatz, adresseSplit(ort));
     neueEinheiten.forEach(u => state.einheiten.push(u));
     neueFk.forEach(f => state.fuehrung.push(f));
     markChange(); closeEditor(); render();
@@ -3006,7 +3039,8 @@ function ocrUebersichtHtml({ datum, stw, ort, fahrzeugeDisp, fkDisp, dubletten }
     const disp = isNaN(dt) ? datum : dt.toLocaleString("de-DE", { day:"2-digit", month:"2-digit", year:"numeric", hour:"2-digit", minute:"2-digit" }) + " Uhr";
     teile.push(sektion("🕑", "Alarmzeit", `<div class="ok-addr">${esc(disp)}</div>`, "ok-ort")); }
   if(stw) teile.push(sektion("🔺", "Einsatzstichwort", `<div class="ok-addr">${esc(stw)}</div>`));
-  if(ort) teile.push(sektion("📍", "Einsatzort", `<div class="ok-addr">${esc(ort)}</div>`, "ok-ort"));
+  if(ort){ const a = adresseSplit(ort);   // so wird es in die Stammdatenfelder übernommen
+    teile.push(sektion("📍", "Einsatzort", `<div class="ok-addr">${esc(a.strasse || "–")}</div><div class="ok-addr">${esc([a.plz, a.ort].filter(Boolean).join(" ") || "–")}</div>`, "ok-ort")); }
   if(fahrzeugeDisp.length) teile.push(sektion("🚒", `${fahrzeugeDisp.length} Fahrzeug${fahrzeugeDisp.length===1?"":"e"}`, liste(fahrzeugeDisp), "ok-fz"));
   if(fkDisp.length) teile.push(sektion("👤", `${fkDisp.length} Führungskraft${fkDisp.length===1?"":"/-kräfte"}`, liste(fkDisp), "ok-fk"));
   if(dubletten.length) teile.push(sektion("↩︎", `${dubletten.length} bereits erfasst – wird übersprungen`, liste(dubletten), "ok-dup"));
@@ -3432,6 +3466,13 @@ function openFkEditor(id){
   normalizeFkAbschnitt(editingFk.fk);
   renderFkSheet();
 }
+/* Fahrzeug-Auswahl für die Führungskraft: nur die erfassten Fahrzeuge der Organisation der Führungskraft
+   (z. B. THW-Führungskraft → nur THW-Fahrzeuge). Freie Eingabe bleibt möglich. */
+function fkFahrzeugOptionen(org){
+  const namen = [];
+  state.einheiten.filter(u => u.org === org).forEach(u => { const n = fullName(u); if(n && !namen.includes(n)) namen.push(n); });
+  return namen.map(n => `<option value="${esc(n)}">`).join("");
+}
 function renderFkSheet(){
   if(!editingFk){ $("#sheetHost").innerHTML = ""; return; }
   const f = editingFk.fk;
@@ -3453,6 +3494,10 @@ function renderFkSheet(){
       <div class="field"><label for="fk-funktion">Funktion</label>
         <input id="fk-funktion" value="${esc(f.funktion)}" list="fk-funktionen" placeholder="z. B. Abschnittsleiter" autocomplete="off">
         <datalist id="fk-funktionen">${FUNKTIONEN.map(x=>`<option value="${esc(x)}">`).join("")}</datalist></div>
+      <div class="field"><label for="fk-fahrzeug">Fahrzeug</label>
+        <input id="fk-fahrzeug" value="${esc(f.fahrzeug||"")}" list="fk-fahrzeuge" placeholder="Fahrzeug wählen oder eintippen" autocomplete="off">
+        <datalist id="fk-fahrzeuge">${fkFahrzeugOptionen(f.org)}</datalist>
+        <p class="hint" style="margin:.4rem 0 0">Mit welchem Fahrzeug die Führungskraft gekommen ist – Auswahl aus den erfassten Fahrzeugen der gewählten Organisation (z. B. nur THW), freie Eingabe möglich.</p></div>
       <div class="field"><label for="fk-funkruf">Funkrufname</label>
         <input id="fk-funkruf" class="mono" value="${esc(f.funkrufname||"")}" placeholder="z. B. Florian Weiden 1" autocomplete="off"></div>
       <div class="field"><label for="fk-abschnitt">Einsatzabschnitt</label>
@@ -3491,6 +3536,7 @@ function renderFkSheet(){
     // Stammdaten-Auswahl auf die neue Organisation umstellen (vorherige Auswahl passt ggf. nicht mehr)
     const sel = $("#fk-stamm");
     if(sel) sel.innerHTML = fkStammOptionsHtml(f.org);
+    const fz = $("#fk-fahrzeuge"); if(fz) fz.innerHTML = fkFahrzeugOptionen(f.org);
   }));
   const stammSel = $("#fk-stamm");
   if(stammSel) stammSel.addEventListener("change", () => {
@@ -3505,6 +3551,7 @@ function renderFkSheet(){
   $("#fk-name").addEventListener("input", e => { f.name = e.target.value; });
   $("#fk-funktion").addEventListener("input", e => { f.funktion = e.target.value; });
   $("#fk-funkruf").addEventListener("input", e => { f.funkrufname = e.target.value; });
+  $("#fk-fahrzeug").addEventListener("input", e => { f.fahrzeug = e.target.value; });
   const fkAb = $("#fk-abschnitt");
   if(fkAb) fkAb.addEventListener("change", () => { f.einheit = fkAb.value; });
   const fkTat = $("#fk-tat");
@@ -3537,9 +3584,15 @@ function fsSuggestions(){
   // Leit-/Kommandostellen – das sind die typischen Gesprächspartner. Danach Abschnitte
   // und alle erfassten Fahrzeuge (aktive vor abgerückten).
   const s = [];
-  const add = v => { v = (v||"").trim(); if(v && !s.includes(v)) s.push(v); };
+  const gesehen = new Set();
+  const add = v => { v = (v||"").trim(); if(v && !gesehen.has(v.toLowerCase())){ gesehen.add(v.toLowerCase()); s.push(v); } };
   state.fuehrung.forEach(f => { add(f.funkrufname); add(f.name); });
   [state.config.elwFunk, "Leitstelle", "ELW", state.config.ugName].forEach(add);
+  // Im Einsatz bereits getippte Sender/Empfänger (wirksame Fassung, ohne stornierte Einträge) – neueste zuerst,
+  // damit ein Gesprächspartner beim zweiten Mal direkt in der Auswahl steht.
+  fsThreads(state.funk).filter(t => !t.storno && !t.waise)
+    .sort((a, b) => (b.effektiv.zeit || "").localeCompare(a.effektiv.zeit || ""))
+    .forEach(t => { add(t.effektiv.von); add(t.effektiv.an); });
   state.abschnitte.forEach(a => { add(a.ansprechpartner); add(a.name); });
   aktive().forEach(u => add(fullName(u)));
   state.einheiten.filter(u => u.abgerueckt).forEach(u => add(fullName(u)));
@@ -3548,6 +3601,15 @@ function fsSuggestions(){
 const FS_TYPEN = { funk:"Funk", ereignis:"Ereignis", befehl:"Befehl", lage:"Lagemeldung" };
 const FS_EREIGNIS_PRESETS = ["Menschenrettung", "Feuer unter Kontrolle", "Feuer aus",
   "Nachforderung", "Einsatzabschnitt gebildet", "Lage erkundet", "Einsatzstelle übergeben"];
+/* Schnell-Ereignisse: öffnen den Eintrags-Dialog vorbelegt (Zeit = jetzt) – gespeichert wird erst dort.
+   „Einsatzleitung besetzt" ist ein Funkspruch: Von = ELW-Funkrufname, An = Leitstelle (beides aus den Einstellungen). */
+function fsSchnellListe(){
+  return [
+    { label:"Einsatzleitung besetzt", text: (state.config.elwFunk ? state.config.elwFunk + " – " : "") + "Einsatzleitung besetzt",
+      typ:"funk", von: state.config.elwFunk || "", an: state.config.ilsName || "Leitstelle", wichtig:false },
+    ...FS_EREIGNIS_PRESETS.map(t => ({ text:t, typ:"ereignis", von:"", an:"", wichtig:true })),
+  ];
+}
 let fsFilter = "alle";   // alle | ereignis | wichtig
 const fsTyp = f => f.typ || "funk";
 function fsGeraet(f){ return f && f.erstelltVon ? "Gerät …" + String(f.erstelltVon).slice(-4) : ""; }
@@ -3620,14 +3682,14 @@ function renderFunk(){
     : `<div class="empty"><p>${fsFilter === "alle"
         ? "Noch keine Einträge.<br>Funksprüche und wichtige Ereignisse landen hier – Zeitstempel kommt automatisch."
         : "Keine Einträge in diesem Filter."}</p></div>`;
-  const presets = FS_EREIGNIS_PRESETS.map(x => `<button class="fs-ev" data-fsev="${esc(x)}">${esc(x)}</button>`).join("");
+  const presets = fsSchnellListe().map((x, i) => `<button class="fs-ev" data-fsev="${i}">${esc(x.label || x.text)}</button>`).join("");
   return `
   <div class="statstrip" role="status">
     <div class="stat"><div class="k">Einträge</div><div class="v mono">${echte.length}</div><div class="s">gesamt</div></div>
     <div class="stat"><div class="k">Ereignisse</div><div class="v mono">${ereignisN}</div><div class="s">erfasst</div></div>
     <div class="stat"><div class="k">Wichtig</div><div class="v mono">${wichtigN}</div><div class="s">markiert</div></div>
   </div>
-  <div class="field" style="margin-bottom:10px"><label style="margin-bottom:6px">Ereignis schnell erfassen (ein Tipp = Zeitstempel)</label>
+  <div class="field" style="margin-bottom:10px"><label style="margin-bottom:6px">Ereignis schnell erfassen (öffnet den Eintrag, Zeit = jetzt)</label>
     <div class="fs-events">${presets}</div></div>
   <button class="btn btn-primary btn-block" id="btnAddFs" style="margin-bottom:10px">＋&nbsp; Eintrag erfassen (Funk / Ereignis)</button>
   <div class="seg fs-filter" role="tablist" style="max-width:none;margin-bottom:12px">
@@ -3644,11 +3706,9 @@ function wireFunk(){
   if(pr) pr.addEventListener("click", doPrintFunk);
   document.querySelectorAll("[data-editfs]").forEach(el =>
     el.addEventListener("click", () => openFsEditor(el.dataset.editfs)));
-  document.querySelectorAll("[data-fsev]").forEach(b => b.addEventListener("click", () => {   // Ereignis-Schnellerfassung
-    const jetzt = new Date().toISOString();
-    state.funk.push({ id:uid(), zeit:jetzt, erstelltAm:jetzt, erstelltVon:syncClientId(), typ:"ereignis", von:"", an:"", text:b.dataset.fsev, wichtig:true });
-    fsFilter = "alle";   // neuen Eintrag garantiert sichtbar machen (nicht durch aktiven Filter verstecken)
-    markChange(); render();
+  document.querySelectorAll("[data-fsev]").forEach(b => b.addEventListener("click", () => {   // Ereignis-Schnellerfassung → Dialog vorbelegt
+    const { label, ...p } = fsSchnellListe()[+b.dataset.fsev] || {};
+    if(p.text) openFsEditor(null, p);
   }));
   document.querySelectorAll("[data-fsfilter]").forEach(b => b.addEventListener("click", () => { fsFilter = b.dataset.fsfilter; render(); }));
 }
@@ -3663,17 +3723,17 @@ function doPrintFunk(){
     const strike = st ? ' style="text-decoration:line-through;color:#888"' : "";
     let html = `
       <tr>
-        <td class="p-mono">${idx+1}${f.wichtig && !st ? " !" : ""}</td>
-        <td class="p-mono">${zt(f.zeit)}</td>
-        <td>${esc(FS_TYPEN[f.typ||"funk"] || "")}</td>
-        <td>${esc(f.von)}</td>
-        <td>${esc(f.an)}</td>
+        <td class="p-mono nw">${idx+1}${f.wichtig && !st ? " !" : ""}</td>
+        <td class="p-mono nw">${zt(f.zeit)}</td>
+        <td class="nw">${esc(FS_TYPEN[f.typ||"funk"] || "")}</td>
+        <td class="nw">${esc(f.von)}</td>
+        <td class="nw">${esc(f.an)}</td>
         <td${strike}>${t.waise ? `<em>(verwaiste ${esc(t.waise)})</em> ` : ""}${f.wichtig && !st ? `<strong>${esc(f.text)}</strong>` : esc(f.text)}</td>
       </tr>`;
     t.korrekturen.forEach(k => { html += `
-      <tr><td></td><td class="p-mono">${zt(k.erstelltAm||k.zeit)}</td><td colspan="4"><em>Berichtigung:</em> ${esc(k.text)}</td></tr>`; });
+      <tr><td></td><td class="p-mono nw">${zt(k.erstelltAm||k.zeit)}</td><td colspan="4"><em>Berichtigung:</em> ${esc(k.text)}</td></tr>`; });
     if(st) html += `
-      <tr><td></td><td class="p-mono">${zt(st.erstelltAm)}</td><td colspan="4"><em>Storniert${st.stornoGrund ? " – " + esc(st.stornoGrund) : ""}</em></td></tr>`;
+      <tr><td></td><td class="p-mono nw">${zt(st.erstelltAm)}</td><td colspan="4"><em>Storniert${st.stornoGrund ? " – " + esc(st.stornoGrund) : ""}</em></td></tr>`;
     return html;
   }).join("");
   $("#printArea").innerHTML = `
@@ -3681,11 +3741,11 @@ function doPrintFunk(){
       <div>
         <div class="p-sub">${esc(state.config.ugName)} · Einsatztagebuch (ETB)</div>
         <h1>${esc(e.stichwort) || "Ohne Stichwort"}</h1>
-        <div>${esc(e.ort)}${e.beginn ? " · Alarm " + fmtDatum(e.beginn) + " " + fmtZeit(e.beginn) + " Uhr" : ""}</div>
+        <div>${esc(einsatzAdresse(e))}${e.beginn ? " · Alarm " + fmtDatum(e.beginn) + " " + fmtZeit(e.beginn) + " Uhr" : ""}</div>
       </div>
       ${pMarkHtml()}
     </div>
-    <table><thead><tr><th>Nr.</th><th>Zeit</th><th>Art</th><th>Von</th><th>An</th><th>Inhalt</th></tr></thead><tbody>
+    <table><thead><tr><th class="nw">Nr.</th><th class="nw">Zeit</th><th class="nw">Art</th><th class="nw">Von</th><th class="nw">An</th><th style="width:100%">Inhalt</th></tr></thead><tbody>
       ${rows}
     </tbody></table>
     <div class="p-foot">
@@ -3695,7 +3755,7 @@ function doPrintFunk(){
     <p style="font-size:8pt;color:#666;margin-top:16px">Nr. = Erfassungsreihenfolge (revisionssicher); Berichtigungen &amp; Stornos bleiben erhalten. Gedruckt am ${new Date().toLocaleString("de-DE")} · LOTSE112 – Kräfteerfassung (Prototyp) · ${esc(state.config.ugName)}<br>${DRUCK_HINWEIS}</p>`;
   window.print();
 }
-function openFsEditor(id){
+function openFsEditor(id, preset){
   if(id){
     const th = fsThreads(state.funk).find(t => t.basis.id === id);
     if(!th) return;
@@ -3704,7 +3764,7 @@ function openFsEditor(id){
     editingFs = { basisId:id, fs:{...th.effektiv}, orig:{...th.effektiv}, isNew:false };
   }else{
     editingFs = { basisId:null, fs:{ id:uid(), zeit:new Date().toISOString(), typ:"funk", von:"", an:state.config.elwFunk||"Kater Weiden 1/12/1",
-      text:"", wichtig:false }, isNew:true };
+      text:"", wichtig:false, ...(preset || {}) }, isNew:true };
   }
   renderFsSheet();
 }
@@ -4855,7 +4915,7 @@ function doPrintAtemschutz(){
       <div>
         <div class="p-sub">${esc(state.config.ugName)} · Atemschutz-Nachweis · FwDV 7</div>
         <h1>${esc(e.stichwort) || "Ohne Stichwort"}</h1>
-        <div>${esc(e.ort)}${e.beginn ? " · Alarm " + fmtDatum(e.beginn) + " " + fmtZeit(e.beginn) + " Uhr" : ""}</div>
+        <div>${esc(einsatzAdresse(e))}${e.beginn ? " · Alarm " + fmtDatum(e.beginn) + " " + fmtZeit(e.beginn) + " Uhr" : ""}</div>
       </div>
       ${pMarkHtml()}
     </div>
@@ -5062,7 +5122,7 @@ function renderMonitor(){
     <div class="fkrow">
       <span class="chip chip-${esc(f.org)}">${esc((ORGS[f.org]||ORGS.SON).short)}</span>
       <span class="fk-n">${esc(f.name)}${f.funkrufname?` <span class="mono" style="font-weight:600;color:var(--ink2)">${esc(f.funkrufname)}</span>`:""}</span>
-      <span class="fk-f">${esc(f.funktion)}${f.einheit?` · ${esc(f.einheit)}`:""}</span>
+      <span class="fk-f">${esc(f.funktion)}${f.einheit?` · ${esc(f.einheit)}`:""}${f.fahrzeug?` · ${esc(f.fahrzeug)}`:""}</span>
     </div>`).join("");
 
   const fsMonRows = fsThreads(state.funk).filter(t => !t.storno && !t.waise)
@@ -5143,12 +5203,13 @@ function renderMonitor(){
   const isSkizzePage = specialKey === "skizze";
   const isFunkPage = specialKey === "funkchecks";
   const isAsPage = specialKey === "as";
+  const isZugangPage = specialKey === "zugang";
   const abIdx = monAbPage - preSpecials.length;
   const pg = (!specialKey && abPageList[abIdx]) ? abPageList[abIdx] : { start:0, count:0 };
   const visible = specialKey ? [] : cardsData.slice(pg.start, pg.start + pg.count);
   const abCards = visible.map(c => abCard(c.title, c.units, c.opts)).join("");
   const pagerLabel = isStaerkePage ? "Kräfteübersicht" : isLagePage ? "Lagekarte" : isSkizzePage ? "Komm-Skizze"
-    : isFunkPage ? "ETB & Checklisten" : isAsPage ? "Atemschutz-Trupps"
+    : isFunkPage ? "ETB & Checklisten" : isAsPage ? "Atemschutz-Trupps" : isZugangPage ? "Zugang"
     : `${pg.start+1}–${pg.start+pg.count} von ${cardsData.length}`;
   const abPager = totalPages > 1 ? `
     <div class="ab-pager" title="${monAbPaused ? "Rotation angehalten" : "Wechselt alle 30 Sekunden"}">
@@ -5181,7 +5242,7 @@ function renderMonitor(){
         <div class="mon-title">
           <div class="eyebrow"><span style="color:var(--accent)">LOTSE</span><span style="color:var(--ink)">112</span> · ${esc(state.config.ugName)} · Kräfteübersicht</div>
           <h2>${esc(e.stichwort) || "Kein Einsatz angelegt"}</h2>
-          <div class="ort">${esc(e.ort)}</div>
+          <div class="ort">${esc(einsatzAdresse(e))}</div>
           ${e.leiter ? `<div class="mon-el">EL: ${esc(e.leiter)}</div>` : ""}
           ${(!e.bereitstellung && (e.bereitstellungsraum||"").trim()) ? `<div class="mon-vr">Verfügungsraum <strong>${esc(e.bereitstellungsraum.trim())}</strong></div>` : ""}
         </div>
@@ -5305,6 +5366,7 @@ function renderMonitor(){
         <div class="panel mon-scrollpanel"><h3>Checklisten</h3><div class="mon-scroll">${checksListe || `<p class="hint">Noch keine Checkliste.</p>`}</div></div>
       </div>`;
       })()
+      : isZugangPage ? monZugangHtml()
       : isAsPage ? (() => {
         // Eigene Seite: Atemschutz-Trupps in 3 Spalten (Bereitschaft / Einsatz / abgelegt)
         const spalten = [
@@ -5393,6 +5455,43 @@ function monCardsData(){
   }
   return cards;
 }
+/* ---- Zugang-Kachel: QR-Codes zum Beitreten (WLAN + App) ----
+   WLAN-Name/-Passwort liegen NUR in diesem Browser (localStorage) – bewusst nicht im State,
+   damit sie weder synchronisiert noch exportiert noch im Freigabe-Link landen. */
+const WLAN_KEY = "lotse112-wlan";
+function wlanLaden(){
+  try{ const o = JSON.parse(localStorage.getItem(WLAN_KEY) || "null"); if(o && o.ssid) return { ssid: String(o.ssid), pass: String(o.pass || "") }; }catch(e){}
+  return { ssid: "", pass: "" };
+}
+function wlanSpeichern(w){
+  try{ if(w && w.ssid) localStorage.setItem(WLAN_KEY, JSON.stringify(w)); else localStorage.removeItem(WLAN_KEY); }catch(e){}
+}
+/* Standard-WLAN-QR (iOS-/Android-Kamera bietet „Verbinden" an). Sonderzeichen \ ; , : " werden maskiert. */
+function wlanQrText(ssid, pass){
+  const mask = t => String(t).replace(/([\\;,:"])/g, "\\$1");
+  return pass ? `WIFI:T:WPA;S:${mask(ssid)};P:${mask(pass)};;` : `WIFI:T:nopass;S:${mask(ssid)};;`;
+}
+function monZugangHtml(){
+  const w = wlanLaden();
+  const url = (SYNC.urls || [])[0];
+  const qr = txt => `<img src="${qrDataUrl(txt)}" alt="QR-Code" style="width:min(36vh,100%);max-width:340px;aspect-ratio:1;image-rendering:pixelated;background:#fff;padding:8px;border-radius:10px">`;
+  const wlanTeil = w.ssid ? `
+      ${qr(wlanQrText(w.ssid, w.pass))}
+      <p style="margin:12px 0 0;font-size:1.05rem">Netz: <strong>${esc(w.ssid)}</strong></p>
+      <p style="margin:2px 0 0;font-size:1.05rem">${w.pass ? `Passwort: <strong class="mono">${esc(w.pass)}</strong>` : "offenes Netz"}</p>`
+    : `<p class="hint">Noch keine WLAN-Daten hinterlegt. Sie werden nur auf diesem Gerät gespeichert.</p>`;
+  const appTeil = url ? `
+      ${qr(url)}
+      <p class="mono" style="margin:12px 0 0;font-size:1.05rem;word-break:break-all">${esc(url)}</p>`
+    : `<p class="hint">Die Adresse erscheint, sobald LOTSE112 über den ELW-Server läuft (nicht über die Web-URL).</p>`;
+  const ohneWlan = !!state.monHide.panels.zugangNoWlan;   // WLAN-Teil über „Kacheln" ausgeblendet
+  return `
+      <div class="mon-grid" style="grid-template-columns:${ohneWlan ? "1fr" : "1fr 1fr"}">
+        ${ohneWlan ? "" : `<div class="panel" style="text-align:center"><h3>1 · Mit dem WLAN verbinden</h3>${wlanTeil}
+          <p style="margin:12px 0 0"><button class="btn btn-ghost" id="monWlanEdit">${w.ssid ? "WLAN-Daten ändern" : "WLAN-Daten eintragen"}</button></p></div>`}
+        <div class="panel" style="text-align:center"><h3>${ohneWlan ? "App öffnen" : "2 · App öffnen"}</h3>${appTeil}</div>
+      </div>`;
+}
 /* Sonderseiten des Monitors (Lagekarte, Komm-Skizze, Funk & Checklisten, Atemschutz)
    – als eigene durchschaltbare Seiten in der Rotation, über den Kacheln-Dialog abschaltbar.
    Kommen NACH den Abschnitts-Kacheln. */
@@ -5403,6 +5502,7 @@ function monSpecialPages(){
   if(!hp.skizze) s.push("skizze");
   if(!hp.funkchecks && (state.funk.length || state.checks.length)) s.push("funkchecks");
   if(!hp.as && state.asTrupps.length) s.push("as");
+  if(hp.zugangAn) s.push("zugang");   // Standard aus: enthält WLAN-Zugangsdaten
   return s;
 }
 /* Kräfteübersicht (Gesamtstärke/Ist-Stärke/Stärke nach Organisation/Führungskräfte) läuft als
@@ -5415,8 +5515,9 @@ function monAbPagesCount(){
 }
 function openMonHideSheet(){
   const hp = state.monHide.panels, ha = state.monHide.ab;
-  const row = (label, hidden, key) => `
-    <button class="check-item ${hidden ? "" : "done"}" data-monhide="${esc(key)}">
+  // einzug: Unterpunkt eingerückt; ohneLinie: Trennlinie weglassen (sie steht dann erst unter dem Unterpunkt)
+  const row = (label, hidden, key, einzug, ohneLinie) => `
+    <button class="check-item ${hidden ? "" : "done"}" data-monhide="${esc(key)}"${einzug ? ` style="margin-left:26px;width:calc(100% - 26px)"` : ohneLinie ? ` style="border-bottom:none"` : ""}>
       <span class="check-box">✓</span>
       <span class="check-text" style="text-decoration:none;color:${hidden ? "var(--ink3)" : "var(--ink)"}">${esc(label)}</span>
       <span class="check-zeit">${hidden ? "ausgeblendet" : "sichtbar"}</span>
@@ -5434,11 +5535,13 @@ function openMonHideSheet(){
     </div>
     <div class="sheet-body">
       <div class="field"><label>Rotierende Seiten</label>
+        ${row("Atemschutz-Trupps", hp.as, "p:as")}
+        ${row("ETB & Checklisten", hp.funkchecks, "p:funkchecks")}
+        ${row("Komm-Skizze", hp.skizze, "p:skizze")}
         ${row("Kräfteübersicht", hp.staerke, "p:staerke")}
         ${row("Lagekarte", hp.karte, "p:karte")}
-        ${row("Komm-Skizze", hp.skizze, "p:skizze")}
-        ${row("ETB & Checklisten", hp.funkchecks, "p:funkchecks")}
-        ${row("Atemschutz-Trupps", hp.as, "p:as")}
+        ${row("Zugang (WLAN & App-QR)", !hp.zugangAn, "p:zugangAn", false, true)}
+        ${row("WLAN-QR-Code (mit Name und Passwort)", hp.zugangNoWlan, "p:zugangNoWlan", true)}
       </div>
       <div class="field"><label>Einsatzabschnitte</label>
         ${state.abschnitte.map(a => row(a.name, ha[a.id], "a:" + a.id)).join("")}
@@ -5488,6 +5591,17 @@ function wireMonitor(){
     const lagePage = preSpecials.length + abPages + specials.indexOf("karte");
     monAbPage = (monAbPage === lagePage) ? 0 : lagePage;
     monAbLast = Date.now();
+    render();
+  });
+  const wlanEdit = $("#monWlanEdit");
+  if(wlanEdit) wlanEdit.addEventListener("click", async () => {
+    const alt = wlanLaden();
+    const ssid = await modalPrompt("WLAN-Name", "Name (SSID) des Einsatz-WLANs. Leer lassen = WLAN-Daten entfernen.", "z. B. ELW-Einsatz", "Weiter", alt.ssid);
+    if(ssid === null) return;
+    if(!ssid){ wlanSpeichern(null); render(); return; }
+    const pass = await modalPrompt("WLAN-Passwort", "Leer lassen für ein offenes Netz. Wird nur auf diesem Gerät gespeichert (nicht synchronisiert, nicht exportiert).", "Passwort", "Speichern", alt.pass);
+    if(pass === null) return;
+    wlanSpeichern({ ssid, pass });
     render();
   });
   const lgEdit = $("#monLgEdit");
@@ -5895,7 +6009,7 @@ function renderLagekarte(){
         <button data-lglayer="strasse" class="${state.lage.mapLayer==="strasse"?"active":""}">Straße</button>
       </div>
       ${lgEinsatzAdresse() ? `<button class="btn btn-ghost" id="lgToAddr" style="min-height:42px;padding:6px 14px;font-size:.85rem">⌖ Einsatzadresse</button>` : ""}
-      <button class="btn btn-ghost" id="lgLuftbildAll" style="min-height:42px;padding:6px 12px;font-size:.85rem" title="Übersichts-Luftbild automatisch um alle eingezeichneten Elemente einfangen (für den Bericht) – Modus bleibt Karte (online)">🛰 Übersicht einfangen (alle Elemente)</button>
+      <button class="btn btn-ghost" id="lgPrintView" style="min-height:42px;padding:6px 12px;font-size:.85rem" title="Die aktuell angezeigte Karte (gewählte Ebene und Ausschnitt) ohne Symbole möglichst groß auf Papier drucken – zum Einzeichnen von Fahrzeugen und Brandstelle von Hand bei der Erkundung">🖨 Karte drucken (zum Einzeichnen)</button>
       <button class="btn btn-ghost" id="lgAddTile" style="min-height:42px;padding:6px 12px;font-size:.85rem" title="Aktuell sichtbaren Kartenausschnitt als eigene Detailseite für den Bericht aufnehmen (beliebig oft)">➕ Ausschnitt aufnehmen</button>` : ""}
     </div>
     <div class="lg-toolbar">${tools}</div>
@@ -5939,24 +6053,9 @@ function renderLagekarte(){
       <input type="file" id="lgBgFile" accept="image/*" style="display:none">
     </div>
   </div>
-  ${(state.lage.tiles||[]).length ? `
+  ${((state.lage.snapshots||[]).length || (state.lage.tiles||[]).length) ? `
   <div class="card">
-    <h2>Detail-Ausschnitte für den Bericht (${state.lage.tiles.length})</h2>
-    ${state.lage.tiles.map((t, idx) => `
-    <div class="arch">
-      <div class="a-main">
-        <div class="a-t">${esc(t.label || ("Ausschnitt " + (idx+1)))}</div>
-        <div class="a-s">${(t.items||[]).filter(i => i.x != null || Array.isArray(i.points)).length} Symbole</div>
-      </div>
-      <button class="btn btn-ghost ab-ord-btn" data-tileup="${idx}" ${idx===0?"disabled":""} aria-label="Nach oben">▲</button>
-      <button class="btn btn-ghost ab-ord-btn" data-tiledown="${idx}" ${idx===state.lage.tiles.length-1?"disabled":""} aria-label="Nach unten">▼</button>
-      <button class="btn btn-ghost" data-tileren="${idx}">Umbenennen</button>
-      <button class="btn btn-danger-ghost" data-tiledel="${idx}" aria-label="Ausschnitt löschen">✕</button>
-    </div>`).join("")}
-    <p class="hint">Jeder Ausschnitt wird eine eigene Detailseite im Bericht (PDF + Word). Im Kartenmodus näher zoomen/verschieben und „➕ Ausschnitt aufnehmen" drücken, um weitere hinzuzufügen.</p>
-  </div>` : ""}
-  ${(state.lage.snapshots||[]).length ? `
-  <div class="card">
+${(state.lage.snapshots||[]).length ? `
     <h2>Lagebilder (eingefrorene Stände)</h2>
     ${[...state.lage.snapshots].sort((a,b) => (b.zeit||"").localeCompare(a.zeit||"")).map(s => `
     <div class="arch">
@@ -5970,6 +6069,24 @@ function renderLagekarte(){
     </div>`).join("")}
     <button class="btn btn-ghost btn-block" id="lgSnapCompare" style="margin-top:8px"${lgSnapSel.length===2?"":" disabled"}>Zwei Lagebilder nebeneinander vergleichen${lgSnapSel.length?` (${lgSnapSel.length}/2 markiert)`:""}</button>
     <p class="hint">Ein Snapshot friert den aktuellen Kartenstand ein. Zwei Lagebilder ankreuzen und vergleichen – Änderungen wackeln. „Ansehen" öffnet ein Lagebild (mit Vollbild).</p>
+` : ""}
+${(state.lage.tiles||[]).length ? `
+    <h3 style="margin:18px 0 4px;font-size:1rem">Detail-Ausschnitte für den Bericht (${state.lage.tiles.length})</h3>
+    ${state.lage.tiles.map((t, idx) => `
+    <div class="arch">
+      ${t.bg ? `<img src="${t.bg}" alt="" style="width:72px;height:45px;object-fit:cover;border-radius:6px;border:1px solid var(--line);flex:none">` : ""}
+      <div class="a-main">
+        <div class="a-t">${esc(t.label || ("Ausschnitt " + (idx+1)))}</div>
+        <div class="a-s">${(t.items||[]).filter(i => i.x != null || Array.isArray(i.points)).length} Symbole</div>
+      </div>
+      <button class="btn btn-ghost ab-ord-btn" data-tileup="${idx}" ${idx===0?"disabled":""} aria-label="Nach oben">▲</button>
+      <button class="btn btn-ghost ab-ord-btn" data-tiledown="${idx}" ${idx===state.lage.tiles.length-1?"disabled":""} aria-label="Nach unten">▼</button>
+      <button class="btn btn-ghost" data-tileview="${idx}">Ansehen</button>
+      <button class="btn btn-ghost" data-tileren="${idx}">Umbenennen</button>
+      <button class="btn btn-danger-ghost" data-tiledel="${idx}" aria-label="Ausschnitt löschen">✕</button>
+    </div>`).join("")}
+    <p class="hint">Jeder Ausschnitt wird eine eigene Detailseite im Bericht (PDF + Word). Im Kartenmodus näher zoomen/verschieben und „➕ Ausschnitt aufnehmen" drücken, um weitere hinzuzufügen.</p>
+` : ""}
   </div>` : ""}
   `;
 }
@@ -6018,6 +6135,12 @@ function lgWmsStrasse(minX, minY, maxX, maxY, W, H){
     + "&BBOX=" + [minX, minY, maxX, maxY].join(",") + "&WIDTH=" + W + "&HEIGHT=" + H;
   return lgWmsLoad(url, W, H, "Straßenkarten-Server nicht erreichbar (Internet/CORS)");
 }
+const LG_BASIS_HINWEIS = "Die Bayern-Karte kann nicht als Ausschnitt/Bild aufgenommen werden (sie steht nur als Kachel-Dienst zur Verfügung).\n\nBitte oben die Ebene „Luftbild“ oder „Straße“ wählen und dann erneut aufnehmen. Es wurde nichts angelegt.";
+/* Kartenbild passend zur in der Lagekarte gewählten Ebene („Luftbild" / „Bayern-Karte" / „Straße").
+   Die Bayern-Karte gibt es nur als Kachel-Dienst (nicht als einlesbares Bild) → dafür die Straßenkarte. */
+function lgWmsFuerEbene(ebene, minX, minY, maxX, maxY, W, H){
+  return (ebene === "strasse" || ebene === "basis") ? lgWmsStrasse(minX, minY, maxX, maxY, W, H) : lgWmsDop(minX, minY, maxX, maxY, W, H);
+}
 /* Items in eine 3857-Bounding-Box projizieren → NEUE Kopien mit x/y (%) bzw. points (%). */
 function lgProjItemsTo(items, minX, maxX, minY, maxY){
   const P = ll => L.CRS.EPSG3857.project(ll);
@@ -6035,59 +6158,54 @@ function lgProjItemsTo(items, minX, maxX, minY, maxY){
     return j;
   });
 }
-/* Luftbild (Bayern-WMS DOP) für ALLE eingezeichneten Elemente einfangen und als Karten-Hintergrund
-   setzen (Modus „Bild") → Karte + Symbole offline in Bericht/PDF/Word. Bei dichten/überlappenden
-   Symbolen zusätzlich gezoomte Detail-Kacheln (state.lage.tiles) → je eigene Bericht-Seite. */
-async function lgLuftbildEinfangen(setBusy, fitAll){
+/* Erkundungs-Ausdruck: die aktuell angezeigte Karte (gewählte Ebene, sichtbarer Ausschnitt) OHNE Symbole,
+   möglichst groß auf eine A4-Querseite – zum Mitnehmen und Einzeichnen von Fahrzeugen/Brandstelle von Hand.
+   Der Ausschnitt wird nur auf das Papier-Seitenverhältnis erweitert, nie beschnitten. */
+async function lgDruckAktuelleKarte(){
+  if(!lgMapObj){ modalInfo("Karte ist nicht geöffnet – oben Modus „Karte (online)“ wählen und den Ausschnitt einstellen."); return; }
+  if(navigator.onLine === false){ modalInfo("Gerät muss online sein, um das Kartenbild zu laden."); return; }
+  const ebene = state.lage.mapLayer;
   const P = ll => L.CRS.EPSG3857.project(ll);
-  const items0 = state.lage.items || [];
-  const markerLL = [];
-  for(const i of items0) if(Array.isArray(i.ll)) markerLL.push(i.ll);
-  let minX, maxX, minY, maxY, W, H;
-  if(fitAll){
-    // Auto: Ausschnitt um ALLE Elemente (+ Rand), auf 16:10 aufgezogen (ohne Verzerrung).
-    const geoPts = lgItemsGeoPts(items0);
-    const bounds = geoPts.length ? L.latLngBounds(geoPts).pad(0.18) : (lgMapObj && lgMapObj.getBounds());
-    if(!bounds){ modalInfo("Kein Kartenausschnitt vorhanden – erst Elemente einzeichnen oder Karte öffnen."); return; }
-    const sw = P(bounds.getSouthWest()), ne = P(bounds.getNorthEast());
-    minX = sw.x; maxX = ne.x; minY = sw.y; maxY = ne.y;
-    const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2;
-    let hw = (maxX - minX) / 2, hh = (maxY - minY) / 2;
-    if(hw < 120) hw = 120; if(hh < 75) hh = 75;
-    const A = 16 / 10;
-    if(hw / hh < A) hw = hh * A; else hh = hw / A;
-    minX = cx - hw; maxX = cx + hw; minY = cy - hh; maxY = cy + hh;
-    W = 1600; H = 1000;
-  }else{
-    // Aktuell sichtbarer Kartenausschnitt (Anwender framet live per Schieben/Zoomen).
-    if(!lgMapObj){ modalInfo("Karte ist nicht geöffnet – oben Modus „Karte (online)“ wählen und Ausschnitt einstellen."); return; }
-    const b = lgMapObj.getBounds(), size = lgMapObj.getSize();
-    const sw = P(b.getSouthWest()), ne = P(b.getNorthEast());
-    minX = sw.x; maxX = ne.x; minY = sw.y; maxY = ne.y;
-    W = Math.max(600, Math.min(1920, Math.round(size.x)));
-    H = Math.max(1, Math.round(W * (maxY - minY) / (maxX - minX)));   // Bild-Seitenverhältnis = Ausschnitt (keine Verzerrung)
+  const b = lgMapObj.getBounds();
+  const sw = P(b.getSouthWest()), ne = P(b.getNorthEast());
+  const A = 1.58;   // Seitenverhältnis der Kartenfläche auf A4 quer (siehe .p-karte-gross in app.css)
+  const cx = (sw.x + ne.x) / 2, cy = (sw.y + ne.y) / 2;
+  let hw = (ne.x - sw.x) / 2, hh = (ne.y - sw.y) / 2;
+  if(hw / hh < A) hw = hh * A; else hh = hw / A;
+  const minX = cx - hw, maxX = cx + hw, minY = cy - hh, maxY = cy + hh;
+  let W = 2400, H = Math.round(W / A), bg = null;
+  try{ bg = await lgWmsFuerEbene(ebene, minX, minY, maxX, maxY, W, H); }
+  catch(e){   // große Anfrage abgelehnt? einmal kleiner versuchen
+    W = 1600; H = Math.round(W / A);
+    try{ bg = await lgWmsFuerEbene(ebene, minX, minY, maxX, maxY, W, H); }
+    catch(err){ modalInfo("Kartenbild laden fehlgeschlagen: " + (err.message || err) + ".\nGerät muss online sein."); return; }
   }
-  // --- Übersichts-Luftbild ---
-  let dataUrl;
-  try{ dataUrl = await lgWmsDop(minX, minY, maxX, maxY, W, H); }
-  catch(err){ modalInfo("Luftbild einfangen fehlgeschlagen: " + (err.message || err) + ".\nGerät muss online sein. Alternativ Screenshot als Hintergrund einfügen."); return; }
-  // Übersicht auf die LIVE-Items projizieren (frisch – Sync kann das Array getauscht haben).
-  const cur = state.lage.items || [];
-  const projOv = lgProjItemsTo(cur, minX, maxX, minY, maxY);
-  cur.forEach((i, idx) => { const j = projOv[idx]; if(j){ if(j.x != null){ i.x = j.x; i.y = j.y; } if(j.points) i.points = j.points; } });
-  // Nur den Hintergrund für den Bericht setzen – Modus bleibt „Karte (online)", damit man
-  // sofort weiterarbeiten und weitere Ausschnitte aufnehmen kann (kein Wechsel in „Bild").
-  state.lage.bg = dataUrl; state.lage.bgW = W; state.lage.bgH = H;
-  // Detail-Ausschnitte werden MANUELL aufgenommen (Knopf ➕ Ausschnitt aufnehmen) –
-  // bestehende manuelle Ausschnitte bleiben erhalten (keine automatische Rasterung mehr).
-  if(!Array.isArray(state.lage.tiles)) state.lage.tiles = [];
-  if(!(await saveJetzt())){ state.lage.bg = ""; render(); modalInfo("Übersichts-Luftbild zu groß für den lokalen Speicher – bitte alte Fotos/Lagebilder löschen oder den Einsatz exportieren."); return; }
-  render();
-  modalInfo("Übersichts-Luftbild eingefangen (erscheint im Bericht/PDF/Word). Du bleibst im Kartenmodus.\n"
-    + "Für Detailseiten näher zoomen und ➕ Ausschnitt aufnehmen.");
+  // Maßstabsbalken: Mercator-Meter → echte Meter über cos(Breite)
+  const lat = lgMapObj.getCenter().lat;
+  const breiteM = (maxX - minX) * Math.cos(lat * Math.PI / 180);
+  const bal = [10, 20, 50, 100, 200, 500, 1000, 2000, 5000].reduce((best, m) => Math.abs(m - breiteM * 0.2) < Math.abs(best - breiteM * 0.2) ? m : best, 10);
+  const balPct = bal / breiteM * 100;
+  const quelle = ebene === "luftbild" ? "Luftbild: © Bayerische Vermessungsverwaltung (dl-de/by-2.0)" : "Karte: © BKG – TopPlusOpen (dl-de/by-2.0)";
+  const e = state.einsatz;
+  document.body.classList.add("druck-karte");
+  window.addEventListener("afterprint", () => document.body.classList.remove("druck-karte"), { once: true });
+  $("#printArea").innerHTML = `
+    <section class="p-karte-gross">
+      <div class="p-karte-kopf"><strong>${esc(e.stichwort) || "Erkundung"}</strong><span>${esc(einsatzAdresse(e))}</span><span>${new Date().toLocaleString("de-DE")}</span></div>
+      <div class="p-karte-rahmen">
+        <img src="${bg}" alt="Karte">
+        <div class="p-karte-nord">N<br>↑</div>
+        <div class="p-karte-balken" style="width:${balPct.toFixed(2)}%"></div>
+        <div class="p-karte-mass">${bal >= 1000 ? (bal / 1000) + " km" : bal + " m"}</div>
+      </div>
+      <div class="p-karte-quelle">${quelle}${ebene === "basis" ? " · statt „Bayern-Karte“ die Straßenkarte" : ""} · LOTSE112 · ${esc(state.config.ugName)}</div>
+    </section>`;
+  await warteAufBilder($("#printArea"));
+  window.print();
 }
 // Aktuell sichtbaren Kartenausschnitt als eigene Detailseite (Tile) für den Bericht aufnehmen.
 async function lgAddAusschnitt(setBusy){
+  if(state.lage.mapLayer === "basis"){ modalInfo(LG_BASIS_HINWEIS); return; }
   if(!lgMapObj){ modalInfo("Karte ist nicht geöffnet – oben Modus Karte (online) wählen und den Ausschnitt einstellen."); return; }
   if(navigator.onLine === false){ modalInfo("Gerät muss online sein, um das Luftbild einzufangen."); return; }
   const P = ll => L.CRS.EPSG3857.project(ll);
@@ -6096,7 +6214,7 @@ async function lgAddAusschnitt(setBusy){
   const W = Math.max(600, Math.min(1920, Math.round(size.x)));
   const H = Math.max(1, Math.round(W * (ne.y - sw.y) / (ne.x - sw.x)));
   if(setBusy) setBusy("🛰 lädt …");
-  let bg; try{ bg = await lgWmsDop(sw.x, sw.y, ne.x, ne.y, W, H); }
+  let bg; try{ bg = await lgWmsFuerEbene(state.lage.mapLayer, sw.x, sw.y, ne.x, ne.y, W, H); }
   catch(err){ modalInfo("Ausschnitt einfangen fehlgeschlagen: " + (err.message || err) + ".\nGerät muss online sein."); return; }
   if(!Array.isArray(state.lage.tiles)) state.lage.tiles = [];
   // Nur Symbole aufnehmen, die tatsächlich im Ausschnitt liegen (Marker im Rahmen bzw.
@@ -6125,7 +6243,7 @@ async function lgFreeze(){
       const sw = P(b.getSouthWest()), ne = P(b.getNorthEast());
       const W = Math.max(600, Math.min(1920, Math.round(size.x)));
       const H = Math.max(1, Math.round(W * (ne.y - sw.y) / (ne.x - sw.x)));
-      const bg = await lgWmsDop(sw.x, sw.y, ne.x, ne.y, W, H);
+      const bg = await lgWmsFuerEbene(state.lage.mapLayer, sw.x, sw.y, ne.x, ne.y, W, H);
       s.bild = { bg, bgW: W, bgH: H, items: lgProjItemsTo(state.lage.items || [], sw.x, ne.x, sw.y, ne.y) };
     }catch(e){ /* offline/Fehler → Bericht rendert schematisch, kein Abbruch */ }
   }
@@ -6154,9 +6272,34 @@ async function lgSnapBildBackfill(s){
   if(hw / hh < A) hw = hh * A; else hh = hw / A;
   minX = cx - hw; maxX = cx + hw; minY = cy - hh; maxY = cy + hh;
   const W = 1600, H = 1000;
-  let bg; try{ bg = await lgWmsDop(minX, minY, maxX, maxY, W, H); }catch(e){ return false; }
+  let bg; try{ bg = await lgWmsFuerEbene(s.mapLayer, minX, minY, maxX, maxY, W, H); }catch(e){ return false; }
   s.bild = { bg, bgW: W, bgH: H, items: lgProjItemsTo(items0, minX, maxX, minY, maxY) };
   return true;
+}
+/* Für Druck/PDF/Word: Ist die Lagekarte im Modus „Karte (online)" und es wurde kein Luftbild eingefangen,
+   würde sie nur als Raster (Schema) gedruckt. Dann hier ein frisches DOP-Luftbild um alle Geo-Elemente
+   besorgen und eine Druck-Kopie mit Bild + darauf projizierten Symbolen liefern (State bleibt unverändert).
+   Offline/ohne Geo-Elemente/Fehler: unveränderte Lage → Schema wie bisher. */
+async function lageMitLuftbild(lage){
+  if(!lage || lage.bg || lage.mode !== "karte" || navigator.onLine === false || typeof L === "undefined") return lage;
+  const items0 = lage.items || [];
+  const geoPts = lgItemsGeoPts(items0);
+  if(!geoPts.length) return lage;
+  const P = ll => L.CRS.EPSG3857.project(ll);
+  const bounds = L.latLngBounds(geoPts).pad(0.18);
+  const sw = P(bounds.getSouthWest()), ne = P(bounds.getNorthEast());
+  let minX = sw.x, maxX = ne.x, minY = sw.y, maxY = ne.y;
+  const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2;
+  let hw = (maxX - minX) / 2, hh = (maxY - minY) / 2;
+  if(hw < 120) hw = 120; if(hh < 75) hh = 75;
+  const A = 16 / 10;
+  if(hw / hh < A) hw = hh * A; else hh = hw / A;
+  minX = cx - hw; maxX = cx + hw; minY = cy - hh; maxY = cy + hh;
+  const W = 1600, H = 1000;
+  try{
+    const bg = await lgWmsFuerEbene(lage.mapLayer, minX, minY, maxX, maxY, W, H);
+    return { ...lage, mode: "bild", bg, bgW: W, bgH: H, items: lgProjItemsTo(items0, minX, maxX, minY, maxY) };
+  }catch(e){ return lage; }
 }
 /* Alle Lagebilder eines Berichts (data.lage.snapshots) vor dem Druck mit Luftbild versorgen. */
 async function backfillSnapshotBilder(data){
@@ -6240,19 +6383,24 @@ function renderFunkskizze(src){
   // Sammellinie je Reihe: reicht von Boxmitte links bis Boxmitte rechts (also bis zu den
   // äußeren Abschnitten). Breite = Gesamtbreite minus eine Boxbreite (bei Lücken 14px je Spalt).
   const busBreite = c => `calc(100% - (100% - ${(c.length - 1) * 14}px) / ${c.length})`;
-  const reihenHtml = chunks.map((c, idx) => {
-    const abstand = idx > 0 ? "margin-top:24px" : "";
-    const hline = c.length > 1
-      ? `<div class="fk-hline" style="width:${busBreite(c)};${abstand}"></div>`
-      : (idx > 0 ? `<div style="height:24px"></div>` : "");
-    return `${hline}<div class="fk-hwrap">${c.join("")}</div>`;
-  }).join("");
-  // Durchgehende zentrale Stammlinie verbindet alle Reihen-Sammellinien (liegt hinter den
-  // Boxen, sichtbar nur in den Lücken → Verbindung läuft zwischen zwei Abschnitten hindurch).
-  const stamm = chunks.length > 1 ? `<div class="fk-trunk"></div>` : "";
+  // Eine Reihe: Abschnitte wie bisher mittig an einer Sammellinie.
+  // Mehrere Reihen: „Kamm"-Layout – eine Verbindungslinie läuft LINKS außerhalb der Kästen von der
+  // Einsatzleitung nach unten und speist jede Reihe-Sammellinie. So wirkt kein Kasten (z. B. der mittlere
+  // der Reihe darüber) wie ein Oberabschnitt, und alle Abschnitte bleiben gleichrangig.
+  let reihenHtml, stamm = "";
+  if(chunks.length <= 1){
+    const c = chunks[0] || [];
+    const hline = c.length > 1 ? `<div class="fk-hline" style="width:${busBreite(c)}"></div>` : "";
+    reihenHtml = `${hline}<div class="fk-hwrap">${c.join("")}</div>`;
+  }else{
+    reihenHtml = `<div class="fk-rows" style="--n:${proReihe}">${chunks.map((c, idx) => `
+      <div class="fk-row${idx === chunks.length - 1 ? " last" : ""}" style="--pt:${idx > 0 ? 24 : 0}px">
+        <div class="fk-gut"></div>
+        <div class="fk-hwrap fk-kamm">${c.join("")}</div>
+      </div>`).join("")}</div>`;
+  }
   return `
   <div class="fk-skizze">
-    ${stamm}
     ${ilsTeil}
     ${elBox}
     ${n > 1 ? `<div class="fk-vline" style="height:26px">${commonFg ? fkGrpHtml(commonFg) : ""}</div>` : ""}
@@ -6359,7 +6507,22 @@ function lgGeocode(q, cb){
     .then(d => cb(d ? pick(d) : null))
     .catch(() => cb(null));
 }
-function lgEinsatzAdresse(){ return (state.einsatz.ort || state.einsatz.objekt || "").trim(); }
+/* Suchkandidaten für die Lagekarte: erst die volle Adresse, dann Objekt + Ort, zuletzt nur PLZ + Ort. */
+function lgEinsatzKandidaten(){
+  const e = state.einsatz, ortTeil = [e.plz, e.ort].filter(Boolean).join(" "), voll = einsatzAdresse(e);
+  const k = [];
+  if(voll) k.push(voll);
+  if(e.objekt && ortTeil) k.push(e.objekt + ", " + ortTeil);
+  if(ortTeil) k.push(ortTeil);
+  if(!k.length && e.objekt) k.push(e.objekt);
+  return [...new Set(k)];
+}
+function lgGeocodeEinsatz(cb){
+  const k = lgEinsatzKandidaten();
+  const next = i => { if(i >= k.length){ cb(null); return; } lgGeocode(k[i], ll => ll ? cb(ll) : next(i + 1)); };
+  next(0);
+}
+function lgEinsatzAdresse(){ return (einsatzAdresse(state.einsatz) || state.einsatz.objekt || "").trim(); }
 /* Koordinaten → Adresse (Anbieter konfigurierbar, nur online) */
 function reverseGeocode(lat, lng, cb){
   if(navigator.onLine === false){ cb(null); return; }
@@ -6383,11 +6546,41 @@ function reverseGeocode(lat, lng, cb){
     .then(d => cb(d ? norm(d) : null))
     .catch(() => cb(null));
 }
-function nominatimAdresse(d){
+/* ---- Einsatzadresse: Straße + PLZ + Ort (Feld "ort" bleibt der Ortsname → kompatibel zu älteren Ständen) ---- */
+/* Freitext-Adresse in Straße/PLZ/Ort zerlegen, soweit erkennbar ("Musterweg 5, 92637 Weiden"). Sonst alles in "ort". */
+function adresseSplit(text){
+  const t = String(text || "").trim();
+  let m = /^(.*?)\s*[,;]\s*(\d{5})\s+(.+)$/.exec(t);
+  if(m) return { strasse: m[1].trim(), plz: m[2], ort: m[3].trim() };
+  m = /^(.*?\d[a-zA-Z]?)\s+(\d{5})\s+(.+)$/.exec(t);   // „Musterweg 5 92637 Weiden" (Komma vom OCR verschluckt)
+  if(m) return { strasse: m[1].trim(), plz: m[2], ort: m[3].trim() };
+  m = /^(\d{5})\s+(.+)$/.exec(t);
+  if(m) return { strasse: "", plz: m[1], ort: m[2].trim() };
+  m = /^(.*\d[a-zA-Z]?)\s*,\s*([^,\d][^,]*)$/.exec(t);   // "Hauptstr. 5, Weiden"
+  if(m) return { strasse: m[1].trim(), plz: "", ort: m[2].trim() };
+  return { strasse: "", plz: "", ort: t };
+}
+/* Felder sicherstellen; Altbestand (alles in "ort") zerlegen – nach Laden, Import und Archiv-Aktivierung. */
+function einsatzAdresseMigrieren(){
+  const e = state.einsatz;
+  if(e.strasse == null) e.strasse = "";
+  if(e.plz == null) e.plz = "";
+  if(!e.strasse && !e.plz && e.ort) Object.assign(e, adresseSplit(e.ort));
+}
+/* "Straße, PLZ Ort" – für Anzeige, Berichte und die Adresssuche der Lagekarte. */
+function einsatzAdresse(e){
+  e = e || {};
+  const strasse = (e.strasse || "").trim(), plz = (e.plz || "").trim(), ort = (e.ort || "").trim();
+  if(strasse && ort.toLowerCase().includes(strasse.toLowerCase())) return ort;   // Altstand: Ort enthält schon die ganze Adresse
+  return [strasse, [plz, ort].filter(Boolean).join(" ")].filter(Boolean).join(", ");
+}
+function nominatimTeile(d){
   const a = (d && d.address) || {};
-  const strasse = [a.road, a.house_number].filter(Boolean).join(" ");
-  const ort = [a.postcode, a.city || a.town || a.village || a.suburb || a.municipality].filter(Boolean).join(" ");
-  return [strasse, ort].filter(Boolean).join(", ") || (d && d.display_name) || "";
+  return { strasse: [a.road, a.house_number].filter(Boolean).join(" "), plz: a.postcode || "",
+    ort: a.city || a.town || a.village || a.suburb || a.municipality || "" };
+}
+function nominatimAdresse(d){
+  return einsatzAdresse(nominatimTeile(d)) || (d && d.display_name) || "";
 }
 /* what3words: 3 Wörter → Koordinaten (w3w-API, Key nötig) → Adresse (Nominatim) → Einsatzort.
    Läuft nur online. Key wird im Zahnrad hinterlegt. */
@@ -6409,7 +6602,9 @@ async function w3wAufloesen(){
     reverseGeocode(c.lat, c.lng, rd => {
       const adr = nominatimAdresse(rd);
       if(!adr){ reset(); modalInfo(`Keine Adresse zu diesen Koordinaten gefunden (${c.lat.toFixed(5)}, ${c.lng.toFixed(5)}).`); return; }
-      state.einsatz.ort = adr; markChange(); render();
+      const teile = nominatimTeile(rd);
+      if(teile.strasse || teile.plz || teile.ort) Object.assign(state.einsatz, teile); else Object.assign(state.einsatz, adresseSplit(adr));
+      markChange(); render();
       modalInfo(`Einsatzort aus ///${w} gesetzt:\n${adr}`);
     });
   }catch(e){ reset(); modalInfo("what3words-Abfrage fehlgeschlagen: " + (e.message || e)); }
@@ -6557,7 +6752,7 @@ function lgMapSetup(){
   lgWindBadge("lgMap", true);   // Wind-Fahne (antippbar)
   // Beim ersten Öffnen automatisch auf die Einsatzadresse zoomen (Luftbild)
   if(!state.lage.mapView && lgEinsatzAdresse()){
-    lgGeocode(lgEinsatzAdresse(), ll => {
+    lgGeocodeEinsatz(ll => {
       if(ll && lgMapObj){ lgMapObj.setView(ll, 17); state.lage.mapView = { center:ll, zoom:17 }; save(); }
     });
   }
@@ -6792,7 +6987,7 @@ function wireLagekarte(){
   if(toAddr) toAddr.addEventListener("click", () => {
     const q = lgEinsatzAdresse();
     if(!q){ modalInfo("Kein Einsatzort in den Stammdaten hinterlegt."); return; }
-    lgGeocode(q, ll => {
+    lgGeocodeEinsatz(ll => {
       if(ll && lgMapObj){ lgMapObj.setView(ll, 17); state.lage.mapView = { center:ll, zoom:17 }; save(); }
       else modalInfo("Adresse konnte nicht gefunden werden – bitte Einsatzort prüfen.");
     });
@@ -6804,13 +6999,16 @@ function wireLagekarte(){
     if(btn){ btn.disabled = false; btn.textContent = t0; }
     render();
   });
-  const lgLbAll = $("#lgLuftbildAll");
-  if(lgLbAll) lgLbAll.addEventListener("click", () => { const t0 = lgLbAll.textContent; lgLbAll.disabled = true;
-    lgLbAll.textContent = "🛰 lädt …"; lgLuftbildEinfangen(t => { lgLbAll.textContent = t; }, true)
-      .finally(() => { lgLbAll.textContent = t0; lgLbAll.disabled = false; }); });
+  const lgPv = $("#lgPrintView");
+  if(lgPv) lgPv.addEventListener("click", () => { const t0 = lgPv.textContent; lgPv.disabled = true; lgPv.textContent = "🖨 lädt …";
+    lgDruckAktuelleKarte().finally(() => { lgPv.textContent = t0; lgPv.disabled = false; }); });
   const lgAdd = $("#lgAddTile");
   if(lgAdd) lgAdd.addEventListener("click", () => { const t0 = lgAdd.textContent; lgAdd.disabled = true; lgAdd.textContent = "🛰 lädt …";
     lgAddAusschnitt(t => { lgAdd.textContent = t; }).finally(() => { lgAdd.textContent = t0; lgAdd.disabled = false; }); });
+  document.querySelectorAll("[data-tileview]").forEach(b => b.addEventListener("click", () => {
+    const t = state.lage.tiles[+b.dataset.tileview]; if(!t || !t.bg) return;
+    modal({ titel: t.label || "Ausschnitt", html: `<img src="${t.bg}" alt="" style="width:100%;height:auto;border-radius:8px">`, ok: "Schließen" });
+  }));
   document.querySelectorAll("[data-tiledel]").forEach(b => b.addEventListener("click", () => {
     const idx = +b.dataset.tiledel;
     modalConfirm(`Detail-Ausschnitt „${(state.lage.tiles[idx]||{}).label || ("Ausschnitt " + (idx+1))}“ löschen?`).then(ok => { if(!ok) return;
@@ -7567,7 +7765,7 @@ function printMapHtml(lage){
       ${lgShapesSvg(items, null)}
       ${items.filter(i => i.x != null && i.type !== "circle" && i.type !== "sector").map(lgMarkerHtml).join("")}
     </div>
-    ${geoSchema ? `<div class="p-map-note">Schematische Lagekarte – Positionen aus GPS, ohne Luftbild. Für ein echtes Kartenbild in der Lagekarte oben „🛰 Luftbild einfangen" nutzen.</div>` : ""}
+    ${geoSchema ? `<div class="p-map-note">Schematische Lagekarte – Positionen aus GPS, ohne Luftbild. Für ein echtes Kartenbild online drucken – das Luftbild wird beim Drucken geladen.</div>` : ""}
   </div>`;
 }
 function printLegendHtml(items, units){
@@ -7589,19 +7787,22 @@ function printLegendHtml(items, units){
   return rows ? `<div class="p-legend">${rows}</div>` : "";
 }
 /* Nur die Lagekarte drucken (Karte + Legende), ohne den gesamten Einsatzbericht */
-function doPrintLagekarte(){
+async function doPrintLagekarte(){
   const e = state.einsatz;
+  const lage = await lageMitLuftbild(state.lage);   // Online-Karte ohne Luftbild → sonst nur Raster im Ausdruck
+  document.body.classList.add("druck-quer");   // Seite 1 gleich quer (sonst Leerseite davor)
+  window.addEventListener("afterprint", () => document.body.classList.remove("druck-quer"), { once: true });
   $("#printArea").innerHTML = `
     <section class="p-land">
       <div class="p-head">
         <div>
           <div class="p-sub">${esc(state.config.ugName)} · Lagekarte</div>
           <h1>${esc(e.stichwort) || "Ohne Stichwort"}</h1>
-          <div>${esc(e.ort)}${e.beginn ? " · Alarm " + fmtDatum(e.beginn) + " " + fmtZeit(e.beginn) + " Uhr" : ""}</div>
+          <div>${esc(einsatzAdresse(e))}${e.beginn ? " · Alarm " + fmtDatum(e.beginn) + " " + fmtZeit(e.beginn) + " Uhr" : ""}</div>
         </div>
         ${pMarkHtml()}
       </div>
-      ${printMapHtml(state.lage)}
+      ${printMapHtml(lage)}
       ${printLegendHtml(state.lage.items, state.einheiten)}
       <p style="font-size:8pt;color:#666;margin-top:16px">Gedruckt am ${new Date().toLocaleString("de-DE")} · LOTSE112 – Lagekarte · ${esc(state.config.ugName)}<br>${DRUCK_HINWEIS}</p>
     </section>`;
@@ -7612,7 +7813,7 @@ function doPrintLagekarte(){
 function reportHead(e, pEnde, opts){
   const sub = `${esc(state.config.ugName)} · Einsatzbericht · Kräfteübersicht${pEnde ? "" : " · Zwischenstand"}`;
   const titel = esc(e.stichwort) || "Ohne Stichwort";
-  const ort = `${esc(e.ort)}${e.objekt ? " · " + esc(e.objekt) : ""}`;
+  const ort = `${esc(einsatzAdresse(e))}${e.objekt ? " · " + esc(e.objekt) : ""}`;
   if(opts && opts.word){
     return `<table class="p-headw"><tr>
       <td class="p-headw-l"><div class="p-sub">${sub}</div><h1>${titel}</h1><div>${ort}</div></td>
@@ -7660,6 +7861,7 @@ function reportBodyHtml(data, sel, opts){
       <td class="p-mono">${esc(f.funkrufname||"")}</td>
       <td>${esc((ORGS[f.org]||ORGS.SON).label)}</td>
       <td>${esc(f.einheit||"–")}</td>
+      <td class="p-mono">${esc(f.fahrzeug||"–")}</td>
     </tr>`).join("");
   // Laufender Seitenkopf/-fuß über @page-Randboxen (kein position:fixed → keine Überlagerung
    // des Inhalts). Die Kopfzeile stammt aus dieser versteckten Quelle (CSS string-set).
@@ -7667,7 +7869,7 @@ function reportBodyHtml(data, sel, opts){
   const secEinsatz = on("einsatz") ? `
     <table class="meta">
       ${e.objekt ? `<tr><td>Objekt</td><td>${esc(e.objekt)}</td></tr>` : ""}
-      <tr><td>Einsatzort</td><td>${esc(e.ort) || "–"}</td></tr>
+      <tr><td>Einsatzort</td><td>${esc(einsatzAdresse(e)) || "–"}</td></tr>
       <tr><td>Alarmzeit</td><td>${e.beginn ? fmtDatum(e.beginn)+" "+fmtZeit(e.beginn)+" Uhr" : "–"}</td></tr>
       <tr><td>Einsatzende</td><td>${pEnde ? fmtDatum(pEnde)+" "+fmtZeit(pEnde)+" Uhr" : "– (Einsatz läuft)"}</td></tr>
       <tr><td>Einsatzdauer</td><td>${dauerStr(e.beginn, pEnde) || "–"}</td></tr>
@@ -7696,7 +7898,7 @@ function reportBodyHtml(data, sel, opts){
     </tbody></table>` : "";
   const secKraefte = on("kraefte") ? `
     <h2>Führungskräfte (${data.fuehrung.length})</h2>
-    ${fkRows ? `<table><thead><tr><th>Name</th><th>Funktion</th><th>Funkrufname</th><th>Organisation</th><th>Einsatzabschnitt</th></tr></thead><tbody>${fkRows}</tbody></table>` : "<p>Keine erfasst.</p>"}
+    ${fkRows ? `<table><thead><tr><th>Name</th><th>Funktion</th><th>Funkrufname</th><th>Organisation</th><th>Einsatzabschnitt</th><th>Fahrzeug</th></tr></thead><tbody>${fkRows}</tbody></table>` : "<p>Keine erfasst.</p>"}
     <h2>Einheiten (${data.einheiten.length})</h2>
     ${unitRows ? `<table><thead><tr><th>Ankunft</th><th>Organisation</th><th>Funkrufname</th>${showAb?"<th>Abschnitt</th>":""}<th>Stärke</th><th>AGT</th><th>CSA</th><th>Status</th></tr></thead><tbody>${unitRows}</tbody></table>` : "<p>Keine erfasst.</p>"}
     <h2>Nachforderungen (${(data.anforderungen||[]).length})</h2>
@@ -7882,7 +8084,7 @@ function warteAufBilder(root){
 }
 async function doPrint(data, sel){
   await backfillSnapshotBilder(data);   // Lagebilder ohne eingefangenes Luftbild vor dem Druck nachziehen
-  data = { ...data, fotos: await fotosMitBytes(data.fotos) };   // Foto-Bytes für den Bericht besorgen
+  data = { ...data, lage: await lageMitLuftbild(data.lage), fotos: await fotosMitBytes(data.fotos) };   // Foto-Bytes für den Bericht besorgen
   $("#printArea").innerHTML = reportBodyHtml(data, sel);
   warteAufBilder($("#printArea")).then(() => window.print());
 }
@@ -7935,17 +8137,20 @@ async function nodeToPng(node, rotate){
   await new Promise((res, rej) => { img.onload = res; img.onerror = () => rej(new Error("SVG-Bild")); img.src = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg); });
   const scale = 2, c = document.createElement("canvas");
   const ctx = c.getContext("2d");
+  // Karten (Luftbild-Fotos) als JPEG: als PNG wären es ~10 MB je Karte (60+ MB Word-Datei) – Word
+  // zeigt solche Riesenbilder teils leer an. Skizze/Tabellen bleiben PNG (scharfe Linien/Schrift).
+  const fmt = node.classList.contains("p-map") ? ["image/jpeg", 0.88] : ["image/png"];
   if(rotate){
     c.width = h * scale; c.height = w * scale;
     ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, c.width, c.height);
     ctx.translate(0, c.height); ctx.rotate(-Math.PI / 2);   // 90° GEGEN den Uhrzeigersinn
     ctx.scale(scale, scale); ctx.drawImage(img, 0, 0);
-    return { url: c.toDataURL("image/png"), w: h, h: w };
+    return { url: c.toDataURL(...fmt), w: h, h: w };
   }
   c.width = w * scale; c.height = h * scale;
   ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, c.width, c.height);
   ctx.scale(scale, scale); ctx.drawImage(img, 0, 0);
-  return { url: c.toDataURL("image/png"), w, h };
+  return { url: c.toDataURL(...fmt), w, h };
 }
 // Lagekarte + Komm-Skizze im Word-Body durch gerenderte PNGs ersetzen. Bei Fehler bleibt der
 // ursprüngliche HTML-Body erhalten (Text/Legende gehen nie verloren).
@@ -8004,11 +8209,11 @@ async function wordBodyMitGrafik(body){
 async function exportWord(data, sel){
   const e = data.einsatz;
   const pEnde = e.ende || data.ende;
-  data = { ...data, fotos: await fotosMitBytes(data.fotos) };   // Foto-Bytes für den Bericht besorgen
+  data = { ...data, lage: await lageMitLuftbild(data.lage), fotos: await fotosMitBytes(data.fotos) };   // Luftbild + Foto-Bytes für den Bericht besorgen
   let body = reportBodyHtml(data, sel, { word:true });
   try{ body = await wordBodyMitGrafik(body); }
   catch(err){ console.warn("[LOTSE112] Word-Grafik fehlgeschlagen, nutze HTML:", err && err.message); }
-  const titel = (e.stichwort || "Einsatzbericht") + (e.ort ? " – " + e.ort : "");
+  const titel = (e.stichwort || "Einsatzbericht") + (einsatzAdresse(e) ? " – " + einsatzAdresse(e) : "");
   const kopfText = `${esc(state.config.ugName)} · ${esc(e.stichwort) || "Einsatzbericht"}${pEnde ? "" : " · Zwischenstand"}`;
   // Laufende Kopfzeile auf JEDER Seite (mso-header) – links Kontext, rechts das Logo/die Marke.
   const header = `<div style='mso-element:header' id='eh1'>
@@ -8132,7 +8337,7 @@ function openPrintDialog(data){
         <button type="button" class="btn btn-ghost" id="pick-none">Keine</button>
       </div>
       <div class="print-picks">${rows}</div>
-      ${karteOhneBild ? `<p class="hint" style="margin-top:12px;padding:10px 12px;border-radius:10px;background:var(--warn-bg);color:var(--warn);line-height:1.45">🛰 <strong>Lagekarte ohne Luftbild:</strong> Für ein echtes Kartenbild die Lagekarte vorher über „Ausschnitt einfangen“ (Tab Lagekarte) einfangen – sonst wird sie nur schematisch (Positionen ohne Luftbild) gedruckt.</p>` : ""}
+      ${karteOhneBild ? `<p class="hint" style="margin-top:12px;padding:10px 12px;border-radius:10px;background:var(--warn-bg);color:var(--warn);line-height:1.45">🛰 <strong>Lagekarte ohne gespeichertes Kartenbild:</strong> Das Luftbild wird beim Drucken bzw. Word-Export automatisch geladen (Internet nötig). Offline wird die Lagekarte nur schematisch ausgegeben.</p>` : ""}
     </div>
     <div class="sheet-foot" style="flex-wrap:wrap;gap:10px">
       <button class="btn btn-ghost" id="print-word" style="flex:1;min-width:150px">Word (.doc) exportieren</button>
@@ -8545,6 +8750,8 @@ function pruefeUhr(res, t0, t1){
   zeigeServerWarnung(`Die Uhr dieses Geräts ${abw > 0 ? "geht nach" : "geht vor"} (ca. ${txt} Abweichung zum ELW-Server). `
     + "Bitte Datum/Uhrzeit in den Systemeinstellungen korrigieren – sonst stimmen Zeiten im Einsatz nicht und Änderungen können sich falsch überschreiben.", "uhrWarnBar");
 }
+/* Kurze, auf allen Geräten gleiche Einsatz-Kennung (Ende der einsatzId) – zum schnellen Abgleichen. */
+function einsatzKurzId(){ return String(state.einsatzId || "").slice(-4).toUpperCase(); }
 function syncUhrzeit(iso, mitDatum){
   const t = new Date(iso);
   if(!iso || isNaN(t)) return "?";
@@ -8566,10 +8773,12 @@ function syncPill(){
   const pill = $("#syncPill"), txt = $("#syncText");
   if(!pill || !txt) return;
   pill.classList.remove("busy");
+  const idEl = $("#syncId");
+  if(idEl) idEl.textContent = "#" + einsatzKurzId();   // auch auf dem Handy sichtbar (dort ist der Text ausgeblendet)
   if(SYNC.verbunden){
     pill.classList.add("good");
     txt.textContent = `Synchron · ${SYNC.clients} Gerät${SYNC.clients === 1 ? "" : "e"} · Einsatz ${syncUhrzeit(state.einsatzStart).replace(" Uhr", "")}`;
-    pill.title = `Verbunden mit dem ELW-Server · Einsatz seit ${syncUhrzeit(state.einsatzStart, true)} · Kennung ${String(state.einsatzId || "").slice(-5)}`;
+    pill.title = `Verbunden mit dem ELW-Server · Einsatz seit ${syncUhrzeit(state.einsatzStart, true)} · Kennung #${einsatzKurzId()}`;
   }else{
     pill.classList.remove("good");
     txt.textContent = `Offline · ${SYNC.pending} lokal`;
@@ -8646,7 +8855,7 @@ function einsatzHatDaten(){
     if(Array.isArray(arr) && arr.length) return true;
   }
   const e = state.einsatz || {};
-  return !!(e.stichwort || e.ort || e.objekt || e.leiter || e.bereitstellungsraum || e.bemerkung);
+  return !!(e.stichwort || e.strasse || e.plz || e.ort || e.objekt || e.leiter || e.bereitstellungsraum || e.bemerkung);
 }
 /* Server-Stand holen (leerer Body → Server ändert nichts, liefert nur seinen
    aktuellen Stand). Wird NICHT automatisch übernommen – der Aufrufer entscheidet. */
